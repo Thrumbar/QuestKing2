@@ -39,7 +39,7 @@ function setPercent (self, percent)
 
 	local lastPercent = self._lastPercent
 	if (lastPercent) and (percent ~= lastPercent) then
-		
+
 		local delta = percent - lastPercent
 		if (delta < 0) then delta = 0 end
 
@@ -71,7 +71,7 @@ function setPercent (self, percent)
 		if (self.pulse.animGroup:IsPlaying()) then
 			self.pulse.animGroup:Stop()
 		end
-		self.pulse.animGroup:Play()		
+		self.pulse.animGroup:Play()
 	end
 
 	self._lastPercent = percent
@@ -109,10 +109,10 @@ function QuestKing.WatchButton:AddProgressBar (duration, startTime)
 			text:SetFont(opt.font, opt.fontSize - 1, opt.fontStyle)
 			text:SetJustifyH("CENTER")
 			text:SetJustifyV("CENTER")
-			
+
 			text:SetPoint("TOPLEFT", progressBar, "TOPLEFT", 0, 0)
 			text:SetPoint("BOTTOMRIGHT", progressBar, "BOTTOMRIGHT", 0, 2)
-			
+
 			text:SetTextColor(1, 1, 1)
 			text:SetShadowOffset(1, -1)
 			text:SetShadowColor(0, 0, 0, 1)
@@ -127,14 +127,14 @@ function QuestKing.WatchButton:AddProgressBar (duration, startTime)
 			glow:SetHeight(progressBar:GetHeight() - 4)
 			glow:SetTexture([[Interface\AddOns\QuestKing\textures\Full-Line-Glow-White]])
 			glow:SetVertexColor(0.6, 0.8, 1, 0)
-			glow:SetBlendMode("ADD")		
+			glow:SetBlendMode("ADD")
 			progressBar.glow = glow
 
 			local animGroup = glow:CreateAnimationGroup()
 			local a0 = animGroup:CreateAnimation("Alpha")
-				a0:SetStartDelay(0); a0:SetChange(1); a0:SetDuration(0.25); a0:SetOrder(1);
+				a0:SetStartDelay(0); a0:SetFromAlpha(1); a0:SetDuration(0.25); a0:SetOrder(1);
 			local a1 = animGroup:CreateAnimation("Alpha")
-				a1:SetStartDelay(0.3); a1:SetChange(-1); a1:SetDuration(0.2); a1:SetOrder(1);
+				a1:SetStartDelay(0.3); a1:SetFromAlpha(-1); a1:SetDuration(0.2); a1:SetOrder(1);
 			glow.animGroup = animGroup
 
 			local topLineBurst = progressBar:CreateTexture(nil, "OVERLAY")
@@ -144,14 +144,14 @@ function QuestKing.WatchButton:AddProgressBar (duration, startTime)
 			topLineBurst:SetTexture([[Interface\QuestFrame\ObjectiveTracker]])
 			topLineBurst:SetTexCoord(0.1640625, 0.33203125, 0.66796875, 0.74609375)
 			topLineBurst:SetVertexColor(0.6, 0.8, 1, 0)
-			topLineBurst:SetBlendMode("ADD")		
+			topLineBurst:SetBlendMode("ADD")
 			progressBar.topLineBurst = topLineBurst
 
 			local animGroup = topLineBurst:CreateAnimationGroup()
 			local a0 = animGroup:CreateAnimation("Alpha")
-				a0:SetStartDelay(0); a0:SetChange(1); a0:SetDuration(0.25); a0:SetOrder(1);
+				a0:SetStartDelay(0); a0:SetFromAlpha(1); a0:SetDuration(0.25); a0:SetOrder(1);
 			local a1 = animGroup:CreateAnimation("Alpha")
-				a1:SetStartDelay(0.3); a1:SetChange(-1); a1:SetDuration(0.2); a1:SetOrder(1);
+				a1:SetStartDelay(0.3); a1:SetFromAlpha(-1); a1:SetDuration(0.2); a1:SetOrder(1);
 			local a2 = animGroup:CreateAnimation("Translation")
 				a2:SetStartDelay(0); a2:SetOffset(5, 0); a2:SetDuration(0.25); a2:SetOrder(1);
 			topLineBurst.animGroup = animGroup
@@ -163,14 +163,14 @@ function QuestKing.WatchButton:AddProgressBar (duration, startTime)
 			bottomLineBurst:SetTexture([[Interface\QuestFrame\ObjectiveTracker]])
 			bottomLineBurst:SetTexCoord(0.1640625, 0.33203125, 0.66796875, 0.74609375)
 			bottomLineBurst:SetVertexColor(0.6, 0.8, 1, 0)
-			bottomLineBurst:SetBlendMode("ADD")		
+			bottomLineBurst:SetBlendMode("ADD")
 			progressBar.bottomLineBurst = bottomLineBurst
 
 			local animGroup = bottomLineBurst:CreateAnimationGroup()
 			local a0 = animGroup:CreateAnimation("Alpha")
-				a0:SetStartDelay(0); a0:SetChange(1); a0:SetDuration(0.25); a0:SetOrder(1);
+				a0:SetStartDelay(0); a0:SetFromAlpha(1); a0:SetDuration(0.25); a0:SetOrder(1);
 			local a1 = animGroup:CreateAnimation("Alpha")
-				a1:SetStartDelay(0.3); a1:SetChange(-1); a1:SetDuration(0.2); a1:SetOrder(1);
+				a1:SetStartDelay(0.3); a1:SetFromAlpha(-1); a1:SetDuration(0.2); a1:SetOrder(1);
 			local a2 = animGroup:CreateAnimation("Translation")
 				a2:SetStartDelay(0); a2:SetOffset(5, 0); a2:SetDuration(0.25); a2:SetOrder(1);
 			bottomLineBurst.animGroup = animGroup
@@ -179,14 +179,14 @@ function QuestKing.WatchButton:AddProgressBar (duration, startTime)
 			pulse:SetAllPoints(progressBar)
 			pulse:SetTexture([[Interface\QuestFrame\UI-QuestLogTitleHighlight]])
 			pulse:SetVertexColor(0.6, 0.8, 1, 0)
-			pulse:SetBlendMode("ADD")		
+			pulse:SetBlendMode("ADD")
 			progressBar.pulse = pulse
 
 			local animGroup = pulse:CreateAnimationGroup()
 			local a1 = animGroup:CreateAnimation("Alpha")
-				a1:SetStartDelay(0); a1:SetDuration(0.25); a1:SetChange(1); a1:SetOrder(1);
+				a1:SetStartDelay(0); a1:SetDuration(0.25); a1:SetFromAlpha(1); a1:SetOrder(1);
 			local a2 = animGroup:CreateAnimation("Alpha")
-				a2:SetStartDelay(0.3); a2:SetDuration(0.2); a2:SetChange(-1); a2:SetOrder(1);
+				a2:SetStartDelay(0.3); a2:SetDuration(0.2); a2:SetFromAlpha(-1); a2:SetOrder(1);
 			pulse.animGroup = animGroup
 
 			progressBar.Free = freeProgressBar

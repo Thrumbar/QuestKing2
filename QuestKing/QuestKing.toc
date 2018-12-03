@@ -8,8 +8,6 @@
 ## OptionalDeps: PetTracker
 
 options.lua
-options_override.lua
-options_override_custom.lua
 
 core\util.lua
 core\compatibility.lua

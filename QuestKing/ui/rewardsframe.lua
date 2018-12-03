@@ -35,7 +35,7 @@ function QuestKing:AddReward (button, questID, xp, money)
 		t.font = "NumberFontNormal"
 		tinsert(data.rewards, t)
 	end
-	
+
 	if (questID) then
 		-- currencies
 		local numCurrencies = GetNumQuestLogRewardCurrencies(questID)
@@ -59,7 +59,7 @@ function QuestKing:AddReward (button, questID, xp, money)
 			t.count = count
 			t.font = "GameFontHighlightSmall"
 			tinsert(data.rewards, t)
-		end	
+		end
 	end
 
 	-- money
@@ -127,7 +127,7 @@ function QuestKing:AnimateReward (block)
 	rewardsFrame.Anim.RewardsShadowAnim:SetToScale(0.8, contentsHeight / 16)
 	rewardsFrame.Anim:Play()
 
-	PlaySoundKitID(45142) --UI_BonusEventSystemVignettes
+	PlaySound(SOUNDKIT.UI_BONUS_EVENT_SYSTEM_VIGNETTES) --UI_BonusEventSystemVignettes
 
 	-- configure reward frames
 	for i = 1, numRewards do

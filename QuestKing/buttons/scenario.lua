@@ -48,7 +48,7 @@ function QuestKing:UpdateTrackerScenarios ()
 	if (mapID == 1148) then
 		inProvingGrounds = true
 	end
-	
+
 	if (inProvingGrounds) then
 		local diffID, currWave, maxWave, duration = C_Scenario.GetProvingGroundsInfo()
 		if (duration ~= 0) then
@@ -58,7 +58,7 @@ function QuestKing:UpdateTrackerScenarios ()
 
 	local stageName, stageDescription, numCriteria = C_Scenario.GetStepInfo()
 	local inChallengeMode = C_Scenario.IsChallengeMode()
-	
+
 	if (currentStage > 0) then
 		if (currentStage <= numStages) then
 			-- scenario type header
@@ -138,7 +138,7 @@ function QuestKing.SetButtonToScenario (button, stepIndex)
 		if (not criteriaCompleted) then
 			stepFinished = false
 		end
-	end		
+	end
 
 	if (stepFailed) then
 		button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-NotReady:0:0:1:0|t %s", stageName)
@@ -221,7 +221,7 @@ function QuestKing:OnScenarioUpdate (newStage)
 		local inChallengeMode = C_Scenario.IsChallengeMode()
 		if (not inChallengeMode) then
 			if --[[(currentStage > 1) and]] (currentStage <= numStages) then
-				PlaySound("UI_Scenario_Stage_End")
+				PlaySound(SOUNDKIT.UI_SCENARIO_ENDING)
 			end
 			if (currentStage > 0) then
 				if (not IsPlayerInWorld()) then
@@ -291,7 +291,7 @@ function mouseHandlerScenario:TitleButtonOnEnter (motion)
 				GameTooltip:AddLine(string.format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
 			end
 
-			-- currency		
+			-- currency
 			local numQuestCurrencies = GetNumQuestLogRewardCurrencies(questID)
 			for i = 1, numQuestCurrencies do
 				local name, texture, numItems = GetQuestLogRewardCurrencyInfo(i, questID)
@@ -324,18 +324,17 @@ function mouseHandlerScenario:TitleButtonOnEnter (motion)
 			if (money > 0) then
 				if (not blankLine) then GameTooltip:AddLine(" "); blankLine = true end
 				SetTooltipMoney(GameTooltip, money, nil)
-			end			
+			end
 		end
 	else
 		if (xp > 0) then
 			if (not blankLine) then GameTooltip:AddLine(" "); blankLine = true end
 			GameTooltip:AddLine(string.format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
-	  end
-	  if (money > 0) then
-	  	if (not blankLine) then GameTooltip:AddLine(" "); blankLine = true end
-			SetTooltipMoney(GameTooltip, money, nil)
-	  end
+		end
+		if (money > 0) then
+			if (not blankLine) then GameTooltip:AddLine(" "); blankLine = true end
+				SetTooltipMoney(GameTooltip, money, nil)
+		end
 	end
-
 	GameTooltip:Show()
 end

@@ -47,10 +47,10 @@ function buildQuestSortTable ()
 		wipe(questSortTable[k])
 	end
 	wipe(headerList)
-	
+
 	local numEntries = GetNumQuestLogEntries()
 	local currentHeader = "(Unknown 0)"
-	
+
 	local numQuests = 0
 	for i = 1, numEntries do
 		local title, _, _, isHeader, isCollapsed, _, _, questID = GetQuestLogTitle(i)
@@ -78,12 +78,12 @@ function buildQuestSortTable ()
 
 			tinsert(questSortTable[currentHeader], i)
 		end
-		
+
 		if (not isHeader) then
 			numQuests = numQuests + 1
 		end
 	end
-	
+
 	-- totalQuestCount = numQuests
 end
 
@@ -114,7 +114,7 @@ function QuestKing:UpdateTrackerQuests()
 		if #questSortTable[headerName] > 0 then
 			local button = WatchButton:GetKeyed("collapser", headerName)
 			button._headerName = headerName
-			
+
 			--|TTexturePath:size1:size2:xoffset:yoffset:dimx:dimy:coordx1:coordx2:coordy1:coordy2:red:green:blue|t
 			if QuestKingDBPerChar.collapsedHeaders[headerName] then
 				button.title:SetTextIcon("|TInterface\\AddOns\\QuestKing\\textures\\UI-SortArrow_sm_right:8:8:0:-1:0:0:0:0:0:0:1:1:1|t "..headerName)
@@ -126,7 +126,7 @@ function QuestKing:UpdateTrackerQuests()
 		end
 
 		-- quests
-		
+
 		if not QuestKingDBPerChar.collapsedHeaders[headerName] then
 			for j = 1, #questSortTable[headerName] do
 				questIndex = questSortTable[headerName][j]
@@ -169,11 +169,11 @@ function setButtonToQuest (button, questIndex)
 
 	for i = 1, numObj do
 		local objectiveDesc, objectiveType, objectiveIsDone = GetQuestLogLeaderBoard(i, questIndex)
-		
+
 		if (objectiveIsDone) then
 			completedObj = completedObj + 1
 		end
-		
+
 		local displayObjective = true
 		if (collapseObjectives) then
 			-- hide for collapsed quest
@@ -211,7 +211,7 @@ function setButtonToQuest (button, questIndex)
 				end
 				line._lastQuant = objectiveIsDone
 
-				displayedObj = displayedObj + 1				
+				displayedObj = displayedObj + 1
 
 			elseif (not quantName) or (objectiveType == "spell") then
 				if ((displayObjective) or (not objectiveIsDone)) then
@@ -243,7 +243,7 @@ function setButtonToQuest (button, questIndex)
 				end
 			end
 		end
-		
+
 	end
 
 	-- money
@@ -251,13 +251,13 @@ function setButtonToQuest (button, questIndex)
 	if (requiredMoney > 0) then
 		QuestKing.watchMoney = true
 		local playerMoney = GetMoney()
-		
+
 		-- not sure about this, but the default watch frame does it
 		-- (fake completion for gold-requiring connectors when gold req is met and no event begins)
 		if (numObj == 0 and playerMoney >= requiredMoney and not startEvent) then
 			isComplete = 1
 		end
-		
+
 		numObj = numObj + 1 -- (questking only) ensure all gold-requiring quests aren't marked as connectors
 
 		if (not collapseObjectives) then -- hide entirely if objectives are collapsed
@@ -284,7 +284,7 @@ function setButtonToQuest (button, questIndex)
 			timerBar:SetStatusBarColor(opt_colors.QuestTimer[1], opt_colors.QuestTimer[2], opt_colors.QuestTimer[3])
 		end
 	end
-	
+
 	-- set title colour
 	if (isComplete == -1) then
 		-- failed
@@ -317,7 +317,7 @@ function setButtonToQuest (button, questIndex)
 	if collapseObjectives then
 		button.title:SetAlpha(0.6)
 	end
-	
+
 	-- add item button
 	local link, item, charges, showItemWhenComplete = GetQuestLogSpecialItemInfo(questIndex)
 	local itemButton
@@ -332,7 +332,7 @@ function setButtonToQuest (button, questIndex)
 		if (button.itemButton) then
 			if InCombatLockdown() then
 				QuestKing:StartCombatTimer()
-			else		
+			else
 				button:RemoveItemButton()
 			end
 		end
@@ -353,7 +353,7 @@ function setButtonToQuest (button, questIndex)
 			QuestKing:OnQuestObjectivesCompleted(questID)
 		end
 		button._questCompleted = not not (isComplete == 1)
-	end	
+	end
 
 	-- animate sequenced quests
 	if ((not button.fresh) and IsQuestSequenced(questID)) then
@@ -361,7 +361,7 @@ function setButtonToQuest (button, questIndex)
 
 		if ((lastNumObj) and (lastNumObj > 0) and (numObj > lastNumObj)) then
 			-- do animations [FIXME: test this]
-			PlaySound("UI_QuestRollingForward_01")
+			PlaySound(SOUNDKIT.IG_QUEST_LIST_OPEN)
 			local lines = button.lines
 			for i = 1, #lines do
 				if (i > lastNumObj) then
@@ -456,6 +456,6 @@ function mouseHandlerQuest:TitleButtonOnClick (mouse, down)
 		-- 	ShowUIPanel(QuestLogFrame)
 		-- end
 		QuestObjectiveTracker_OpenQuestMap(nil, button.questIndex)
-	end	
-	
+	end
+
 end

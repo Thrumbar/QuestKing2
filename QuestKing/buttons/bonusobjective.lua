@@ -143,14 +143,14 @@ function setButtonToBonusTask (button, questID)
 
 	if (GetSuperTrackedQuestID() == questID) then
 		taggedTitle = taggedTitle .. " |TInterface\\Scenarios\\ScenarioIcon-Combat:10:10:-1:0|t"
-	end	
+	end
 
 	button.title:SetTextIcon(taggedTitle)
 	button.title:SetTextColor(color.r, color.g, color.b)
 
 	local isInArea, isOnMap, numObjectives = GetTaskInfo(questID)
 	local useNonBonusHeader = false
-	
+
 	for i = 1, numObjectives do
 		local desc, objectiveType, isDone, displayAsObjective = GetQuestObjectiveInfo(questID, i, false)
 		useNonBonusHeader = useNonBonusHeader or displayAsObjective
@@ -174,7 +174,7 @@ function setButtonToBonusTask (button, questID)
 			progressBar:SetPercent(percent)
 		elseif (quantName) then
 			local r, g, b = getObjectiveColor(quantCur / quantMax)
-			local line = button:AddLine(format("  %s", quantName), format(": %s/%s", quantCur, quantMax), r, g, b)		
+			local line = button:AddLine(format("  %s", quantName), format(": %s/%s", quantCur, quantMax), r, g, b)
 
 			local lastQuant = line._lastQuant
 			if ((lastQuant) and (quantCur > lastQuant)) then
@@ -208,7 +208,7 @@ end
 function QuestKing:SetDummyTask (questID)
 	local questIndex = GetQuestLogIndexByID(questID)
 	local taggedTitle, level = getQuestTaggedTitle(questIndex, true)
-	
+
 	local _, _, numObjectives = GetTaskInfo(questID)
 	numObjectives = numObjectives or 0
 
@@ -279,7 +279,7 @@ function QuestKing:OnCriteriaComplete (id)
 
 		if (numCompleteCriteria == numCriteria) then
 			---- FIXME: test this in ZG
-			PlaySound("UI_Scenario_BonusObjective_Success")
+			PlaySound(SOUNDKIT.UI_BONUS_EVENT_SYSTEM_VIGNETTES)
 
 			local questID = C_Scenario.GetBonusStepRewardQuestID(bonusStepIndex)
 			if (questID ~= 0) then
@@ -310,7 +310,7 @@ function mouseHandlerBonusTask:TitleButtonOnClick (mouse, down)
 			ClassicQuestLog:SetShown(true)
 		end
 		return
-	end	
+	end
 
 	if (mouse == "RightButton") then
 		if (GetSuperTrackedQuestID() == button.questID) then
@@ -344,24 +344,24 @@ function mouseHandlerBonusTask:TitleButtonOnEnter (motion)
 
 	if (not HaveQuestData(questID)) then
 		GameTooltip:AddLine(RETRIEVING_DATA, RED_FONT_COLOR.r, RED_FONT_COLOR.g, RED_FONT_COLOR.b)
-	else	
+	else
 		GameTooltip:AddLine(BONUS_OBJECTIVE_TOOLTIP_DESCRIPTION, 1, 1, 1, 1)
 		GameTooltip:AddLine(" ")
-		
+
 		-- xp
 		local xp = GetQuestLogRewardXP(questID)
 		if (xp > 0) then
 			GameTooltip:AddLine(string.format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
 		end
-		
-		-- currency		
+
+		-- currency
 		local numQuestCurrencies = GetNumQuestLogRewardCurrencies(questID)
 		for i = 1, numQuestCurrencies do
 			local name, texture, numItems = GetQuestLogRewardCurrencyInfo(i, questID)
 			local text = string.format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
 			GameTooltip:AddLine(text, 1, 1, 1)
 		end
-		
+
 		-- items
 		local numQuestRewards = GetNumQuestLogRewards(questID)
 		for i = 1, numQuestRewards do
@@ -385,5 +385,5 @@ function mouseHandlerBonusTask:TitleButtonOnEnter (motion)
 		end
 	end
 
-	GameTooltip:Show()	
+	GameTooltip:Show()
 end

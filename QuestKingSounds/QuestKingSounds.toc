@@ -5,7 +5,5 @@
 ## Notes: Quest Sounds
 
 options.lua
-options_override.lua
-options_override_custom.lua
 
 sounds.lua

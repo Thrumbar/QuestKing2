@@ -71,7 +71,7 @@ end
 Events.QUEST_ACCEPTED = function (self, event, ...)
 	local questLogIndex, questID = ...;
 	if (IsQuestTask(questID)) then
-		PlaySound("UI_Scenario_Stage_End");
+		PlaySound(SOUNDKIT.UI_SCENARIO_ENDING);
 	else
 		if ((AUTO_QUEST_WATCH == "1") and (GetNumQuestWatches() < MAX_WATCHABLE_QUESTS)) then
 			AddQuestWatch(questLogIndex)
@@ -84,7 +84,7 @@ end
 Events.QUEST_AUTOCOMPLETE = function (self, event, ...)
 	local questId = ...
 	if (AddAutoQuestPopUp(questId, "COMPLETE")) then
-		PlaySound("UI_AutoQuestComplete")
+		PlaySound(SOUNDKIT.IG_QUEST_LIST_COMPLETE)
 	end
 	QuestKing:UpdateTracker()
 end
@@ -94,7 +94,7 @@ Events.QUEST_TURNED_IN = function (self, event, ...)
 	local questID = ...
 	if (IsQuestTask(questID)) then
 		QuestKing:OnTaskTurnedIn(...)
-	end		
+	end
 end
 
 -- scenario
@@ -112,7 +112,7 @@ end
 
 -- scenario complete
 Events.SCENARIO_COMPLETED = function (self, event, ...)
-	QuestKing:OnScenarioCompleted(...)		
+	QuestKing:OnScenarioCompleted(...)
 end
 
 -- proving grounds

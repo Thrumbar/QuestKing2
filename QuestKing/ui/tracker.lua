@@ -233,7 +233,7 @@ function Tracker:Resize (lastShown)
 		end
 	else
 		Tracker:SetHeight(Tracker:GetTop() - lastShown:GetBottom())
-		
+
 		if (Tracker.advancedBackgroundHideWhenEmpty) then
 			Tracker.advancedBackground:Show()
 		end
@@ -361,14 +361,14 @@ function Tracker.MinimizeButtonOnClick (self, mouse, down)
 	else
 		if (mouse == "RightButton") then
 			QuestKingDBPerChar.trackerCollapsed = 2
-			PlaySound("igMiniMapClose")
+			PlaySound(SOUNDKIT.IG_MINIMAP_CLOSE)
 		elseif (QuestKingDBPerChar.trackerCollapsed ~= 0) then
 			QuestKingDBPerChar.trackerCollapsed = 0
 			wipe(QuestKing.newlyAddedQuests)
-			PlaySound("igMiniMapOpen")
+			PlaySound(SOUNDKIT.IG_MINIMAP_OPEN)
 		else
 			QuestKingDBPerChar.trackerCollapsed = 1
-			PlaySound("igMiniMapClose")
+			PlaySound(SOUNDKIT.IG_MINIMAP_CLOSE)
 		end
 		QuestKing:UpdateTracker()
 	end

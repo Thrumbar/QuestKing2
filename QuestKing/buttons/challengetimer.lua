@@ -62,7 +62,7 @@ function parseChallengeTimers (...)
 				setButtonToProvingGroundsTimer(button, elapsedTime, diffID, currWave, maxWave, duration)
 				return
 			end
-		end	
+		end
 	end
 
 end
@@ -97,7 +97,7 @@ function setButtonToProvingGroundsTimer (button, elapsed, diffID, currWave, maxW
 
 	challengeBar.bonusHeight = 28
 	challengeBar.extraText:Show()
-	
+
 
 	if (diffID == 1) then
 		challengeBar:SetStatusBarColor(0.76, 0.38, 0.15)
@@ -132,7 +132,7 @@ function setButtonToProvingGroundsTimer (button, elapsed, diffID, currWave, maxW
 		challengeBar:SetValue(1)
 		challengeBar.text:SetText()
 		challengeBar:SetScript("OnUpdate", nil)
-	end	
+	end
 end
 
 local cachedChallengeBar = nil
@@ -164,14 +164,14 @@ function WatchButton:AddChallengeBar ()
 		barPulser:SetAllPoints(challengeBar)
 		barPulser:SetTexture("Interface\\TargetingFrame\\UI-StatusBar")
 		barPulser:SetVertexColor(1, 0.9, 0.7, 0)
-		barPulser:SetBlendMode("ADD")		
+		barPulser:SetBlendMode("ADD")
 		challengeBar.barPulser = barPulser
 
 		local animGroup = barPulser:CreateAnimationGroup()
 		local a1 = animGroup:CreateAnimation("Alpha")
-			a1:SetDuration(0.25); a1:SetChange(1); a1:SetOrder(1);
+			a1:SetDuration(0.25); a1:SetFromAlpha(1); a1:SetOrder(1);
 		local a2 = animGroup:CreateAnimation("Alpha")
-			a2:SetDuration(0.3); a2:SetChange(-1); a2:SetOrder(2); a2:SetEndDelay(0.45);
+			a2:SetDuration(0.3); a2:SetFromAlpha(-1); a2:SetOrder(2); a2:SetEndDelay(0.45);
 		animGroup.cycles = 0
 		animGroup:SetScript("OnFinished", function (self)
 			if (self.cycles > 0) then
@@ -184,7 +184,7 @@ function WatchButton:AddChallengeBar ()
 		challengeBar.barPulserAnim = animGroup
 
 		-- <Alpha childKey="BorderAnim" change="1" duration="0.25" order="1"/>
-		-- <Alpha childKey="BorderAnim" endDelay="0.45" change="-1" duration="0.3" order="2"/>		
+		-- <Alpha childKey="BorderAnim" endDelay="0.45" change="-1" duration="0.3" order="2"/>
 
 		local border = challengeBar:CreateTexture(nil, "OVERLAY")
 		border:SetTexture([[Interface\Challenges\challenges-main]])
@@ -230,7 +230,7 @@ function WatchButton:AddChallengeBar ()
 		score:SetShadowColor(0, 0, 0, 1)
 		score:SetText("0")
 		score:Hide()
-		challengeBar.score = score		
+		challengeBar.score = score
 
 		challengeBar.bonusHeight = 18
 
@@ -314,12 +314,12 @@ function updateChallengeMedal (self, elapsedTime)
 				self:SetStatusBarColor(0.76, 0.38, 0.15)
 				self.icon:SetTexture([[Interface\Challenges\challenges-bronze-sm]])
 				self.icon:Show()
-				if (prevMedal) then PlaySound("UI_Challenges_MedalExpires_SilvertoBronze") end
+				if (prevMedal) then PlaySound(SOUNDKIT.LOOT_WINDOW_COIN_SOUND) end
 			elseif i == 2 then
 				self:SetStatusBarColor(0.68, 0.64, 0.64)
 				self.icon:SetTexture([[Interface\Challenges\challenges-silver-sm]])
 				self.icon:Show()
-				if (prevMedal) then PlaySound("UI_Challenges_MedalExpires_GoldtoSilver") end
+				if (prevMedal) then PlaySound(SOUNDKIT.LOOT_WINDOW_COIN_SOUND) end
 			elseif i == 3 then
 				self:SetStatusBarColor(0.93, 0.67, 0.25)
 				self.icon:SetTexture([[Interface\Challenges\challenges-gold-sm]])
@@ -340,7 +340,7 @@ function updateChallengeMedal (self, elapsedTime)
 	end
 
 	if (prevMedal) then
-		PlaySound("UI_Challenges_MedalExpires")
+		PlaySound(SOUNDKIT.LOOT_WINDOW_COIN_SOUND)
 	end
 
 	-- no medal
@@ -359,7 +359,7 @@ function onUpdateChallengeTimer (self, elapsed, manual)
 	local currentTime = GetTime() - self._startTime
 
 	local currentMedalTime = self._currentMedalTime
-	
+
 	if (currentMedalTime) and (currentTime > currentMedalTime) then
 		-- manual update or medal expired, force update
 		updateChallengeMedal(self, currentTime)
@@ -371,7 +371,7 @@ function onUpdateChallengeTimer (self, elapsed, manual)
 		local timeLeft = currentMedalTime - currentTime
 
 		if (timeLeft < 10) and (not soundPlayed) then
-			PlaySoundKitID(34154)
+			PlaySound(SOUNDKIT.UI_BATTLEGROUND_COUNTDOWN_FINISHED)
 			soundPlayed = true
 		elseif (soundPlayed) and (timeLeft > 20) then
 			soundPlayed = false

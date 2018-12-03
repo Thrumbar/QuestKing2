@@ -124,14 +124,14 @@ do
 			else
 				self:RemoveItemButton()
 			end
-		end		
+		end
 
 		self:EnableMouse(false)
 		self.titleButton:EnableMouse(true)
 
 		self:SetBackdropColor(0, 0, 0, 0)
 		self:SetScript("OnUpdate", nil)
-		
+
 		self.icon.animGroup:Stop()
 		self.icon:Hide()
 		self.buttonPulser.animGroup:Stop()
@@ -232,7 +232,7 @@ do
 		self:Hide()
 		self:Show()
 		self:SetAlpha(0)
-		self:SetAlpha(1)		
+		self:SetAlpha(1)
 	end
 
 	function WatchButton:Create()
@@ -241,7 +241,7 @@ do
 		-- D("CREATE", buttonCounter)
 
 		-- button
-		
+
 		local button = CreateFrame("Button", name, QuestKing.Tracker)
 		button.name = name
 		button:SetWidth(opt_buttonWidth)
@@ -253,7 +253,7 @@ do
 			insets = { left = 0, right = 0, top = 0, bottom = 0 }
 		})
 		button:SetBackdropColor(0, 0, 0, 0)
-		
+
 		local buttonHighlight = button:CreateTexture()
 		buttonHighlight:SetAllPoints(button)
 		buttonHighlight:SetTexture([[Interface\QuestFrame\UI-QuestLogTitleHighlight]])
@@ -277,28 +277,28 @@ do
 
 		local animGroup = buttonPulser:CreateAnimationGroup()
 		local a1 = animGroup:CreateAnimation("Alpha")
-			a1:SetStartDelay(0); a1:SetDuration(0.50); a1:SetChange(1); a1:SetOrder(1); a1:SetSmoothing("OUT");
+			a1:SetStartDelay(0); a1:SetDuration(0.50); a1:SetFromAlpha(1); a1:SetOrder(1); a1:SetSmoothing("OUT");
 		local a2 = animGroup:CreateAnimation("Alpha")
-			a2:SetStartDelay(0.2); a2:SetDuration(0.50); a2:SetChange(-1); a2:SetOrder(2); a2:SetSmoothing("IN");
+			a2:SetStartDelay(0.2); a2:SetDuration(0.50); a2:SetFromAlpha(-1); a2:SetOrder(2); a2:SetSmoothing("IN");
 		animGroup:SetLooping("NONE")
 		animGroup:SetScript("OnFinished", hideOnOnFinished)
-		
+
 		button.buttonPulser = buttonPulser
 		button.buttonPulser.animGroup = animGroup
 		button.Pulse = buttonPulse
-		
+
 		-- icons
-		
+
 		local icon = button:CreateTexture(nil, nil, "QuestIcon-Exclamation")
 		icon:ClearAllPoints()
 		icon:SetPoint("RIGHT", button, "LEFT")
 		icon:SetHeight(opt_lineHeight * 2 - 2)
 		icon:SetWidth(opt_lineHeight * 1.4)
 		icon:Hide()
-		
+
 		local animGroup = icon:CreateAnimationGroup()
 		local a1 = animGroup:CreateAnimation("Alpha")
-			a1:SetStartDelay(0.25); a1:SetDuration(0.33); a1:SetChange(-1); a1:SetOrder(1); a1:SetSmoothing("IN");
+			a1:SetStartDelay(0.25); a1:SetDuration(0.33); a1:SetFromAlpha(-1); a1:SetOrder(1); a1:SetSmoothing("IN");
 		animGroup:SetLooping("BOUNCE")
 
 		button.icon = icon
@@ -306,19 +306,19 @@ do
 		button.SetIcon = buttonSetIcon
 
 		-- title button
-		
+
 		local titleButton = CreateFrame("Button", nil, button)
 		titleButton:SetPoint("TOPLEFT", 0, 0)
 		titleButton:SetWidth(opt_buttonWidth)
-		titleButton:SetHeight(opt_lineHeight)		
+		titleButton:SetHeight(opt_lineHeight)
 		titleButton.parent = button
-		
+
 		titleButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 		titleButton:SetScript("OnClick", WatchButton.TitleButtonOnClick)
 		titleButton:SetScript("OnEnter", WatchButton.TitleButtonOnEnter)
 		titleButton:SetScript("OnLeave", WatchButton.TitleButtonOnLeave)
 		button.titleButton = titleButton
-		
+
 		-- title button hover
 
 		local tex = titleButton:CreateTexture()
@@ -326,18 +326,18 @@ do
 		tex:SetTexture([[Interface\QuestFrame\UI-QuestLogTitleHighlight]])
 		tex:SetAlpha(0.5)
 		titleButton.highlightTexture = tex
-		
+
 		titleButton:EnableMouse(true)
 		titleButton:SetHighlightTexture(tex, "ADD")
-		
+
 		-- title text
-		
+
 		local title = titleButton:CreateFontString(nil, opt_fontLayer)
 		title:SetFont(opt_font, opt_fontSize, opt_fontStyle)
 		title:SetJustifyH("LEFT")
 		title:SetTextColor(1, 1, 0)
 		title:SetShadowOffset(1, -1)
-		title:SetShadowColor(0, 0, 0, 1)	
+		title:SetShadowColor(0, 0, 0, 1)
 		title:SetPoint("TOPLEFT", 0, 0)
 		title:SetWidth(opt_buttonWidth)
 		title:SetHeight(opt_lineHeight)
@@ -349,19 +349,19 @@ do
 
 		button.title = title
 		titleButton.text = title
-		
+
 		-- variables
 
 		button.lines = {}
 		button.currentLine = 0
 
 		button.challengeBarShown = false
-		
+
 		setmetatable(button, WatchButton)
 
 		button:Wipe()
-	
-		return button		
+
+		return button
 	end
 
 	---- ########
@@ -371,12 +371,12 @@ do
 	local function lineWipe (self)
 		self:Hide()
 		self.right:Hide()
-		
+
 		self.flash.animGroup:Stop()
 		self.flash:Hide()
 		self.glow.animGroup:Stop()
 		self.glow:Hide()
-		
+
 		if (self.timerBar) then
 			self.timerBar:Free()
 		end
@@ -385,7 +385,7 @@ do
 			self.progressBar:Free()
 		end
 
-		self._lastQuant = nil			
+		self._lastQuant = nil
 	end
 
 	local function lineFlash (self)
@@ -394,7 +394,7 @@ do
 		end
 
 		self.flash:Show()
-		self.flash.animGroup:Play()		
+		self.flash.animGroup:Play()
 	end
 
 	local function lineGlow (self, r, g, b)
@@ -421,18 +421,18 @@ do
 		line:SetJustifyV("TOP")
 		line:SetWordWrap(false)
 		tinsert(self.lines, line)
-		
+
 		local right = self:CreateFontString(nil, opt_fontLayer)
 		right:SetFont(opt_font, opt_fontSize, opt_fontStyle)
 		right:SetJustifyH("LEFT")
 		right:SetTextColor(1, 1, 0)
 		right:SetShadowOffset(1, -1)
-		right:SetShadowColor(0, 0, 0, 1)	
+		right:SetShadowColor(0, 0, 0, 1)
 		right:SetPoint("TOPLEFT", 0, 0)
 		right:SetJustifyV("TOP")
 		right:SetWordWrap(false)
 		line.right = right
-		
+
 		local flash = self:CreateTexture()
 		flash:SetPoint("TOPLEFT", line)
 		flash:SetPoint("BOTTOMLEFT", line)
@@ -441,14 +441,14 @@ do
 		flash:SetBlendMode("ADD")
 		flash:SetVertexColor(opt_colors.ObjectiveProgressFlash[1], opt_colors.ObjectiveProgressFlash[2], opt_colors.ObjectiveProgressFlash[3], 0)
 		flash:Hide()
-		
+
 		local animGroup = flash:CreateAnimationGroup()
 		local a1 = animGroup:CreateAnimation("Alpha")
-			a1:SetStartDelay(0); a1:SetDuration(0.15); a1:SetChange(1); a1:SetOrder(1); a1:SetSmoothing("OUT")
+			a1:SetStartDelay(0); a1:SetDuration(0.15); a1:SetFromAlpha(1); a1:SetOrder(1); a1:SetSmoothing("OUT")
 		local a2 = animGroup:CreateAnimation("Alpha")
-			a2:SetStartDelay(0.25); a2:SetDuration(0.50); a2:SetChange(-1); a2:SetOrder(2); a2:SetSmoothing("IN")
-		animGroup:SetScript("OnFinished", hideOnOnFinished)			
-		
+			a2:SetStartDelay(0.25); a2:SetDuration(0.50); a2:SetFromAlpha(-1); a2:SetOrder(2); a2:SetSmoothing("IN")
+		animGroup:SetScript("OnFinished", hideOnOnFinished)
+
 		line.flash = flash
 		line.flash.animGroup = animGroup
 		line.Flash = lineFlash
@@ -468,9 +468,9 @@ do
 		local a1 = animGroup:CreateAnimation("Scale")
 			a1:SetStartDelay(0.067); a1:SetScale(5, 1); a1:SetDuration(0.633); a1:SetOrder(1); a1:SetOrigin("LEFT", 0, 0)
 		local a2 = animGroup:CreateAnimation("Alpha")
-			a2:SetStartDelay(0.067); a2:SetChange(1.0); a2:SetDuration(0.1); a2:SetOrder(1);
+			a2:SetStartDelay(0.067); a2:SetFromAlpha(1.0); a2:SetDuration(0.1); a2:SetOrder(1);
 		local a3 = animGroup:CreateAnimation("Alpha")
-			a3:SetStartDelay(0.867); a3:SetChange(-1.0); a3:SetDuration(0.267); a3:SetOrder(1);	
+			a3:SetStartDelay(0.867); a3:SetFromAlpha(-1.0); a3:SetDuration(0.267); a3:SetOrder(1);
 		animGroup:SetScript("OnFinished", hideOnOnFinished)
 
 		line.glow = glow
@@ -485,7 +485,7 @@ do
 	function WatchButton:AddLine (textleft, textright, r, g, b, a)
 		local currentLine = self.currentLine + 1
 		self.currentLine = currentLine
-		
+
 		local line, right
 		if self.lines[currentLine] then
 			line = self.lines[currentLine]
@@ -493,17 +493,17 @@ do
 		else
 			line, right = self:CreateLines(currentLine)
 		end
-		
+
 		line.isTimer = false
-		
+
 		line:SetText(textleft)
 		right:SetText(textright)
-		
+
 		if r ~= nil then
 			line:SetTextColor(r, g, b, a or 1)
 			right:SetTextColor(r, g, b, a or 1)
 		end
-		
+
 		return line
 	end
 
@@ -538,9 +538,9 @@ do
 		for i = 1, #self.lines do
 			local line = self.lines[i]
 			local right = line.right
-			
+
 			if (i > self.currentLine) then
-				line:Wipe()	
+				line:Wipe()
 			else
 				line:Show()
 				right:Show()
@@ -555,13 +555,13 @@ do
 					line:SetPoint("TOPLEFT", lastLine, "BOTTOMLEFT", 0, 0)
 				end
 				right:SetPoint("TOPLEFT", line, "TOPRIGHT", -1, 0)
-				
+
 				line:SetWidth(0)
 				line:SetHeight(0)
-				
+
 				local lenLeft = line:GetStringWidth()
-				local lenRight = right:GetStringWidth()				
-				
+				local lenRight = right:GetStringWidth()
+
 				if (lenLeft + lenRight) > opt_buttonWidth then
 					--left:SetHeight(left:GetStringHeight())
 					line:SetHeight(opt_lineHeight)
@@ -588,7 +588,7 @@ do
 		if (self.challengeBar) then
 			height = height + self.challengeBar.bonusHeight
 		end
-		
+
 		self:SetHeight(opt_lineHeight + height)
 		self:Show()
 
@@ -608,7 +608,7 @@ do
 				end
 			end
 		end
-		-- end anchor item buttons	
+		-- end anchor item buttons
 
 	end
 end
