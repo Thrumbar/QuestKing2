@@ -1,0 +1,11 @@
+## Interface: 60200
+## Title: QuestKingSounds
+## Author: Barjack
+## Version: 2.2.4
+## Notes: Quest Sounds
+
+options.lua
+options_override.lua
+options_override_custom.lua
+
+sounds.lua

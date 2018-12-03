@@ -1,0 +1,35 @@
+2.2.4
+- Fixed a bug with PetTracker integration where the pet zone tracker would frequently reappear even when disabled.
+- Added an option to hide the border of the mode toggle buttons (opt.hideToggleButtonBorder, false by default).
+
+2.2.3
+- Added a very ugly hack that enables compatibility with PetTracker's objective tracker panel.
+
+2.2.2
+- Increased TOC for patch 6.2.
+- Fixed bug with bonus objective display (caused by 6.2 patch).
+- Fixed bug related to new text format for some reputation objectives (caused by 6.2 patch).
+- Fixed display color for objectives whose quota is exceeded rather than merely met.
+
+2.2.1
+- Attempted to fix a bug which happened sometimes when multiple bonus objectives were displayed at the same time.
+
+2.2.0
+- Improved how superceding objectives are displayed (e.g. Garrison invasion point objectives). If you want the old behaviour (all objectives always visible), then set opt.hideSupersedingObjectives to false.
+- Slightly increased the time bonus rewards are displayed from 7 to 10 seconds.
+- Fixed how "reptutation"-style objectives are displayed to avoid truncation.
+- Fixed some issues in locales that show objective description/count in reverse order (e.g. ruRU).
+
+2.1.1
+- Fixed an error that happened when the tracker queued an update for after combat.
+- Changed supertracking to always check for the closest POI when accepting a quest.
+
+2.1.0
+- Added "/qk scale" to set the tracker scale.
+- Added "advanced background" option for better looking backgrounds.
+- Fixed the default objective tracker re-appearing after visiting the barber.
+- Fixed the scenario stage objective overlay appearing twice when zoning into a scenario or dungeon. (Workaround for Blizzard bug with LevelUpDisplay.)
+- Cleaned up some code.
+
+2.0.0
+- Massive re-write for WoD.
