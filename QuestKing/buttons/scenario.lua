@@ -39,10 +39,11 @@ end
 
 function QuestKing:UpdateTrackerScenarios ()
 	local scenarioName, currentStage, numStages, flags, hasBonusStep, isBonusStepComplete, completed, xp, money = C_Scenario.GetInfo()
-	local inChallengeMode = bit.band(flags, SCENARIO_FLAG_CHALLENGE_MODE) == SCENARIO_FLAG_CHALLENGE_MODE;
-	local inProvingGrounds = bit.band(flags, SCENARIO_FLAG_PROVING_GROUNDS) == SCENARIO_FLAG_PROVING_GROUNDS;
-	local dungeonDisplay = bit.band(flags, SCENARIO_FLAG_USE_DUNGEON_DISPLAY) == SCENARIO_FLAG_USE_DUNGEON_DISPLAY;
-	-- D("updateTrackerScenarios:", dungeonDisplay)
+	local inChallengeMode = (scenarioType == LE_SCENARIO_TYPE_CHALLENGE_MODE);
+	local inProvingGrounds = (scenarioType == LE_SCENARIO_TYPE_PROVING_GROUNDS);
+	local dungeonDisplay = (scenarioType == LE_SCENARIO_TYPE_USE_DUNGEON_DISPLAY);
+	local inWarfront = (scenarioType == LE_SCENARIO_TYPE_WARFRONT);
+	local scenariocompleted = currentStage > numStages;
 
 	local _, _, _, _, _, _, _, mapID = GetInstanceInfo()
 	if (mapID == 1148) then
@@ -218,7 +219,7 @@ function QuestKing:OnScenarioUpdate (newStage)
 	-- D("OnScenarioUpdate", newStage, currentStage, numStages, IsPlayerInWorld())
 	if (newStage) then
 		local _, currentStage, numStages = C_Scenario.GetInfo()
-		local inChallengeMode = C_Scenario.IsChallengeMode()
+		local inChallengeMode = C_ChallengeMode.IsChallengeMode()
 		if (not inChallengeMode) then
 			if --[[(currentStage > 1) and]] (currentStage <= numStages) then
 				PlaySound(SOUNDKIT.UI_SCENARIO_ENDING)

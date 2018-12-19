@@ -37,11 +37,11 @@ local function playSoundAuto (sound)
 	if (not sound) then return end
 	local low = strlower(sound)
 
-	if ((string.sub(low, -4) == ".wav") or (string.sub(low, -4) == ".mp3")  or (string.sub(low, -4) == ".ogg")) then
-		PlaySoundFile(sound)
-	else
-		PlaySound(sound)
-	end
+--	if ((string.sub(low, -4) == ".wav") or (string.sub(low, -4) == ".mp3")  or (string.sub(low, -4) == ".ogg")) then
+--		PlaySoundFile(sound)
+--	else
+--		PlaySound(sound)
+--	end
 end
 
 local function playQuestSound ()
