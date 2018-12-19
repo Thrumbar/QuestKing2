@@ -25,7 +25,7 @@ function QuestKing.WatchButton:SetItemButton (questIndex, link, item, charges, d
 		self.itemButton = itemButton
 		itemButton.baseButton = self
 
-		itemButton:ClearAllPoints()		
+		itemButton:ClearAllPoints()
 		itemButton:Show()
 	end
 
@@ -66,9 +66,9 @@ function QuestKing.WatchButton:RemoveItemButton ()
 	itemButton:Hide()
 	itemButton:ClearAllPoints()
 
-  itemButton.questLogIndex = nil
-  itemButton.charges = nil
-  itemButton.rangeTimer = nil
+	itemButton.questLogIndex = nil
+	itemButton.charges = nil
+	itemButton.rangeTimer = nil
 
 	itemButton.baseButton = nil
 	self.itemButton = nil
@@ -105,7 +105,7 @@ function QuestKing_QuestObjectiveItem_OnUpdate (self, elapsed)
 			end
 			rangeTimer = TOOLTIP_UPDATE_TIME
 		end
-		
+
 		self.rangeTimer = rangeTimer
 	end
 end
@@ -113,7 +113,7 @@ end
 function QuestKing_QuestObjectiveItem_UpdateCooldown (itemButton)
 	local start, duration, enable = GetQuestLogSpecialItemCooldown(itemButton.questLogIndex)
 	if (start) then
-		CooldownFrame_SetTimer(itemButton.Cooldown, start, duration, enable)
+		CooldownFrame_Set(itemButton.Cooldown, start, duration, enable)
 		if (duration > 0 and enable == 0) then
 			SetItemButtonTextureVertexColor(itemButton, 0.4, 0.4, 0.4)
 		else

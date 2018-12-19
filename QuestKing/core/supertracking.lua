@@ -11,7 +11,7 @@ local activeSuperTrackedQuestID = 0
 
 function QuestKing:OnQuestAccepted(questID)
 	-- if (GetSuperTrackedQuestID() == 0) then
-	-- 	-- FIXME: should we allow accepting a quest to set the arrow no matter what?	
+	-- FIXME: should we allow accepting a quest to set the arrow no matter what?
 	-- elseif (QuestHasPOIInfo(questID)) then
 	if (QuestHasPOIInfo(questID)) then
 		pendingQuestID = nil
@@ -20,7 +20,7 @@ function QuestKing:OnQuestAccepted(questID)
 		QuestKing:UpdateTracker()
 	else
 		pendingQuestID = questID
-	end	
+	end
 end
 
 function QuestKing:OnPOIUpdate ()
@@ -56,7 +56,7 @@ function QuestKing:PostCheckQuestTracking ()
 
 	if (supertrackUpdatePending) then
 		supertrackUpdatePending = false
-		
+
 		if (GetSuperTrackedQuestID() ~= 0) then
 			QuestKing:TrackClosestQuest()
 			QuestKing:UpdateTracker()
@@ -104,7 +104,7 @@ function QuestKing:TrackClosestQuest ()
 		QuestKing:SetSuperTrackedQuestID(closestQuestID)
 	else
 		QuestKing:SetSuperTrackedQuestID(0)
-	end	
+	end
 end
 
 --

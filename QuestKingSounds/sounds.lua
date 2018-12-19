@@ -36,7 +36,7 @@ end
 local function playSoundAuto (sound)
 	if (not sound) then return end
 	local low = strlower(sound)
-	
+
 	if ((string.sub(low, -4) == ".wav") or (string.sub(low, -4) == ".mp3")  or (string.sub(low, -4) == ".ogg")) then
 		PlaySoundFile(sound)
 	else
@@ -53,11 +53,11 @@ local function playQuestSound ()
 		playSoundAuto(opt.soundObjComplete)
 	elseif (soundLevel == 3) then
 		playSoundAuto(opt.soundQuestComplete)
-	end	
+	end
 end
 
 --
-	
+
 local function checkQuestCompletion (questIndex)
 	local _, _, _, _, _, questIsComplete, _, questID = GetQuestLogTitle(questIndex)
 
@@ -122,9 +122,9 @@ end
 
 fEvents:SetScript("OnEvent", function(self, event, name)
 	if (name ~= addonName) then return end
-	
+
 	self:UnregisterEvent("ADDON_LOADED")
-	
+
 	self:SetScript("OnEvent", handleEvent)
 
 	self:RegisterEvent("QUEST_LOG_UPDATE")
