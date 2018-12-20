@@ -58,7 +58,7 @@ function QuestKing:UpdateTrackerScenarios ()
 	end
 
 	local stageName, stageDescription, numCriteria = C_Scenario.GetStepInfo()
-	local inChallengeMode = C_Scenario.IsChallengeMode()
+	local inChallengeMode = C_ChallengeMode.IsChallengeModeActive()
 
 	if (currentStage > 0) then
 		if (currentStage <= numStages) then
@@ -219,7 +219,7 @@ function QuestKing:OnScenarioUpdate (newStage)
 	-- D("OnScenarioUpdate", newStage, currentStage, numStages, IsPlayerInWorld())
 	if (newStage) then
 		local _, currentStage, numStages = C_Scenario.GetInfo()
-		local inChallengeMode = C_ChallengeMode.IsChallengeMode()
+		local inChallengeMode = C_ChallengeMode.IsChallengeModeActive()
 		if (not inChallengeMode) then
 			if --[[(currentStage > 1) and]] (currentStage <= numStages) then
 				PlaySound(SOUNDKIT.UI_SCENARIO_ENDING)

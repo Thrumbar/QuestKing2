@@ -49,7 +49,7 @@ function QuestKing:UpdateTrackerAchievements()
 		if numTrackedAchievements > 0 then
 			local button = WatchButton:GetKeyed("collapser", "Achievements")
 			button._headerName = headerName
-	
+
 			if QuestKingDBPerChar.collapsedHeaders[headerName] then
 				button.title:SetTextIcon("|TInterface\\AddOns\\QuestKing\\textures\\UI-SortArrow_sm_right:8:8:0:-1:0:0:0:0:0:0:1:1:1|t "..headerName)
 				button.title:SetTextColor(opt_colors.AchievementHeaderCollapsed[1], opt_colors.AchievementHeaderCollapsed[2], opt_colors.AchievementHeaderCollapsed[3])
@@ -67,12 +67,12 @@ function QuestKing:UpdateTrackerAchievements()
 		achheader.title:SetText("Achievements")
 		achheader.title:SetTextColor(opt_colors.AchievementHeader[1], opt_colors.AchievementHeader[2], opt_colors.AchievementHeader[3])
 	end
-	
+
 	-- achievements
 	if showAchievements then
 		for i = 1, numTrackedAchievements do
 			local achievementID = trackedAchievements[i]
-			
+
 			local button = WatchButton:GetKeyed("achievement", achievementID)
 			setButtonToAchievement(button, achievementID)
 		end
@@ -82,12 +82,12 @@ end
 function setButtonToAchievement (button, achievementID)
 	button.mouseHandler = mouseHandlerAchievement
 
-	local id, achievementName, points, achievemntCompleted, _, _, _, achievementDesc, flags, image, rewardText, isGuildAch = GetAchievementInfo(achievementID)	
+	local id, achievementName, points, achievemntCompleted, _, _, _, achievementDesc, flags, image, rewardText, isGuildAch = GetAchievementInfo(achievementID)
 	button.achievementID = achievementID
 
 	local collapseCriteria = QuestKingDBPerChar.collapsedAchievements[achievementID]
 
-	-- set title		
+	-- set title
 	button.title:SetText(achievementName)
 	if completed then
 		button.title:SetTextColor(opt_colors.AchievementTitleComplete[1], opt_colors.AchievementTitleComplete[2], opt_colors.AchievementTitleComplete[3])
@@ -98,28 +98,28 @@ function setButtonToAchievement (button, achievementID)
 			button.title:SetTextColor(opt_colors.AchievementTitle[1], opt_colors.AchievementTitle[2], opt_colors.AchievementTitle[3])
 		end
 	end
-	
+
 	if collapseCriteria then
 		button.title:SetAlpha(0.6)
 	end
-	
+
 	-- criteria setup
-	local numCriteria = GetAchievementNumCriteria(achievementID)	
+	local numCriteria = GetAchievementNumCriteria(achievementID)
 	local foundTimer = false
 	local timeNow -- avoid multiple calls to GetTime()
-	
+
 	-- no criteria
 	if (numCriteria == 0) then
 		if (not collapseCriteria) then
 			button:AddLine("  "..achievementDesc, nil, opt_colors.AchievementDescription[1], opt_colors.AchievementDescription[2], opt_colors.AchievementDescription[3]) -- no criteria exist, show desc line
 		end
 	end
-	
+
 	-- criteria loop
 	for i = 1, numCriteria do
 		local _
 		local criteriaString, criteriaType, criteriaCompleted, quantity, totalQuantity, name, flags, assetID, quantityString, criteriaID, eligible, duration, elapsed = GetAchievementCriteriaInfo(achievementID, i)
-		
+
 		-- set string
 		if (bit.band(flags, EVALUATION_TREE_FLAG_PROGRESS_BAR) == EVALUATION_TREE_FLAG_PROGRESS_BAR) then
 			criteriaString = quantityString
@@ -128,7 +128,7 @@ function setButtonToAchievement (button, achievementID)
 				_, criteriaString = GetAchievementInfo(assetID)
 			end
 		end
-		
+
 		-- display criteria depending on timer state
 		-- kinda wanna seperate this out, but display is dependent on timer logic (e.g. timeLeft > 0 forces display)
 
@@ -149,11 +149,11 @@ function setButtonToAchievement (button, achievementID)
 			else
 				button:AddLine("  "..criteriaString, nil, opt_colors.AchievementCriteria[1], opt_colors.AchievementCriteria[2], opt_colors.AchievementCriteria[3]) -- timer running, force showing normal objective
 			end
-			
+
 			-- adding timer line
 			local timerBar = button:AddTimerBar(duration, GetTime() - elapsed)
 			timerBar:SetStatusBarColor(opt_colors.AchievementTimer[1], opt_colors.AchievementTimer[2], opt_colors.AchievementTimer[3])
-			
+
 		else
 			-- no timer exists / timer expired
 
@@ -167,7 +167,7 @@ function setButtonToAchievement (button, achievementID)
 				button:AddLine("  "..criteriaString, nil, opt_colors.AchievementCriteria[1], opt_colors.AchievementCriteria[2], opt_colors.AchievementCriteria[3]) -- no timer, show normally unless completed/collapsed
 			end
 		end
-		
+
 	end
 
 	-- show "meta" timer if there is a timer on this achievement, but no associated criteria are found in GetAchievementNumCriteria (Salt and Pepper?)
@@ -194,7 +194,7 @@ function setButtonToAchievement (button, achievementID)
 		button.title:SetTextColor(opt_colors.AchievementTimedTitle[1], opt_colors.AchievementTimedTitle[2], opt_colors.AchievementTimedTitle[3])
 		button:SetBackdropColor(opt_colors.AchievementTimedBackground[1], opt_colors.AchievementTimedBackground[2], opt_colors.AchievementTimedBackground[3], opt_colors.AchievementTimedBackground[4])
 	end
-	
+
 end
 
 function mouseHandlerAchievement:TitleButtonOnEnter (motion)
@@ -241,10 +241,10 @@ function mouseHandlerAchievement:TitleButtonOnClick (mouse, down)
 			QuestKing:UpdateTracker()
 			return
 		end
-	end	
+	end
 
 	if (not AchievementFrame) then AchievementFrame_LoadUI() end
-	
+
 	if (not AchievementFrame:IsShown()) then
 		AchievementFrame_ToggleAchievementFrame()
 		AchievementFrame_SelectAchievement(button.achievementID)
@@ -254,5 +254,5 @@ function mouseHandlerAchievement:TitleButtonOnClick (mouse, down)
 		else
 			AchievementFrame_ToggleAchievementFrame()
 		end
-	end	
+	end
 end

@@ -48,7 +48,7 @@ function parseChallengeTimers (...)
 
 			if (mapID) then
 				local button = WatchButton:GetKeyed("challengetimer", mapID)
-				setButtonToChallengeTimer(button, timerID, elapsedTime, GetChallengeModeMapTimes(mapID))
+				setButtonToChallengeTimer(button, timerID, elapsedTime, C_ChallengeMode.GetMapUIInfo(mapID))
 				return
 			end
 
