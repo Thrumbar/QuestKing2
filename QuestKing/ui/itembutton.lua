@@ -77,47 +77,42 @@ function QuestKing.WatchButton:RemoveItemButton ()
 end
 
 function QuestKing_QuestObjectiveItem_OnUpdate (self, elapsed)
-	-- D("%%%")
-	-- self:ClearAllPoints()
-	-- self:SetPoint("CENTER", UIParent, "CENTER")
-
 	-- Handle range indicator
-	local rangeTimer = self.rangeTimer
-	if (rangeTimer) then
-		rangeTimer = rangeTimer - elapsed
-		if (rangeTimer <= 0) then
-			local link, item, charges, showItemWhenComplete = GetQuestLogSpecialItemInfo(self.questLogIndex)
-			if ((not charges) or (charges ~= self.charges)) then
-				QuestKing:UpdateTracker()
-				return
+	local rangeTimer = self.rangeTimer;
+	if ( rangeTimer ) then
+		rangeTimer = rangeTimer - elapsed;
+		if ( rangeTimer <= 0 ) then
+			local link, item, charges, showItemWhenComplete = GetQuestLogSpecialItemInfo(self:GetID());
+			if ( not charges or charges ~= self.charges ) then
+				ObjectiveTracker_Update(OBJECTIVE_TRACKER_UPDATE_MODULE_QUEST);
+				return;
 			end
-
-			local count = self.HotKey
-			local valid = IsQuestLogSpecialItemInRange(self.questLogIndex)
-			if (valid == 0) then
-				count:Show()
-				count:SetVertexColor(1.0, 0.1, 0.1)
-			elseif (valid == 1) then
-				count:Show()
-				count:SetVertexColor(0.6, 0.6, 0.6)
+			local count = self.HotKey;
+			local valid = IsQuestLogSpecialItemInRange(self:GetID());
+			if ( valid == 0 ) then
+				count:Show();
+				count:SetVertexColor(1.0, 0.1, 0.1);
+			elseif ( valid == 1 ) then
+				count:Show();
+				count:SetVertexColor(0.6, 0.6, 0.6);
 			else
-				count:Hide()
+				count:Hide();
 			end
-			rangeTimer = TOOLTIP_UPDATE_TIME
+			rangeTimer = TOOLTIP_UPDATE_TIME;
 		end
 
-		self.rangeTimer = rangeTimer
+		self.rangeTimer = rangeTimer;
 	end
 end
 
-function QuestKing_QuestObjectiveItem_UpdateCooldown (itemButton)
-	local start, duration, enable = GetQuestLogSpecialItemCooldown(itemButton.questLogIndex)
-	if (start) then
-		CooldownFrame_Set(itemButton.Cooldown, start, duration, enable)
-		if (duration > 0 and enable == 0) then
-			SetItemButtonTextureVertexColor(itemButton, 0.4, 0.4, 0.4)
+function QuestObjectiveItem_UpdateCooldown(itemButton)
+	local start, duration, enable = GetQuestLogSpecialItemCooldown(itemButton:GetID());
+	if ( start ) then
+		CooldownFrame_Set(itemButton.Cooldown, start, duration, enable);
+		if ( duration > 0 and enable == 0 ) then
+			SetItemButtonTextureVertexColor(itemButton, 0.4, 0.4, 0.4);
 		else
-			SetItemButtonTextureVertexColor(itemButton, 1, 1, 1)
+			SetItemButtonTextureVertexColor(itemButton, 1, 1, 1);
 		end
 	end
 end
