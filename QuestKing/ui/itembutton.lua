@@ -39,7 +39,7 @@ function QuestKing.WatchButton:SetItemButton (questIndex, link, item, charges, d
 
 	SetItemButtonTexture(itemButton, item)
 	SetItemButtonCount(itemButton, charges)
-	QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton);
+	QuestObjectiveItem_UpdateCooldown(itemButton);
 
 	-- resize
 	if displayedObj > 0 then
@@ -56,6 +56,14 @@ function QuestKing.WatchButton:SetItemButton (questIndex, link, item, charges, d
 	itemButton:SetAlpha(QuestKing.itemButtonAlpha)
 
 	return itemButton
+end
+
+function QuestObjectiveItem_OnEvent(self, event, ...)
+	if ( event == "PLAYER_TARGET_CHANGED" ) then
+		self.rangeTimer = -1;
+	elseif ( event == "BAG_UPDATE_COOLDOWN" ) then
+		QuestObjectiveItem_UpdateCooldown(self);
+	end
 end
 
 function QuestKing.WatchButton:RemoveItemButton ()
