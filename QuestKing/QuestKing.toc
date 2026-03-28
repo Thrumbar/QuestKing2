@@ -1,17 +1,20 @@
-## Interface: 60200
+## Interface: 120001, 40400, 11503
 ## Title: QuestKing
-## Author: Barjack
-## Version: 2.2.4
-## Notes: Objective Tracker Replacement
+## Author: Barjack, OpenAI refactor pass
+## Version: 2.3.0
+## Notes: Objective Tracker Replacement (Retail, Cataclysm Classic, Classic Era compatible code paths)
 ## SavedVariables: QuestKingDB
 ## SavedVariablesPerCharacter: QuestKingDBPerChar
 ## OptionalDeps: PetTracker
 
 options.lua
+options_override.lua
+## options_override_custom.lua
 
 core\util.lua
 core\compatibility.lua
 
+ui\tracker.lua
 ui\watchbutton.lua
 ui\itembutton.lua
 ui\itembutton.xml
@@ -19,7 +22,6 @@ ui\rewardsframe.lua
 ui\rewardsframe.xml
 ui\timerbar.lua
 ui\progressbar.lua
-ui\tracker.lua
 
 buttons\quest.lua
 buttons\scenario.lua
@@ -28,7 +30,7 @@ buttons\achievement.lua
 buttons\challengetimer.lua
 buttons\bonusobjective.lua
 
-core\slashcommand.lua
 core\supertracking.lua
-core\events.lua
 core\core.lua
+core\slashcommand.lua
+core\events.lua

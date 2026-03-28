@@ -1,180 +1,371 @@
 local addonName, QuestKing = ...
 
--- options
 local opt = QuestKing.options
 
--- import
-
--- local functions
-
--- local variables
-
---
-
 local rewardQueue = {}
-local animatingData
+local animatingData = nil
 
-function QuestKing:AddReward (button, questID, xp, money)
-	local data = {}
-	data.button = button
-	data.questID = questID
+local tinsert = table.insert
+local tremove = table.remove
+local type = type
+local unpack = unpack
 
-	-- save all the rewards
-	data.rewards = {}
+local REWARD_SOUND_KIT = 45142
 
-	-- xp
-	if ((not xp) and (questID)) then
-		xp = GetQuestLogRewardXP(questID)
-	end
+local function GetPlayerMaxLevelSafe()
+    if type(IsPlayerAtEffectiveMaxLevel) == "function" then
+        return IsPlayerAtEffectiveMaxLevel()
+    end
 
-	if ((xp) and (xp > 0) and (UnitLevel("player") < MAX_PLAYER_LEVEL)) then
-		local t = {}
-		t.label = xp
-		t.texture = "Interface\\Icons\\XP_Icon"
-		t.count = 0
-		t.font = "NumberFontNormal"
-		tinsert(data.rewards, t)
-	end
+    if type(MAX_PLAYER_LEVEL) == "number" and MAX_PLAYER_LEVEL > 0 then
+        local playerLevel = UnitLevel("player") or 0
+        return playerLevel >= MAX_PLAYER_LEVEL
+    end
 
-	if (questID) then
-		-- currencies
-		local numCurrencies = GetNumQuestLogRewardCurrencies(questID)
-		for i = 1, numCurrencies do
-			local name, texture, count = GetQuestLogRewardCurrencyInfo(i, questID)
-			local t = {}
-			t.label = name
-			t.texture = texture
-			t.count = count
-			t.font = "GameFontHighlightSmall"
-			tinsert(data.rewards, t)
-		end
+    if C_LevelSquish and type(C_LevelSquish.GetMaxPlayerLevel) == "function" then
+        local level = C_LevelSquish.GetMaxPlayerLevel()
+        if type(level) == "number" and level > 0 then
+            return (UnitLevel("player") or 0) >= level
+        end
+    end
 
-		-- items
-		local numItems = GetNumQuestLogRewards(questID)
-		for i = 1, numItems do
-			local name, texture, count, quality, isUsable = GetQuestLogRewardInfo(i, questID)
-			local t = { }
-			t.label = name
-			t.texture = texture
-			t.count = count
-			t.font = "GameFontHighlightSmall"
-			tinsert(data.rewards, t)
-		end
-	end
+    if type(GetMaxPlayerLevel) == "function" then
+        local level = GetMaxPlayerLevel()
+        if type(level) == "number" and level > 0 then
+            return (UnitLevel("player") or 0) >= level
+        end
+    end
 
-	-- money
-	if ((not money) and (questID)) then
-		money = GetQuestLogRewardMoney(questID)
-	end
-	if (money) and (money > 0) then
-		local t = {}
-		t.label = GetMoneyString(money)
-		t.texture = "Interface\\Icons\\inv_misc_coin_01"
-		t.count = 0
-		t.font = "GameFontHighlight"
-		tinsert(data.rewards, t)
-	end
-
-	-- try to play it
-	if (#data.rewards > 0) then
-		tinsert(rewardQueue, data)
-		QuestKing:AnimateReward()
-	elseif (questID) then
-		C_Timer.After(10, function ()
-			QuestKing:ClearDummyTask(questID)
-			QuestKing:UpdateTracker()
-		end)
-	end
+    return false
 end
 
-function QuestKing:AnimateReward (block)
-	local rewardsFrame = QuestKing_RewardsFrame
+local function GetQuestRewardXPCompat(questID)
+    if questID and type(GetQuestLogRewardXP) == "function" then
+        return GetQuestLogRewardXP(questID) or 0
+    end
 
-	if (rewardsFrame.Anim:IsPlaying()) then
-		return
-	end
-
-	if (#rewardQueue == 0) then
-		rewardsFrame:Hide()
-		return
-	end
-
-	local data = tremove(rewardQueue, 1)
-	animatingData = data
-
-	local button = data.button
-	if ((not button) or (not button:IsVisible())) then
-		button = QuestKing.Tracker
-		data.button = button
-	end
-
-	-- rewardsFrame:SetParent(button)
-	rewardsFrame:ClearAllPoints()
-	-- rewardsFrame:SetPoint("TOPRIGHT", button, "TOPLEFT", 10, -4)
-	local scale = QuestKing.Tracker:GetScale()
-
-	if (opt.rewardAnchorSide == "right") then
-		rewardsFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", button:GetRight() * scale - 10, button:GetTop() * scale + 0)
-	else
-		rewardsFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", button:GetLeft() * scale + 10, button:GetTop() * scale + 0)
-	end
-	rewardsFrame:Show()
-
-	local numRewards = #data.rewards
-	local contentsHeight = 12 + numRewards * 36
-
-	rewardsFrame.Anim.RewardsBottomAnim:SetOffset(0, -contentsHeight)
-	rewardsFrame.Anim.RewardsShadowAnim:SetToScale(0.8, contentsHeight / 16)
-	rewardsFrame.Anim:Play()
-
-	PlaySound(SOUNDKIT.UI_BONUS_EVENT_SYSTEM_VIGNETTES) --UI_BonusEventSystemVignettes
-
-	-- configure reward frames
-	for i = 1, numRewards do
-		local rewardItem = rewardsFrame.Rewards[i]
-		if (not rewardItem) then
-			rewardItem = CreateFrame("FRAME", nil, rewardsFrame, "QuestKing_RewardTemplate")
-			rewardItem:SetPoint("TOPLEFT", rewardsFrame.Rewards[i-1], "BOTTOMLEFT", 0, -4)
-		end
-
-		local rewardData = data.rewards[i]
-		if (rewardData.count > 1) then
-			rewardItem.Count:Show()
-			rewardItem.Count:SetText(rewardData.count)
-		else
-			rewardItem.Count:Hide()
-		end
-
-		rewardItem.Label:SetFontObject(rewardData.font)
-		rewardItem.Label:SetText(rewardData.label)
-		rewardItem.ItemIcon:SetTexture(rewardData.texture)
-		rewardItem:Show()
-
-		if (rewardItem.Anim:IsPlaying()) then
-			rewardItem.Anim:Stop()
-		end
-
-		rewardItem.Anim:Play()
-	end
-
-	-- hide unused reward items
-	for i = numRewards + 1, #rewardsFrame.Rewards do
-		rewardsFrame.Rewards[i]:Hide()
-	end
+    return 0
 end
 
-function QuestKing_OnAnimateRewardDone ()
-	local completedData = animatingData
-	if (completedData.questID) then
-		local questID = completedData.questID
-		C_Timer.After(3, function ()
-			QuestKing:ClearDummyTask(questID)
-			QuestKing:UpdateTracker()
-		end)
-	end
+local function GetQuestRewardMoneyCompat(questID)
+    if questID and type(GetQuestLogRewardMoney) == "function" then
+        return GetQuestLogRewardMoney(questID) or 0
+    end
 
-	animatingData = nil
-	QuestKing:AnimateReward()
+    return 0
 end
 
--- bonus step (scenario reward [has questid])
+local function GetQuestRewardCurrenciesCompat(questID)
+    if not questID then
+        return {}
+    end
+
+    if C_QuestLog and type(C_QuestLog.GetQuestRewardCurrencies) == "function" then
+        local rewards = C_QuestLog.GetQuestRewardCurrencies(questID)
+        if type(rewards) == "table" then
+            return rewards
+        end
+    end
+
+    local rewards = {}
+
+    if type(GetNumQuestLogRewardCurrencies) == "function" and type(GetQuestLogRewardCurrencyInfo) == "function" then
+        local numCurrencies = GetNumQuestLogRewardCurrencies(questID) or 0
+        for index = 1, numCurrencies do
+            local name, texture, count = GetQuestLogRewardCurrencyInfo(index, questID)
+            rewards[#rewards + 1] = {
+                name = name,
+                texture = texture,
+                totalRewardAmount = count or 0,
+            }
+        end
+    end
+
+    return rewards
+end
+
+local function GetQuestRewardItemsCompat(questID)
+    local rewards = {}
+
+    if not questID then
+        return rewards
+    end
+
+    if type(GetNumQuestLogRewards) == "function" and type(GetQuestLogRewardInfo) == "function" then
+        local numItems = GetNumQuestLogRewards(questID) or 0
+        for index = 1, numItems do
+            local name, texture, count = GetQuestLogRewardInfo(index, questID)
+            rewards[#rewards + 1] = {
+                name = name,
+                texture = texture,
+                count = count or 0,
+            }
+        end
+    end
+
+    return rewards
+end
+
+local function QueueDummyTaskCleanup(questID, delay)
+    if not questID then
+        return
+    end
+
+    local function Cleanup()
+        QuestKing:ClearDummyTask(questID)
+        QuestKing:UpdateTracker()
+    end
+
+    if C_Timer and type(C_Timer.After) == "function" then
+        C_Timer.After(delay or 0, Cleanup)
+    else
+        Cleanup()
+    end
+end
+
+local function PlayRewardSound()
+    if not PlaySound then
+        return
+    end
+
+    PlaySound(REWARD_SOUND_KIT)
+end
+
+local function GetRewardsFrame()
+    return QuestKing_RewardsFrame
+end
+
+local function EnsureRewardFramePool(rewardsFrame)
+    if rewardsFrame.rewardFrames then
+        return rewardsFrame.rewardFrames
+    end
+
+    rewardsFrame.rewardFrames = {}
+
+    if rewardsFrame.Rewards and rewardsFrame.Rewards[1] then
+        rewardsFrame.rewardFrames[1] = rewardsFrame.Rewards[1]
+    end
+
+    return rewardsFrame.rewardFrames
+end
+
+local function AcquireRewardItemFrame(rewardsFrame, index)
+    local frames = EnsureRewardFramePool(rewardsFrame)
+    local rewardItem = frames[index]
+
+    if rewardItem then
+        return rewardItem
+    end
+
+    rewardItem = CreateFrame("Frame", nil, rewardsFrame, "QuestKing_RewardTemplate")
+    frames[index] = rewardItem
+
+    if index == 1 then
+        rewardItem:SetPoint("TOPLEFT", rewardsFrame.RewardsTop, "BOTTOMLEFT", 25, 0)
+    else
+        rewardItem:SetPoint("TOPLEFT", frames[index - 1], "BOTTOMLEFT", 0, -4)
+    end
+
+    return rewardItem
+end
+
+local function HideUnusedRewardFrames(rewardsFrame, firstUnusedIndex)
+    local frames = EnsureRewardFramePool(rewardsFrame)
+    for index = firstUnusedIndex, #frames do
+        local frame = frames[index]
+        if frame then
+            if frame.Anim and frame.Anim:IsPlaying() then
+                frame.Anim:Stop()
+            end
+            frame:Hide()
+        end
+    end
+end
+
+local function SetAnimationShadowScale(rewardsFrame, contentsHeight)
+    local scaleY = contentsHeight / 16
+    if rewardsFrame.Anim and rewardsFrame.Anim.RewardsShadowAnim then
+        local anim = rewardsFrame.Anim.RewardsShadowAnim
+        if anim.SetScaleTo then
+            anim:SetScaleTo(0.8, scaleY)
+        elseif anim.SetToScale then
+            anim:SetToScale(0.8, scaleY)
+        end
+    end
+end
+
+local function ResolveAnchorButton(button)
+    if button and button.IsVisible and button:IsVisible() then
+        return button
+    end
+
+    return QuestKing.Tracker
+end
+
+local function PositionRewardsFrame(rewardsFrame, button)
+    local anchorButton = ResolveAnchorButton(button)
+    local tracker = QuestKing.Tracker
+    local scale = (tracker and tracker.GetScale and tracker:GetScale()) or 1
+
+    rewardsFrame:ClearAllPoints()
+
+    local right = anchorButton and anchorButton.GetRight and anchorButton:GetRight()
+    local left = anchorButton and anchorButton.GetLeft and anchorButton:GetLeft()
+    local top = anchorButton and anchorButton.GetTop and anchorButton:GetTop()
+
+    if not top then
+        rewardsFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        return
+    end
+
+    if opt.rewardAnchorSide == "right" and right then
+        rewardsFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", right * scale - 10, top * scale)
+    elseif left then
+        rewardsFrame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", left * scale + 10, top * scale)
+    else
+        rewardsFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    end
+end
+
+function QuestKing:AddReward(button, questID, xp, money)
+    local data = {
+        button = button,
+        questID = questID,
+        rewards = {},
+    }
+
+    if xp == nil and questID then
+        xp = GetQuestRewardXPCompat(questID)
+    end
+
+    if type(xp) == "number" and xp > 0 and not GetPlayerMaxLevelSafe() then
+        data.rewards[#data.rewards + 1] = {
+            label = xp,
+            texture = "Interface\\Icons\\XP_Icon",
+            count = 0,
+            font = "NumberFontNormal",
+        }
+    end
+
+    if questID then
+        local currencies = GetQuestRewardCurrenciesCompat(questID)
+        for index = 1, #currencies do
+            local reward = currencies[index]
+            if reward and reward.texture and reward.name then
+                data.rewards[#data.rewards + 1] = {
+                    label = reward.name,
+                    texture = reward.texture,
+                    count = reward.totalRewardAmount or reward.baseRewardAmount or reward.bonusRewardAmount or 0,
+                    font = "GameFontHighlightSmall",
+                }
+            end
+        end
+
+        local items = GetQuestRewardItemsCompat(questID)
+        for index = 1, #items do
+            local reward = items[index]
+            if reward and reward.texture and reward.name then
+                data.rewards[#data.rewards + 1] = {
+                    label = reward.name,
+                    texture = reward.texture,
+                    count = reward.count or 0,
+                    font = "GameFontHighlightSmall",
+                }
+            end
+        end
+    end
+
+    if money == nil and questID then
+        money = GetQuestRewardMoneyCompat(questID)
+    end
+
+    if type(money) == "number" and money > 0 then
+        data.rewards[#data.rewards + 1] = {
+            label = GetMoneyString(money),
+            texture = "Interface\\Icons\\inv_misc_coin_01",
+            count = 0,
+            font = "GameFontHighlight",
+        }
+    end
+
+    if #data.rewards > 0 then
+        tinsert(rewardQueue, data)
+        QuestKing:AnimateReward()
+    elseif questID then
+        QueueDummyTaskCleanup(questID, 10)
+    end
+end
+
+function QuestKing:AnimateReward()
+    local rewardsFrame = GetRewardsFrame()
+    if not rewardsFrame then
+        return
+    end
+
+    if rewardsFrame.Anim and rewardsFrame.Anim:IsPlaying() then
+        return
+    end
+
+    if #rewardQueue == 0 then
+        rewardsFrame:Hide()
+        return
+    end
+
+    local data = tremove(rewardQueue, 1)
+    animatingData = data
+
+    PositionRewardsFrame(rewardsFrame, data.button)
+    rewardsFrame:Show()
+
+    local numRewards = #data.rewards
+    local contentsHeight = 12 + numRewards * 36
+
+    if rewardsFrame.Anim and rewardsFrame.Anim.RewardsBottomAnim then
+        rewardsFrame.Anim.RewardsBottomAnim:SetOffset(0, -contentsHeight)
+    end
+    SetAnimationShadowScale(rewardsFrame, contentsHeight)
+
+    for index = 1, numRewards do
+        local rewardItem = AcquireRewardItemFrame(rewardsFrame, index)
+        local rewardData = data.rewards[index]
+        local count = rewardData.count or 0
+
+        if count > 1 then
+            rewardItem.Count:Show()
+            rewardItem.Count:SetText(count)
+        else
+            rewardItem.Count:Hide()
+            rewardItem.Count:SetText("")
+        end
+
+        rewardItem.Label:SetFontObject(rewardData.font)
+        rewardItem.Label:SetText(rewardData.label or "")
+        rewardItem.ItemIcon:SetTexture(rewardData.texture)
+        rewardItem:Show()
+
+        if rewardItem.Anim and rewardItem.Anim:IsPlaying() then
+            rewardItem.Anim:Stop()
+        end
+        if rewardItem.Anim then
+            rewardItem.Anim:Play()
+        end
+    end
+
+    HideUnusedRewardFrames(rewardsFrame, numRewards + 1)
+
+    if rewardsFrame.Anim then
+        rewardsFrame.Anim:Play()
+    end
+
+    PlayRewardSound()
+end
+
+function QuestKing_OnAnimateRewardDone()
+    local completedData = animatingData
+    if completedData and completedData.questID then
+        QueueDummyTaskCleanup(completedData.questID, 3)
+    end
+
+    animatingData = nil
+    QuestKing:AnimateReward()
+end

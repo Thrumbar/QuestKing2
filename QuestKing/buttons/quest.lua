@@ -1,461 +1,1042 @@
+--[[
+QuestKing - quest.lua
+Validated quest tracker pass for:
+- normal quests
+- campaign quests
+- watched world quests
+- special assignments (capstone world quests)
+- prey quests
+- legacy/retail compatible fallbacks where possible
+
+Notes:
+- Task / bonus-objective ambient content is still handled by bonusobjective.lua.
+- This file owns the normal quest-log/watch-list based tracker rendering.
+- We deliberately classify using direct API predicates first, then safe tag fallbacks.
+--]]
+
 local addonName, QuestKing = ...
 
--- options
+local CQL = C_QuestLog
+local CTQ = C_TaskQuest
+local WatchButton = QuestKing.WatchButton
 local opt = QuestKing.options
 local opt_colors = opt.colors
-local opt_itemAnchorSide = opt.itemAnchorSide
 local opt_showCompletedObjectives = opt.showCompletedObjectives
 
--- import
-local WatchButton = QuestKing.WatchButton
-local getObjectiveColor = QuestKing.GetObjectiveColor
-local getQuestTaggedTitle = QuestKing.GetQuestTaggedTitle
-local matchObjective = QuestKing.MatchObjective
-local matchObjectiveRep = QuestKing.MatchObjectiveRep
-
-local pairs = pairs
 local format = string.format
-local GetQuestLogTitle = GetQuestLogTitle
-local GetNumQuestLogEntries = GetNumQuestLogEntries
-local GetSuperTrackedQuestID = GetSuperTrackedQuestID
-local GetNumQuestLeaderBoards = GetNumQuestLeaderBoards
-local GetQuestLogLeaderBoard = GetQuestLogLeaderBoard
-local GetQuestLogRequiredMoney = GetQuestLogRequiredMoney
-local GetQuestWatchInfo = GetQuestWatchInfo
-local GetQuestWatchIndex = GetQuestWatchIndex
-local GetQuestLogIsAutoComplete = GetQuestLogIsAutoComplete
-local GetQuestDifficultyColor = GetQuestDifficultyColor
-local GetQuestLogSpecialItemInfo = GetQuestLogSpecialItemInfo
+local match = string.match
+local sort = table.sort
+local tonumber = tonumber
+local wipe = wipe
 
--- local functions
-local buildQuestSortTable
-local setButtonToQuest
+local UNKNOWN = UNKNOWN or "Unknown"
 
--- local variables
-local headerList = {}
-local questSortTable = {}
+local QUEST_KIND = {
+    NORMAL = "normal",
+    CAMPAIGN = "campaign",
+    TASK = "task",
+    WORLD_QUEST = "world_quest",
+    SPECIAL_ASSIGNMENT = "special_assignment",
+    PREY = "prey",
+}
 
-local prev_GetNumQuestLogEntries = 0
-local prev_GetNumQuestWatches = 0
+QuestKing.QUEST_KIND = QUEST_KIND
+
+local QUEST_TAG_CAPSTONE_WORLD_QUEST = 286
+
+-- ============================================================================
+-- Basic compat helpers
+-- ============================================================================
+
+local function QK_GetInfo(index)
+    return CQL and CQL.GetInfo and CQL.GetInfo(index) or nil
+end
+
+local function QK_GetQuestLogIndexByID(questID)
+    if not questID then
+        return nil
+    end
+
+    if CQL and CQL.GetLogIndexForQuestID then
+        local index = CQL.GetLogIndexForQuestID(questID)
+        if index and index > 0 then
+            return index
+        end
+    end
+
+    if GetQuestLogIndexByID then
+        local index = GetQuestLogIndexByID(questID)
+        if index and index > 0 then
+            return index
+        end
+    end
+
+    return nil
+end
+
+local function QK_IsWatched(questID)
+    if not questID then
+        return false
+    end
+
+    if CQL and CQL.IsQuestWatched then
+        return CQL.IsQuestWatched(questID) and true or false
+    end
+
+    local questIndex = QK_GetQuestLogIndexByID(questID)
+    if questIndex and IsQuestWatched then
+        return IsQuestWatched(questIndex) and true or false
+    end
+
+    return false
+end
+
+local function QK_AddWatch(questID)
+    if not questID then
+        return
+    end
+
+    if CQL and CQL.AddQuestWatch then
+        if Enum and Enum.QuestWatchType and Enum.QuestWatchType.Manual ~= nil then
+            CQL.AddQuestWatch(questID, Enum.QuestWatchType.Manual)
+        else
+            CQL.AddQuestWatch(questID)
+        end
+        return
+    end
+
+    local questIndex = QK_GetQuestLogIndexByID(questID)
+    if questIndex and AddQuestWatch then
+        AddQuestWatch(questIndex)
+    end
+end
+
+local function QK_RemoveWatch(questID)
+    if not questID then
+        return
+    end
+
+    if CQL and CQL.RemoveQuestWatch then
+        CQL.RemoveQuestWatch(questID)
+        return
+    end
+
+    local questIndex = QK_GetQuestLogIndexByID(questID)
+    if questIndex and RemoveQuestWatch then
+        RemoveQuestWatch(questIndex)
+    end
+end
+
+local function QK_IsComplete(questID)
+    if not questID then
+        return false
+    end
+
+    if CQL and CQL.IsComplete then
+        return CQL.IsComplete(questID) and true or false
+    end
+
+    local questIndex = QK_GetQuestLogIndexByID(questID)
+    if questIndex and GetQuestLogIsComplete then
+        return GetQuestLogIsComplete(questIndex) and true or false
+    end
+
+    return false
+end
+
+local function QK_GetDifficultyLevel(info)
+    if not info then
+        return nil
+    end
+
+    if CQL and CQL.GetQuestDifficultyLevel and info.questID then
+        local lvl = CQL.GetQuestDifficultyLevel(info.questID)
+        if type(lvl) == "number" then
+            return lvl
+        end
+    end
+
+    if type(info.level) == "number" then
+        return info.level
+    end
+
+    return nil
+end
+
+local function QK_GetDifficultyColor(level)
+    if level and GetQuestDifficultyColor then
+        return GetQuestDifficultyColor(level)
+    end
+
+    return { r = 1, g = 0.82, b = 0 }
+end
+
+local function QK_GetTagInfo(questID)
+    if CQL and CQL.GetQuestTagInfo and questID then
+        return CQL.GetQuestTagInfo(questID)
+    end
+
+    if GetQuestTagInfo and questID then
+        local tagID, tagName, worldQuestType, quality, isElite, tradeskillLineID, displayExpiration = GetQuestTagInfo(questID)
+        if tagID or tagName or worldQuestType or quality or isElite then
+            return {
+                tagID = tagID,
+                tagName = tagName,
+                worldQuestType = worldQuestType,
+                quality = quality,
+                isElite = isElite,
+                tradeskillLineID = tradeskillLineID,
+                displayExpiration = displayExpiration,
+            }
+        end
+    end
+
+    return nil
+end
+
+local function QK_ObjectiveTextAlreadyHasProgress(text)
+    if type(text) ~= "string" or text == "" then
+        return false
+    end
+
+    if match(text, "%d+%s*/%s*%d+") then
+        return true
+    end
+
+    if match(text, "%(%d+%s*/%s*%d+%)") then
+        return true
+    end
+
+    return false
+end
+
+local function QK_GetQuestObjectives(questID)
+    local out = {}
+
+    if CQL and CQL.GetQuestObjectives and questID then
+        local objectives = CQL.GetQuestObjectives(questID)
+        if type(objectives) == "table" then
+            for i = 1, #objectives do
+                local objective = objectives[i]
+                if objective then
+                    out[#out + 1] = {
+                        text = objective.text or "",
+                        type = objective.type or objective.objectiveType,
+                        finished = (objective.finished or objective.completed) and true or false,
+                        numFulfilled = objective.numFulfilled,
+                        numRequired = objective.numRequired,
+                    }
+                end
+            end
+
+            if #out > 0 then
+                return out
+            end
+        end
+    end
+
+    local questLogIndex = QK_GetQuestLogIndexByID(questID)
+    if questLogIndex and GetNumQuestLeaderBoards and GetQuestLogLeaderBoard then
+        local numObjectives = GetNumQuestLeaderBoards(questLogIndex) or 0
+        for i = 1, numObjectives do
+            local text, objectiveType, finished = GetQuestLogLeaderBoard(i, questLogIndex, true)
+            if text then
+                out[#out + 1] = {
+                    text = text or "",
+                    type = objectiveType,
+                    finished = finished and true or false,
+                }
+            end
+        end
+    elseif questID and GetNumQuestLeaderBoards and GetQuestObjectiveInfo then
+        local numObjectives = GetNumQuestLeaderBoards(questLogIndex or 0) or 0
+        for i = 1, numObjectives do
+            local text, objectiveType, finished = GetQuestObjectiveInfo(questID, i, false)
+            out[#out + 1] = {
+                text = text or "",
+                type = objectiveType,
+                finished = finished and true or false,
+            }
+        end
+    end
+
+    return out
+end
+
+local function QK_GetRequiredMoney(questID)
+    if CQL and CQL.GetRequiredMoney and questID then
+        return CQL.GetRequiredMoney(questID) or 0
+    end
+    return 0
+end
+
+local function QK_GetQuestPercent(questID)
+    if CQL and CQL.GetQuestProgressBarPercent and questID then
+        local p = CQL.GetQuestProgressBarPercent(questID)
+        if type(p) == "number" and p >= 0 and p <= 100 then
+            return p
+        end
+    end
+
+    if GetQuestProgressBarPercent and questID then
+        local p = GetQuestProgressBarPercent(questID)
+        if type(p) == "number" and p >= 0 and p <= 100 then
+            return p
+        end
+    end
+
+    return nil
+end
+
+local function QK_GetActivePreyQuest()
+    if CQL and CQL.GetActivePreyQuest then
+        return CQL.GetActivePreyQuest()
+    end
+    return nil
+end
+
+local function QK_IsCampaignQuest(questID)
+    if not questID then
+        return false
+    end
+
+    if C_CampaignInfo and C_CampaignInfo.IsCampaignQuest then
+        return C_CampaignInfo.IsCampaignQuest(questID) and true or false
+    end
+
+    return false
+end
+
+local function QK_IsTaskQuest(questID)
+    if not questID then
+        return false
+    end
+
+    if CQL and CQL.IsQuestTask then
+        return CQL.IsQuestTask(questID) and true or false
+    end
+
+    if CTQ and CTQ.IsActive then
+        return CTQ.IsActive(questID) and true or false
+    end
+
+    if IsQuestTask then
+        return IsQuestTask(questID) and true or false
+    end
+
+    return false
+end
+
+local function QK_IsWorldQuest(questID)
+    if not questID then
+        return false
+    end
+
+    if CQL and CQL.IsWorldQuest then
+        return CQL.IsWorldQuest(questID) and true or false
+    end
+
+    local tagInfo = QK_GetTagInfo(questID)
+    if not tagInfo then
+        return false
+    end
+
+    if tagInfo.worldQuestType ~= nil then
+        return true
+    end
+
+    local tagID = tagInfo.tagID
+    if tagID == 109 or tagID == 110 or tagID == 111 or tagID == 112 or tagID == 113
+        or tagID == 114 or tagID == 115 or tagID == 116 or tagID == 117 or tagID == 118
+        or tagID == 119 or tagID == 120 or tagID == 121 or tagID == 270 or tagID == 278
+        or tagID == QUEST_TAG_CAPSTONE_WORLD_QUEST then
+        return true
+    end
+
+    return false
+end
+
+local function QK_IsSpecialAssignment(questID)
+    local tagInfo = QK_GetTagInfo(questID)
+    return tagInfo and tagInfo.tagID == QUEST_TAG_CAPSTONE_WORLD_QUEST or false
+end
+
+local function QK_IsPreyQuest(questID)
+    if not questID then
+        return false
+    end
+
+    return QK_GetActivePreyQuest() == questID
+end
+
+function QuestKing:GetQuestKind(questID, info)
+    if not questID then
+        return QUEST_KIND.NORMAL
+    end
+
+    if QK_IsPreyQuest(questID) then
+        return QUEST_KIND.PREY
+    end
+
+    if QK_IsSpecialAssignment(questID) then
+        return QUEST_KIND.SPECIAL_ASSIGNMENT
+    end
+
+    if QK_IsWorldQuest(questID) then
+        return QUEST_KIND.WORLD_QUEST
+    end
+
+    if QK_IsCampaignQuest(questID) then
+        return QUEST_KIND.CAMPAIGN
+    end
+
+    if QK_IsTaskQuest(questID) then
+        return QUEST_KIND.TASK
+    end
+
+    return QUEST_KIND.NORMAL
+end
+
+local function GetKindHeader(kind)
+    if kind == QUEST_KIND.CAMPAIGN then
+        return CAMPAIGN or "Campaign"
+    elseif kind == QUEST_KIND.WORLD_QUEST then
+        return TRACKER_HEADER_WORLD_QUESTS or "World Quests"
+    elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
+        return "Special Assignments"
+    elseif kind == QUEST_KIND.PREY then
+        return "Prey"
+    elseif kind == QUEST_KIND.TASK then
+        return TRACKER_HEADER_OBJECTIVE or "Tasks"
+    end
+
+    return TRACKER_HEADER_QUESTS or "Quests"
+end
+
+local function GetKindOrder(kind)
+    if kind == QUEST_KIND.CAMPAIGN then
+        return 10
+    elseif kind == QUEST_KIND.PREY then
+        return 20
+    elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
+        return 30
+    elseif kind == QUEST_KIND.WORLD_QUEST then
+        return 40
+    elseif kind == QUEST_KIND.TASK then
+        return 50
+    end
+
+    return 60
+end
+
+local function GetKindPrefix(kind)
+    if kind == QUEST_KIND.CAMPAIGN then
+        return "[Campaign]"
+    elseif kind == QUEST_KIND.WORLD_QUEST then
+        return "[World]"
+    elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
+        return "[Special]"
+    elseif kind == QUEST_KIND.PREY then
+        return "[Prey]"
+    elseif kind == QUEST_KIND.TASK then
+        return "[Task]"
+    end
+
+    return nil
+end
+
+-- ============================================================================
+-- Quest title / objective text
+-- ============================================================================
+
+function QuestKing:GetQuestTagBracket(questID)
+    local info = QK_GetTagInfo(questID)
+    if not info then
+        return nil
+    end
+
+    if info.tagName and info.tagName ~= "" then
+        return ("[%s]"):format(info.tagName)
+    end
+
+    if info.isElite then
+        return "[Elite]"
+    end
+
+    return nil
+end
+
+function QuestKing:GetQuestObjectivesText(questID)
+    local out = {}
+    local objectives = QK_GetQuestObjectives(questID)
+    local hasProgressBarObjective = false
+
+    for index = 1, #objectives do
+        local objective = objectives[index]
+        if objective then
+            local text = objective.text or ""
+            local objectiveType = objective.type or objective.objectiveType
+            local numFulfilled = objective.numFulfilled
+            local numRequired = objective.numRequired
+
+            if objectiveType == "progressbar" then
+                hasProgressBarObjective = true
+            elseif type(numRequired) == "number"
+                and numRequired > 0
+                and text ~= ""
+                and not QK_ObjectiveTextAlreadyHasProgress(text) then
+                text = ("%s (%d/%d)"):format(text, numFulfilled or 0, numRequired)
+            end
+
+            out[#out + 1] = {
+                index = index,
+                text = text,
+                type = objectiveType,
+                finished = (objective.finished or objective.completed) and true or false,
+                numFulfilled = numFulfilled,
+                numRequired = numRequired,
+            }
+        end
+    end
+
+    local reqMoney = QK_GetRequiredMoney(questID)
+    if reqMoney and reqMoney > 0 then
+        local have = GetMoney and GetMoney() or 0
+        local done = have >= reqMoney
+        local moneyText = GetMoneyString and GetMoneyString(reqMoney) or tostring(reqMoney)
+
+        out[#out + 1] = {
+            index = #out + 1,
+            text = moneyText,
+            type = "money",
+            finished = done,
+            numFulfilled = have,
+            numRequired = reqMoney,
+        }
+
+        QuestKing.watchMoney = true
+    end
+
+    return out, hasProgressBarObjective
+end
+
+-- ============================================================================
+-- Button rendering helpers
+-- ============================================================================
+
+local LINE_LEFT_PADDING = 16
+local LINE_RIGHT_PADDING = 8
+local LEVEL_GAP_X = 6
+local COMPLETED_ALPHA = 0.65
+local FINISHED_COLOR = {
+    r = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[1]) or 0.60,
+    g = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[2]) or 1.00,
+    b = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[3]) or 0.60,
+}
+local UNFINISHED_COLOR = { r = 0.95, g = 0.95, b = 0.95 }
+local TITLE_COLOR = { r = 1.00, g = 0.82, b = 0.00 }
+local TITLE_COMPLETE_COLOR = {
+    r = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[1]) or 0.20,
+    g = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[2]) or 1.00,
+    b = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[3]) or 0.20,
+}
+
+local function ShouldShowQuestObjective(row, isQuestComplete)
+    if not row then
+        return false
+    end
+
+    if not row.finished then
+        return true
+    end
+
+    if opt_showCompletedObjectives == "always" then
+        return true
+    end
+
+    if isQuestComplete then
+        return true
+    end
+
+    return opt_showCompletedObjectives and true or false
+end
+
+local function GetQuestCompletionLineText()
+    return QUEST_WATCH_QUEST_READY or QUEST_WATCH_QUEST_COMPLETE or COMPLETE or "Complete"
+end
+
+local function FreeLineBars(line)
+    if not line then
+        return
+    end
+
+    if line.timerBar then
+        line.timerBar:Free()
+    end
+
+    if line.progressBar then
+        line.progressBar:Free()
+    end
+end
+
+local function AddQuestObjectiveLine(button, row, isQuestComplete, isNewQuest)
+    if not button or not row then
+        return nil
+    end
+
+    local color = row.finished and FINISHED_COLOR or UNFINISHED_COLOR
+    local line = button:AddLine(("  %s"):format(row.text or ""), nil, color.r, color.g, color.b)
+    FreeLineBars(line)
+
+    line:SetAlpha(row.finished and COMPLETED_ALPHA or 1)
+    if line.right then
+        line.right:SetAlpha(row.finished and COMPLETED_ALPHA or 1)
+    end
+
+    if not row.finished and not isNewQuest and type(row.numFulfilled) == "number" then
+        local lastQuant = tonumber(line._lastQuant)
+        if lastQuant and row.numFulfilled > lastQuant and line.Flash then
+            line:Flash()
+        end
+    end
+
+    line._lastQuant = row.numFulfilled
+    return line
+end
+
+local function AddQuestProgressBar(button, percent)
+    if not button or type(percent) ~= "number" then
+        return nil
+    end
+
+    local progressBar = button:AddProgressBar()
+    local line = progressBar and progressBar.baseLine or nil
+    if line and line.timerBar then
+        line.timerBar:Free()
+    end
+
+    if progressBar.SetPercent then
+        progressBar:SetPercent(percent)
+    elseif progressBar.SetValue then
+        progressBar:SetValue(percent)
+    end
+
+    if progressBar.SetStatusBarColor then
+        progressBar:SetStatusBarColor(0.20, 0.65, 1.00)
+    end
+
+    return progressBar
+end
+
+-- ============================================================================
+-- Mouse / tooltip behavior for quest buttons
+-- ============================================================================
 
 local mouseHandlerQuest = {}
 
---
+function mouseHandlerQuest:TitleButtonOnClick(mouse)
+    local button = self.parent
+    local questID = button.questID
+    local questLogIndex = button.questLogIndex
 
-function buildQuestSortTable ()
-	for k,v in pairs(questSortTable) do
-		wipe(questSortTable[k])
-	end
-	wipe(headerList)
+    if not questID then
+        return
+    end
 
-	local numEntries = GetNumQuestLogEntries()
-	local currentHeader = "(Unknown 0)"
+    if IsModifiedClick and IsModifiedClick("CHATLINK") and ChatEdit_GetActiveWindow then
+        local link
+        if GetQuestLink and questLogIndex then
+            link = GetQuestLink(questLogIndex)
+        end
+        if link then
+            ChatEdit_InsertLink(link)
+            return
+        end
+    end
 
-	local numQuests = 0
-	for i = 1, numEntries do
-		local title, _, _, isHeader, isCollapsed, _, _, questID = GetQuestLogTitle(i)
-		if (not title) or (title == "") then
-			title = format("(Unknown %d)", i)
-		end
+    if mouse == "RightButton" then
+        if QuestKing.SetSuperTrackedQuestID then
+            local currentID = 0
+            if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
+                currentID = C_SuperTrack.GetSuperTrackedQuestID() or 0
+            elseif GetSuperTrackedQuestID then
+                currentID = GetSuperTrackedQuestID() or 0
+            end
 
-		if (isHeader) then
+            if currentID == questID then
+                QuestKing:SetSuperTrackedQuestID(0)
+            else
+                QuestKing:SetSuperTrackedQuestID(questID)
+            end
 
-			if not questSortTable[title] then
-				questSortTable[title] = {}
-			end
+            QuestKing:UpdateTracker()
+        end
+        return
+    end
 
-			if (title ~= currentHeader) then
-				-- new header found
-				-- note: quest "Safe Passage" in Frostfire Ridge is under a duplicate zone header
-				currentHeader = title
-				tinsert(headerList, title)
-			end
+    if QuestObjectiveTracker_OpenQuestMap and questLogIndex then
+        QuestObjectiveTracker_OpenQuestMap(nil, questLogIndex)
+        return
+    end
 
-		elseif (not isHeader) and (IsQuestWatched(i)) then
-			if (not questSortTable[currentHeader]) then
-				questSortTable[currentHeader] = {}
-			end
+    if QuestMapFrame_OpenToQuestDetails and questID then
+        QuestMapFrame_OpenToQuestDetails(questID)
+        return
+    end
 
-			tinsert(questSortTable[currentHeader], i)
-		end
-
-		if (not isHeader) then
-			numQuests = numQuests + 1
-		end
-	end
-
-	-- totalQuestCount = numQuests
+    if ToggleQuestLog and questLogIndex then
+        ToggleQuestLog()
+    end
 end
 
-function QuestKing:CheckQuestSortTable (forceBuild)
-	if (forceBuild) then
-		buildQuestSortTable()
-		prev_GetNumQuestLogEntries = GetNumQuestLogEntries()
-		prev_GetNumQuestWatches = GetNumQuestWatches()
-	else
-		local numEntries = GetNumQuestLogEntries()
-		local numWatches = GetNumQuestWatches()
+function mouseHandlerQuest:TitleButtonOnEnter()
+    local button = self.parent
+    local questLogIndex = button.questLogIndex
+    local questID = button.questID
 
-		if (numEntries ~= prev_GetNumQuestLogEntries) or (numWatches ~= prev_GetNumQuestWatches) then
-			buildQuestSortTable()
-			prev_GetNumQuestLogEntries = numEntries
-			prev_GetNumQuestWatches = numWatches
-		end
-	end
+    GameTooltip:SetOwner(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
+
+    if opt.tooltipScale then
+        if not GameTooltip.__QuestKingPreviousScale then
+            GameTooltip.__QuestKingPreviousScale = GameTooltip:GetScale()
+        end
+        GameTooltip:SetScale(opt.tooltipScale)
+    end
+
+    if questLogIndex and questLogIndex > 0 and QuestUtils_GetQuestName then
+        GameTooltip:SetText(QuestUtils_GetQuestName(questID) or button.title:GetText() or QUESTS_LABEL, 1, 0.82, 0)
+    else
+        GameTooltip:SetText(button.title:GetText() or QUESTS_LABEL, 1, 0.82, 0)
+    end
+
+    local kind = button.questKind
+    if kind == QUEST_KIND.CAMPAIGN then
+        GameTooltip:AddLine("Campaign quest", 0.8, 0.9, 1)
+    elseif kind == QUEST_KIND.WORLD_QUEST then
+        GameTooltip:AddLine("World quest", 0.8, 0.9, 1)
+    elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
+        GameTooltip:AddLine("Special Assignment", 0.8, 0.9, 1)
+    elseif kind == QUEST_KIND.PREY then
+        GameTooltip:AddLine("Prey quest", 0.8, 0.9, 1)
+    elseif kind == QUEST_KIND.TASK then
+        GameTooltip:AddLine("Task / objective quest", 0.8, 0.9, 1)
+    end
+
+    GameTooltip:Show()
 end
 
---
+-- ============================================================================
+-- Public rendering API
+-- ============================================================================
+
+function QuestKing:GetQuestDisplayData(questLogIndex)
+    local info = QK_GetInfo(questLogIndex)
+    if not info or info.isHeader then
+        return nil
+    end
+
+    local questID = info.questID
+    local kind = self:GetQuestKind(questID, info)
+    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID)
+    local percent = nil
+
+    if hasProgressBarObjective then
+        percent = QK_GetQuestPercent(questID)
+    end
+
+    return {
+        questID = questID,
+        kind = kind,
+        title = info.title or UNKNOWN,
+        level = QK_GetDifficultyLevel(info),
+        isComplete = QK_IsComplete(questID),
+        tagBracket = self:GetQuestTagBracket(questID),
+        objectives = objectives,
+        hasProgressBarObjective = hasProgressBarObjective,
+        percent = percent,
+    }
+end
+
+function QuestKing:SetButtonToQuest(button, questLogIndex)
+    if not button or not questLogIndex then
+        return
+    end
+
+    local data = self:GetQuestDisplayData(questLogIndex)
+    if not data then
+        return
+    end
+
+    button.currentLine = 0
+    button.mouseHandler = mouseHandlerQuest
+    button.questID = data.questID
+    button.questLogIndex = questLogIndex
+    button.questKind = data.kind
+
+    local kindPrefix = GetKindPrefix(data.kind)
+    local title = data.title
+    local displayTitle = title
+
+    if kindPrefix then
+        displayTitle = ("%s %s"):format(kindPrefix, title)
+    end
+
+    if data.tagBracket and data.kind == QUEST_KIND.NORMAL then
+        displayTitle = ("%s %s"):format(title, data.tagBracket)
+    end
+
+    if button.title then
+        if data.isComplete and button.title.SetFormattedTextIcon then
+            button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t %s", displayTitle)
+            button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
+        else
+            button.title:SetText(displayTitle)
+            button.title:SetTextColor(TITLE_COLOR.r, TITLE_COLOR.g, TITLE_COLOR.b)
+        end
+
+        button.title:ClearAllPoints()
+        button.title:SetPoint("TOPLEFT", button, "TOPLEFT", LINE_LEFT_PADDING, -4)
+        button.title:SetPoint("RIGHT", button, "RIGHT", -LINE_RIGHT_PADDING, 0)
+        button.title:SetJustifyH("LEFT")
+    end
+
+    if button.level then
+        local col = QK_GetDifficultyColor(data.level)
+        local lvlText = (data.level and data.level > 0) and ("[" .. tostring(data.level) .. "]") or ""
+        button.level:SetText(lvlText)
+        button.level:SetTextColor(col.r or 1, col.g or 0.82, col.b or 0)
+        button.level:ClearAllPoints()
+        button.level:SetPoint("TOPLEFT", button, "TOPLEFT", 4, -4)
+
+        if button.title and lvlText ~= "" then
+            button.title:ClearAllPoints()
+            button.title:SetPoint("TOPLEFT", button.level, "TOPRIGHT", LEVEL_GAP_X, 0)
+            button.title:SetPoint("RIGHT", button, "RIGHT", -LINE_RIGHT_PADDING, 0)
+        end
+    end
+
+    if button.completed then
+        button.completed:SetShown(data.isComplete)
+    end
+
+    local visibleObjectives = 0
+    local isNewQuest = button.fresh or (self.newlyAddedQuests and self.newlyAddedQuests[data.questID])
+
+    for i = 1, #data.objectives do
+        local row = data.objectives[i]
+        if ShouldShowQuestObjective(row, data.isComplete) then
+            if row.type ~= "progressbar" then
+                AddQuestObjectiveLine(button, row, data.isComplete, isNewQuest)
+            end
+            visibleObjectives = visibleObjectives + 1
+        end
+    end
+
+    if data.hasProgressBarObjective
+        and type(data.percent) == "number"
+        and (not data.isComplete or opt_showCompletedObjectives or opt_showCompletedObjectives == "always") then
+        AddQuestProgressBar(button, data.percent)
+        visibleObjectives = visibleObjectives + 1
+    end
+
+    if visibleObjectives == 0 and data.isComplete then
+        local line = button:AddLine(
+            ("  %s"):format(GetQuestCompletionLineText()),
+            nil,
+            FINISHED_COLOR.r,
+            FINISHED_COLOR.g,
+            FINISHED_COLOR.b
+        )
+        FreeLineBars(line)
+        line:SetAlpha(COMPLETED_ALPHA)
+        if line.right then
+            line.right:SetAlpha(COMPLETED_ALPHA)
+        end
+    end
+end
+
+-- ============================================================================
+-- Section / sort / tracker pass
+-- ============================================================================
+
+local function AddSectionHeader(headerText)
+    local header = WatchButton:GetKeyed("header", "quest_header_" .. tostring(headerText))
+    header.title:SetText(headerText)
+    header.title:SetTextColor(
+        opt_colors.SectionHeader[1],
+        opt_colors.SectionHeader[2],
+        opt_colors.SectionHeader[3]
+    )
+    header.titleButton:EnableMouse(false)
+    return header
+end
+
+local function GetQuestIDForWatchIndexCompat(watchIndex)
+    if CQL and CQL.GetQuestIDForQuestWatchIndex then
+        return CQL.GetQuestIDForQuestWatchIndex(watchIndex)
+    end
+
+    if GetQuestIndexForWatch and GetQuestLogTitle then
+        local questLogIndex = GetQuestIndexForWatch(watchIndex)
+        if questLogIndex then
+            local _, _, _, _, _, _, _, questID = GetQuestLogTitle(questLogIndex)
+            return questID
+        end
+    end
+
+    return nil
+end
+
+function QuestKing:BuildQuestSortTable()
+    self.questSortTable = self.questSortTable or {}
+    local questSortTable = self.questSortTable
+    wipe(questSortTable)
+
+    local seenQuestIDs = {}
+    local rows = {}
+
+    local numWatches = 0
+    if CQL and CQL.GetNumQuestWatches then
+        numWatches = CQL.GetNumQuestWatches() or 0
+    elseif GetNumQuestWatches then
+        numWatches = GetNumQuestWatches() or 0
+    end
+
+    for i = 1, numWatches do
+        local questID = GetQuestIDForWatchIndexCompat(i)
+        if questID and not seenQuestIDs[questID] then
+            local questLogIndex = QK_GetQuestLogIndexByID(questID)
+            local info = questLogIndex and QK_GetInfo(questLogIndex) or nil
+            if info and not info.isHeader and not info.isHidden then
+                seenQuestIDs[questID] = true
+                rows[#rows + 1] = {
+                    questID = questID,
+                    questLogIndex = questLogIndex,
+                    kind = self:GetQuestKind(questID, info),
+                    sortText = info.title or "",
+                }
+            end
+        end
+    end
+
+    local preyQuestID = QK_GetActivePreyQuest()
+    if preyQuestID and not seenQuestIDs[preyQuestID] then
+        local preyIndex = QK_GetQuestLogIndexByID(preyQuestID)
+        local preyInfo = preyIndex and QK_GetInfo(preyIndex) or nil
+        if preyInfo and not preyInfo.isHeader and not preyInfo.isHidden then
+            seenQuestIDs[preyQuestID] = true
+            rows[#rows + 1] = {
+                questID = preyQuestID,
+                questLogIndex = preyIndex,
+                kind = self:GetQuestKind(preyQuestID, preyInfo),
+                sortText = preyInfo.title or "",
+            }
+        end
+    end
+
+    sort(rows, function(a, b)
+        local ao = GetKindOrder(a.kind)
+        local bo = GetKindOrder(b.kind)
+        if ao ~= bo then
+            return ao < bo
+        end
+        return (a.sortText or "") < (b.sortText or "")
+    end)
+
+    for i = 1, #rows do
+        questSortTable[i] = rows[i]
+    end
+
+    return questSortTable
+end
+
+function QuestKing:ShouldSkipBonusTask(questID)
+    if not questID then
+        return false
+    end
+
+    local questLogIndex = QK_GetQuestLogIndexByID(questID)
+    if not questLogIndex then
+        return false
+    end
+
+    if not QK_IsWatched(questID) and not QK_IsPreyQuest(questID) then
+        return false
+    end
+
+    local info = QK_GetInfo(questLogIndex)
+    local kind = self:GetQuestKind(questID, info)
+
+    return kind == QUEST_KIND.TASK
+        or kind == QUEST_KIND.WORLD_QUEST
+        or kind == QUEST_KIND.SPECIAL_ASSIGNMENT
+        or kind == QUEST_KIND.PREY
+        or kind == QUEST_KIND.CAMPAIGN
+end
 
 function QuestKing:UpdateTrackerQuests()
-	local headerName, questIndex
-	for i = 1, #headerList do
-		headerName = headerList[i]
-		-- header
-		if #questSortTable[headerName] > 0 then
-			local button = WatchButton:GetKeyed("collapser", headerName)
-			button._headerName = headerName
+    local rows = self:BuildQuestSortTable()
+    if not rows or #rows == 0 then
+        return
+    end
 
-			--|TTexturePath:size1:size2:xoffset:yoffset:dimx:dimy:coordx1:coordx2:coordy1:coordy2:red:green:blue|t
-			if QuestKingDBPerChar.collapsedHeaders[headerName] then
-				button.title:SetTextIcon("|TInterface\\AddOns\\QuestKing\\textures\\UI-SortArrow_sm_right:8:8:0:-1:0:0:0:0:0:0:1:1:1|t "..headerName)
-				button.title:SetTextColor(opt_colors.QuestHeaderCollapsed[1], opt_colors.QuestHeaderCollapsed[2], opt_colors.QuestHeaderCollapsed[3])
-			else
-				button.title:SetTextIcon("|TInterface\\AddOns\\QuestKing\\textures\\UI-SortArrow_sm_down:8:8:0:-1:0:0:0:0:0:0:1:1:1|t "..headerName)
-				button.title:SetTextColor(opt_colors.QuestHeader[1], opt_colors.QuestHeader[2], opt_colors.QuestHeader[3])
-			end
-		end
+    local lastKind = nil
+    local currentHeader = nil
 
-		-- quests
+    for i = 1, #rows do
+        local row = rows[i]
+        if row and row.questLogIndex then
+            if row.kind ~= lastKind then
+                currentHeader = AddSectionHeader(GetKindHeader(row.kind))
+                lastKind = row.kind
+            end
 
-		if not QuestKingDBPerChar.collapsedHeaders[headerName] then
-			for j = 1, #questSortTable[headerName] do
-				questIndex = questSortTable[headerName][j]
-				local _,_,_,_,_,_,_, questID = GetQuestLogTitle(questIndex)
-				local button = WatchButton:GetKeyed("quest", questID)
-				setButtonToQuest(button, questIndex)
-			end
-		end
-	end
+            local button = WatchButton:GetKeyed("quest", row.questID)
+            button._previousHeader = currentHeader
+            self:SetButtonToQuest(button, row.questLogIndex)
 
+            if button.fresh and self.newlyAddedQuests and self.newlyAddedQuests[row.questID] then
+                if button.Pulse then
+                    button:Pulse(
+                        opt_colors.ObjectiveAlertGlow[1],
+                        opt_colors.ObjectiveAlertGlow[2],
+                        opt_colors.ObjectiveAlertGlow[3]
+                    )
+                end
+            end
+        end
+    end
+
+    self.newlyAddedQuests = {}
 end
 
-function setButtonToQuest (button, questIndex)
-	button.mouseHandler = mouseHandlerQuest
+-- ============================================================================
+-- Public watch controls
+-- ============================================================================
 
-	local questTitle, level, suggestedGroup, isHeader, isCollapsed, isComplete, frequency, questID, startEvent, displayQuestID, isOnMap, hasLocalPOI, isTask, isStory = GetQuestLogTitle(questIndex)
-
-	button.questIndex = questIndex
-	button.questID = questID
-
-	local collapseObjectives = QuestKingDBPerChar.collapsedQuests[questID]
-
-	-- set title
-	local taggedTitle = getQuestTaggedTitle(questIndex)
-
-	if (GetSuperTrackedQuestID() == questID) then
-		taggedTitle = taggedTitle .. " |TInterface\\Scenarios\\ScenarioIcon-Combat:10:10:-1:0|t"
-	end
-
-	if (isComplete == -1) then
-		button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-NotReady:0:0:1:0|t %s", taggedTitle)
-	else
-		button.title:SetTextIcon(taggedTitle)
-	end
-
-	-- add objectives
-	local numObj = GetNumQuestLeaderBoards(questIndex) or 0
-	local completedObj = 0
-	local displayedObj = 0
-
-	for i = 1, numObj do
-		local objectiveDesc, objectiveType, objectiveIsDone = GetQuestLogLeaderBoard(i, questIndex)
-
-		if (objectiveIsDone) then
-			completedObj = completedObj + 1
-		end
-
-		local displayObjective = true
-		if (collapseObjectives) then
-			-- hide for collapsed quest
-			displayObjective = false
-		elseif (isComplete == 1) and (opt_showCompletedObjectives ~= "always") then
-			-- hide for complete quest (unless show type is "always")
-			displayObjective = false
-		elseif (objectiveIsDone) and (opt_showCompletedObjectives == false) then
-			-- hide for completed objectives if showCompletedObjectives is false
-			displayObjective = false
-		elseif (objectiveDesc == nil) then
-			-- hide invalid objectives
-			displayObjective = false
-		end
-
-		-- types:
-		-- event, reputation, item, log(Direbrew's Dire Brew), monster, object?, spell(Frost Nova)
-		if (displayObjective) then
-			local quantCur, quantMax, quantName = matchObjective(objectiveDesc)
-
-			if (objectiveType == "reputation") then
-				quantCur, quantMax, quantName = matchObjectiveRep(objectiveDesc)
-
-				local r, g, b = getObjectiveColor(objectiveIsDone and 1 or 0)
-				local line
-				if (not quantName) then
-					line = button:AddLine(format("  %s", objectiveDesc), nil, r, g, b)
-				else
-					line = button:AddLine(format("  %s", quantName), format(": %s / %s", quantCur, quantMax), r, g, b)
-				end
-
-				objectiveIsDone = not not objectiveIsDone
-				if ((line._lastQuant == false) and (objectiveIsDone == true)) then
-					line:Flash()
-				end
-				line._lastQuant = objectiveIsDone
-
-				displayedObj = displayedObj + 1
-
-			elseif (not quantName) or (objectiveType == "spell") then
-				if ((displayObjective) or (not objectiveIsDone)) then
-					local r, g, b = getObjectiveColor(objectiveIsDone and 1 or 0)
-					local line = button:AddLine(format("  %s", objectiveDesc), nil, r, g, b)
-
-					---- FIXME: test this!
-					objectiveIsDone = not not objectiveIsDone
-					if ((line._lastQuant == false) and (objectiveIsDone == true)) then
-						line:Flash()
-					end
-					line._lastQuant = objectiveIsDone
-
-					displayedObj = displayedObj + 1
-				end
-
-			else
-				if ((displayObjective) or (not objectiveIsDone)) then
-					local r, g, b = getObjectiveColor(quantCur / quantMax)
-					local line = button:AddLine(format("  %s", quantName), format(": %s/%s", quantCur, quantMax), r, g, b)
-
-					local lastQuant = line._lastQuant
-					if ((lastQuant) and (quantCur > lastQuant)) then
-						line:Flash()
-					end
-					line._lastQuant = quantCur
-
-					displayedObj = displayedObj + 1
-				end
-			end
-		end
-
-	end
-
-	-- money
-	local requiredMoney = GetQuestLogRequiredMoney(questIndex)
-	if (requiredMoney > 0) then
-		QuestKing.watchMoney = true
-		local playerMoney = GetMoney()
-
-		-- not sure about this, but the default watch frame does it
-		-- (fake completion for gold-requiring connectors when gold req is met and no event begins)
-		if (numObj == 0 and playerMoney >= requiredMoney and not startEvent) then
-			isComplete = 1
-		end
-
-		numObj = numObj + 1 -- (questking only) ensure all gold-requiring quests aren't marked as connectors
-
-		if (not collapseObjectives) then -- hide entirely if objectives are collapsed
-			if playerMoney >= requiredMoney then
-				-- show met gold amounts only for incomplete quests
-				if (isComplete ~= 1) and (opt_showCompletedObjectives) then
-					local r, g, b = getObjectiveColor(1)
-					button:AddLine("  Requires: "..GetMoneyString(requiredMoney), nil, r, g, b)
-				end
-			else
-				-- always show unmet gold amount
-				local r, g, b = getObjectiveColor(0)
-				button:AddLine("  Requires: "..GetMoneyString(requiredMoney), nil, r, g, b)
-			end
-		end
-	end
-
-	local _, _, _, _, _, _, _, _, failureTime, timeElapsed = GetQuestWatchInfo(GetQuestWatchIndex(questIndex))
-
-	-- timer
-	if (failureTime) then
-		if (timeElapsed) then
-			local timerBar = button:AddTimerBar(failureTime, GetTime() - timeElapsed)
-			timerBar:SetStatusBarColor(opt_colors.QuestTimer[1], opt_colors.QuestTimer[2], opt_colors.QuestTimer[3])
-		end
-	end
-
-	-- set title colour
-	if (isComplete == -1) then
-		-- failed
-		button.title:SetTextColor(opt_colors.ObjectiveFailed[1], opt_colors.ObjectiveFailed[2], opt_colors.ObjectiveFailed[3])
-	elseif (isComplete == 1) then
-		if GetQuestLogIsAutoComplete(questIndex) then
-			-- autocomplete
-			button.title:SetTextColor(opt_colors.QuestCompleteAuto[1], opt_colors.QuestCompleteAuto[2], opt_colors.QuestCompleteAuto[3])
-		elseif (numObj == 0) then
-			-- connector quest [type c] (complete, 0/0 objectives)
-			button.title:SetTextColor(opt_colors.QuestConnector[1], opt_colors.QuestConnector[2], opt_colors.QuestConnector[3])
-		else
-			-- completed quest (complete, n/n objectives)
-			button.title:SetTextColor(opt_colors.ObjectiveComplete[1], opt_colors.ObjectiveComplete[2], opt_colors.ObjectiveComplete[3])
-		end
-	else
-		if numObj == 0 then
-			-- connector quest [type i] (incomplete, 0/0 objectives)
-			button.title:SetTextColor(opt_colors.QuestConnector[1], opt_colors.QuestConnector[2], opt_colors.QuestConnector[3])
-		elseif numObj == completedObj then
-			-- unknown state (incomplete, n/n objectives where n>0)
-			button.title:SetTextColor(1, 0, 1)
-		else
-			-- incomplete quest (incomplete, n/m objectives where m>n)
-			local color = GetQuestDifficultyColor(level)
-			button.title:SetTextColor(color.r, color.g, color.b)
-		end
-	end
-
-	if collapseObjectives then
-		button.title:SetAlpha(0.6)
-	end
-
-	-- add item button
-	local link, item, charges, showItemWhenComplete = GetQuestLogSpecialItemInfo(questIndex)
-	local itemButton
-	if opt_itemAnchorSide and item and ((isComplete ~= 1) or (showItemWhenComplete)) then
-		if InCombatLockdown() then
-			QuestKing:StartCombatTimer()
-		else
-			itemButton = button:SetItemButton(questIndex, link, item, charges, displayedObj)
-		end
-
-	else
-		if (button.itemButton) then
-			if InCombatLockdown() then
-				QuestKing:StartCombatTimer()
-			else
-				button:RemoveItemButton()
-			end
-		end
-	end
-
-	if (button.fresh) then
-		if (QuestKing.newlyAddedQuests[questID]) then
-			button:Pulse(0.9, 0.6, 0.2)
-			QuestKing.newlyAddedQuests[questID] = nil
-		end
-	end
-
-	-- quests enter a state of unknown completion (isComplete == nil) when zoning between instances.
-	-- since they also has no objectives in this state, we completely ignore completion changes for quests with no objectives
-	if (numObj > 0) then
-		if (isComplete == 1) and (button._questCompleted == false) then
-			button:Pulse(0.2, 0.6, 0.9)
-			QuestKing:OnQuestObjectivesCompleted(questID)
-		end
-		button._questCompleted = not not (isComplete == 1)
-	end
-
-	-- animate sequenced quests
-	if ((not button.fresh) and IsQuestSequenced(questID)) then
-		local lastNumObj = button._lastNumObj
-
-		if ((lastNumObj) and (lastNumObj > 0) and (numObj > lastNumObj)) then
-			-- do animations [FIXME: test this]
-			PlaySound(SOUNDKIT.IG_QUEST_LIST_OPEN)
-			local lines = button.lines
-			for i = 1, #lines do
-				if (i > lastNumObj) then
-					local line = lines[i]
-					line:Glow(opt_colors.ObjectiveChangedGlow[1], opt_colors.ObjectiveChangedGlow[2], opt_colors.ObjectiveChangedGlow[3])
-				end
-			end
-		end
-		button._lastNumObj = numObj
-	end
-
+function QuestKing:AddWatch(questLogIndex)
+    local info = QK_GetInfo(questLogIndex)
+    if info and info.questID then
+        QK_AddWatch(info.questID)
+    end
 end
 
-
----- Mouse handlers
-
-function mouseHandlerQuest:TitleButtonOnEnter (motion)
-	local button = self.parent
-
-	local link = GetQuestLink(button.questIndex)
-	if link then
-		GameTooltip:SetOwner(self, opt.tooltipAnchor)
-
-		if opt.tooltipScale then
-			if not GameTooltip.__QuestKingPreviousScale then
-				GameTooltip.__QuestKingPreviousScale = GameTooltip:GetScale()
-			end
-			GameTooltip:SetScale(opt.tooltipScale)
-		end
-
-		GameTooltip:SetHyperlink(link)
-		GameTooltip:Show()
-	end
+function QuestKing:RemoveWatch(questLogIndex)
+    local info = QK_GetInfo(questLogIndex)
+    if info and info.questID then
+        QK_RemoveWatch(info.questID)
+    end
 end
 
-function mouseHandlerQuest:TitleButtonOnClick (mouse, down)
-	local button = self.parent
+function QuestKing:IterateWatched()
+    local i = 0
+    local n = (CQL and CQL.GetNumQuestWatches and CQL.GetNumQuestWatches()) or 0
 
-	if (IsModifiedClick("CHATLINK") and ChatEdit_GetActiveWindow()) then
-		local questLink = GetQuestLink(button.questIndex)
-		if (questLink) then
-			ChatEdit_InsertLink(questLink)
-			return
-		end
-	end
-
-	if (IsShiftKeyDown()) and (ClassicQuestLog) then
-		SelectQuestLogEntry(button.questIndex)
-		if ClassicQuestLog:IsVisible() then
-			ClassicQuestLog:OnShow()
-		else
-			ClassicQuestLog:SetShown(true)
-		end
-		return
-	end
-
-	if IsAltKeyDown() then
-		if mouse == "RightButton" then
-			RemoveQuestWatch(button.questIndex)
-			QuestKing:UpdateTracker()
-			return
-		else
-			if QuestKingDBPerChar.collapsedQuests[button.questID] then
-				QuestKingDBPerChar.collapsedQuests[button.questID] = nil
-			else
-				QuestKingDBPerChar.collapsedQuests[button.questID] = true
-			end
-			QuestKing:UpdateTracker()
-			return
-		end
-	end
-
-	if mouse == "RightButton" then
-		-- WORLDMAP_SETTINGS.selectedQuestId = button.questID
-		if (GetSuperTrackedQuestID() == button.questID) then
-			QuestKing:SetSuperTrackedQuestID(0)
-			QuestKing:UpdateTracker()
-		else
-			QuestKing:SetSuperTrackedQuestID(button.questID)
-			QuestKing:UpdateTracker()
-		end
-		-- QuestPOIUpdateIcons()
-		-- if WorldMapFrame:IsShown() then
-		-- 	HideUIPanel(WorldMapFrame)
-		-- 	ShowUIPanel(WorldMapFrame)
-		-- end
-	else
-		-- if (QuestLogFrame:IsShown()) and (QuestLogFrame.selectedIndex == button.questIndex) then
-		-- 	HideUIPanel(QuestLogFrame)
-		-- else
-		-- 	QuestLog_OpenToQuest(button.questIndex)
-		-- 	ShowUIPanel(QuestLogFrame)
-		-- end
-		QuestObjectiveTracker_OpenQuestMap(nil, button.questIndex)
-	end
-
+    return function()
+        i = i + 1
+        if i <= n then
+            local qid = GetQuestIDForWatchIndexCompat(i)
+            return i, qid
+        end
+    end
 end

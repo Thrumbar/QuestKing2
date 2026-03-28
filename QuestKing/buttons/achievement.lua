@@ -1,258 +1,526 @@
+-- achievement.lua (QuestKing)
+-- Renders tracked achievements in the custom watch window.
+
 local addonName, QuestKing = ...
 
--- options
 local opt = QuestKing.options
 local opt_colors = opt.colors
-
--- import
 local WatchButton = QuestKing.WatchButton
+local GetObjectiveColor = QuestKing.GetObjectiveColor
 
-local GetTrackedAchievements = GetTrackedAchievements
-local GetAchievementInfo = GetAchievementInfo
-local GetAchievementNumCriteria = GetAchievementNumCriteria
-local GetAchievementCriteriaInfo = GetAchievementCriteriaInfo
+local format = string.format
+local sort = table.sort
+local tinsert = table.insert
+local tconcat = table.concat
 
--- local functions
-local setButtonToAchievement
+local HAS_CONTENT_TRACKING = C_ContentTracking and Enum and Enum.ContentTrackingType
+local HAS_C_ACHIEVEMENTINFO = C_AchievementInfo and C_AchievementInfo.GetAchievementInfo
 
--- local variables
-local achievementTimers = {}
-local achievementTimersMeta = {}
+local function EnsureTrackedAchievementCache()
+    QuestKing.trackedAchievements = QuestKing.trackedAchievements or {}
+    return QuestKing.trackedAchievements
+end
+
+local function Safe_GetTrackedAchievementIDs()
+    local ids = {}
+    local seen = {}
+
+    local function AddID(id)
+        if type(id) == "number" and not seen[id] then
+            seen[id] = true
+            tinsert(ids, id)
+        end
+    end
+
+    if HAS_CONTENT_TRACKING then
+        local ok, list
+
+        if C_ContentTracking.GetTrackedIDsByType then
+            ok, list = pcall(C_ContentTracking.GetTrackedIDsByType, Enum.ContentTrackingType.Achievement)
+        elseif C_ContentTracking.GetTrackedIDs then
+            ok, list = pcall(C_ContentTracking.GetTrackedIDs, Enum.ContentTrackingType.Achievement)
+        end
+
+        if ok and type(list) == "table" then
+            for _, entry in pairs(list) do
+                if type(entry) == "number" then
+                    AddID(entry)
+                elseif type(entry) == "table" then
+                    AddID(entry.id or entry.achievementID or entry.contentID)
+                end
+            end
+        end
+    end
+
+    if GetNumTrackedAchievements and GetTrackedAchievement then
+        local num = GetNumTrackedAchievements() or 0
+        for i = 1, num do
+            AddID(GetTrackedAchievement(i))
+        end
+    end
+
+    if GetNumTrackedAchievements and GetTrackedAchievementInfo then
+        local num = GetNumTrackedAchievements() or 0
+        for i = 1, num do
+            AddID(select(1, GetTrackedAchievementInfo(i)))
+        end
+    end
+
+    return ids
+end
+
+local function SyncTrackedAchievementCacheFromAPIs()
+    local cache = {}
+    local ids = Safe_GetTrackedAchievementIDs()
+
+    for i = 1, #ids do
+        local id = ids[i]
+        if type(id) == "number" then
+            cache[id] = true
+        end
+    end
+
+    QuestKing.trackedAchievements = cache
+    return cache
+end
+
+QuestKing.EnsureTrackedAchievementCache = EnsureTrackedAchievementCache
+QuestKing.SyncTrackedAchievementCacheFromAPIs = SyncTrackedAchievementCacheFromAPIs
+
+local function Safe_GetAchievementInfo(achievementID)
+    if HAS_C_ACHIEVEMENTINFO then
+        local info = C_AchievementInfo.GetAchievementInfo(achievementID)
+        if info and type(info) == "table" then
+            return info.name, info.points or 0, info.completed or false, info.month, info.day, info.year, info.description
+        end
+    end
+
+    if GetAchievementInfo then
+        local a1, a2, a3, a4, a5, a6, a7, a8 = GetAchievementInfo(achievementID)
+
+        if type(a1) == "number" and type(a2) == "string" then
+            return a2, a3 or 0, a4 or false, a5, a6, a7, a8
+        end
+
+        if type(a1) == "string" then
+            return a1, a3 or 0, a4 or false, a5, a6, a7, a8
+        end
+    end
+
+    return ("Achievement %d"):format(achievementID), 0, false, nil, nil, nil, ""
+end
+
+local function Safe_GetAchievementNumCriteria(achievementID)
+    if GetAchievementNumCriteria then
+        return GetAchievementNumCriteria(achievementID)
+    end
+
+    if C_AchievementInfo and C_AchievementInfo.GetAchievementNumCriteria then
+        return C_AchievementInfo.GetAchievementNumCriteria(achievementID)
+    end
+
+    return 0
+end
+
+local function Safe_GetAchievementCriteriaInfo(achievementID, index)
+    if C_AchievementInfo and C_AchievementInfo.GetCriteriaInfo then
+        local c = C_AchievementInfo.GetCriteriaInfo(achievementID, index)
+        if c then
+            return c.description or "",
+                   c.criteriaType or 0,
+                   c.completed or false,
+                   c.quantity or 0,
+                   c.requiredQuantity or c.maxQuantity or 0,
+                   c.flags,
+                   c.assetID,
+                   c.quantityString,
+                   c.criteriaID,
+                   c.isEligible,
+                   c.duration,
+                   c.elapsed
+        end
+    end
+
+    if GetAchievementCriteriaInfo then
+        return GetAchievementCriteriaInfo(achievementID, index)
+    end
+
+    return "", 0, false, 0, 0
+end
+
+local function Safe_IsTracked(achievementID)
+    if HAS_CONTENT_TRACKING and C_ContentTracking.IsTrackingID then
+        local ok, tracked = pcall(C_ContentTracking.IsTrackingID, achievementID, Enum.ContentTrackingType.Achievement)
+        if ok then
+            return tracked and true or false
+        end
+    end
+
+    if IsTrackedAchievement then
+        return IsTrackedAchievement(achievementID)
+    end
+
+    local cache = EnsureTrackedAchievementCache()
+    return cache[achievementID] and true or false
+end
+
+local function Safe_RefreshAchievementUIs()
+    if AchievementFrameAchievements_ForceUpdate then
+        pcall(AchievementFrameAchievements_ForceUpdate)
+    end
+
+    if WatchFrame_Update then
+        pcall(WatchFrame_Update)
+    end
+end
+
+local function BuildTrackedAchievementSignature()
+    local ids = Safe_GetTrackedAchievementIDs()
+    if not ids or #ids == 0 then
+        return ""
+    end
+
+    sort(ids)
+
+    local parts = {}
+    for i = 1, #ids do
+        parts[i] = tostring(ids[i])
+    end
+
+    return tconcat(parts, ",")
+end
+
+function QuestKing:QueueAchievementTrackerRefresh()
+    QuestKing._achievementRefreshToken = (QuestKing._achievementRefreshToken or 0) + 1
+
+    local token = QuestKing._achievementRefreshToken
+    local attempts = 0
+
+    local function RefreshStep()
+        if token ~= QuestKing._achievementRefreshToken then
+            return
+        end
+
+        local oldSignature = QuestKing._lastTrackedAchievementSignature or ""
+        local newSignature = BuildTrackedAchievementSignature()
+
+        if QuestKing.SyncTrackedAchievementCacheFromAPIs then
+            QuestKing:SyncTrackedAchievementCacheFromAPIs()
+        end
+
+        Safe_RefreshAchievementUIs()
+
+        if newSignature ~= oldSignature or attempts >= 5 then
+            QuestKing._lastTrackedAchievementSignature = newSignature
+
+            if QuestKing.UpdateTracker then
+                QuestKing:UpdateTracker(true)
+            end
+            return
+        end
+
+        attempts = attempts + 1
+
+        if C_Timer and C_Timer.After then
+            C_Timer.After(0.05, RefreshStep)
+        else
+            if QuestKing.UpdateTracker then
+                QuestKing:UpdateTracker(true)
+            end
+        end
+    end
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, RefreshStep)
+    else
+        RefreshStep()
+    end
+end
+
+local function Safe_ToggleTracked(achievementID)
+    if HAS_CONTENT_TRACKING and C_ContentTracking then
+        local isTracked = Safe_IsTracked(achievementID)
+
+        if isTracked then
+            if C_ContentTracking.StopTracking then
+                C_ContentTracking.StopTracking(Enum.ContentTrackingType.Achievement, achievementID)
+            end
+        else
+            if C_ContentTracking.StartTracking then
+                C_ContentTracking.StartTracking(Enum.ContentTrackingType.Achievement, achievementID)
+            end
+        end
+
+        Safe_RefreshAchievementUIs()
+
+        if QuestKing.QueueAchievementTrackerRefresh then
+            QuestKing:QueueAchievementTrackerRefresh()
+        end
+
+        return
+    end
+
+    if IsTrackedAchievement and AddTrackedAchievement and RemoveTrackedAchievement then
+        if IsTrackedAchievement(achievementID) then
+            RemoveTrackedAchievement(achievementID)
+        else
+            AddTrackedAchievement(achievementID)
+        end
+
+        Safe_RefreshAchievementUIs()
+
+        if QuestKing.QueueAchievementTrackerRefresh then
+            QuestKing:QueueAchievementTrackerRefresh()
+        end
+    end
+end
+
+local function addHeader()
+    local header = WatchButton:GetKeyed("header", "Achievements")
+    header.title:SetText(TRACKER_HEADER_ACHIEVEMENTS or "Achievements")
+    header.title:SetTextColor(
+        opt_colors.SectionHeader[1],
+        opt_colors.SectionHeader[2],
+        opt_colors.SectionHeader[3]
+    )
+    return header
+end
 
 local mouseHandlerAchievement = {}
 
---
+function mouseHandlerAchievement:TitleButtonOnClick(mouse)
+    local button = self.parent
+    local achievementID = button.achievementID
 
-function QuestKing:OnTrackedAchievementUpdate (achievementID, criteriaID, timeElapsed, timeLimit)
-	if timeElapsed and timeLimit then
-		if timeElapsed >= timeLimit then
-			achievementTimers[criteriaID] = nil
-			achievementTimersMeta[achievementID] = nil
-		else
-			achievementTimers[criteriaID] = achievementTimers[criteriaID] or {}
-			achievementTimers[criteriaID].startTime = GetTime() - timeElapsed
-			achievementTimers[criteriaID].duration = timeLimit
-			achievementTimersMeta[achievementID] = achievementTimers[criteriaID]
-		end
-	end
-	QuestKing:UpdateTracker()
+    if IsModifiedClick and IsModifiedClick("CHATLINK") and ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow() and GetAchievementLink then
+        local link = GetAchievementLink(achievementID)
+        if link then
+            ChatEdit_InsertLink(link)
+            return
+        end
+    end
+
+    if mouse == "RightButton" then
+        Safe_ToggleTracked(achievementID)
+        return
+    end
+
+    if not AchievementFrame and UIParentLoadAddOn then
+        UIParentLoadAddOn("Blizzard_AchievementUI")
+    end
+
+    if AchievementFrame then
+        ShowUIPanel(AchievementFrame)
+
+        if AchievementFrame_SelectAchievement then
+            AchievementFrame_SelectAchievement(achievementID)
+        elseif AchievementFrameAchievements_SelectAchievement then
+            AchievementFrameAchievements_SelectAchievement(achievementID)
+        end
+    end
+end
+
+function mouseHandlerAchievement:TitleButtonOnEnter()
+    local button = self.parent
+    local achievementID = button.achievementID
+    local name, points, completed, month, day, year, desc = Safe_GetAchievementInfo(achievementID)
+
+    GameTooltip:SetOwner(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
+
+    if opt.tooltipScale then
+        if not GameTooltip.__QuestKingPreviousScale then
+            GameTooltip.__QuestKingPreviousScale = GameTooltip:GetScale()
+        end
+        GameTooltip:SetScale(opt.tooltipScale)
+    end
+
+    GameTooltip:AddLine(name or "Achievement", 1, 0.914, 0.682, 1)
+
+    if points and points > 0 then
+        local pointsText
+        if type(ACHIEVEMENT_TOOLTIP_POINTS) == "string" then
+            pointsText = format(ACHIEVEMENT_TOOLTIP_POINTS, points)
+        else
+            pointsText = ("%d points"):format(points)
+        end
+        GameTooltip:AddLine(pointsText, 1, 1, 1, 1)
+    end
+
+    GameTooltip:AddLine(" ")
+
+    if desc and #desc > 0 then
+        GameTooltip:AddLine(desc, 1, 1, 1, 1)
+    end
+
+    if completed then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(ACHIEVEMENT_COMPLETED or "Completed", 0.2, 0.9, 0.2, 1)
+
+        if month and day and year and type(GUILD_NEWS_FORMAT_TIME) == "string" then
+            GameTooltip:AddLine(format(GUILD_NEWS_FORMAT_TIME, month, day, year), 0.8, 0.8, 0.8, 1)
+        end
+    end
+
+    GameTooltip:Show()
+end
+
+local function ShouldShowCompletedAchievementObjective()
+    local value = opt.showCompletedObjectives
+    return value == true or value == "always"
+end
+
+local function setButtonToAchievement(button, achievementID)
+    button.mouseHandler = mouseHandlerAchievement
+    button.achievementID = achievementID
+
+    local name, points, completed = Safe_GetAchievementInfo(achievementID)
+    name = name or ("Achievement %d"):format(achievementID)
+
+    if completed then
+        button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t %s", name)
+        button.title:SetTextColor(
+            opt_colors.ObjectiveComplete[1],
+            opt_colors.ObjectiveComplete[2],
+            opt_colors.ObjectiveComplete[3]
+        )
+    else
+        button.title:SetText(name)
+        button.title:SetTextColor(
+            opt_colors.ScenarioStageTitle[1],
+            opt_colors.ScenarioStageTitle[2],
+            opt_colors.ScenarioStageTitle[3]
+        )
+    end
+
+    local numCriteria = Safe_GetAchievementNumCriteria(achievementID) or 0
+    if numCriteria > 0 then
+        for i = 1, numCriteria do
+            local desc, cType, cDone, qty, req, flags, assetID, qtyString, criteriaID, eligible, duration, elapsed =
+                Safe_GetAchievementCriteriaInfo(achievementID, i)
+
+            if (not desc or desc == "") and qtyString then
+                desc = qtyString
+            elseif not desc or desc == "" then
+                desc = "Objective"
+            end
+
+            if cDone then
+                if ShouldShowCompletedAchievementObjective() then
+                    button:AddLine(
+                        format("  %s", desc),
+                        nil,
+                        opt_colors.ObjectiveGradientComplete[1],
+                        opt_colors.ObjectiveGradientComplete[2],
+                        opt_colors.ObjectiveGradientComplete[3]
+                    )
+                end
+            else
+                local rightText
+
+                if req and req > 0 then
+                    local fraction = 0
+
+                    if qty and req and req > 0 then
+                        fraction = qty / req
+                        if fraction < 0 then
+                            fraction = 0
+                        elseif fraction > 1 then
+                            fraction = 1
+                        end
+                    end
+
+                    rightText = format(": %s/%s", tostring(qty or 0), tostring(req))
+
+                    local r, g, b = GetObjectiveColor(fraction)
+                    local line = button:AddLine(format("  %s", desc), rightText, r, g, b)
+
+                    local last = line._lastQuant or 0
+                    if (qty or 0) > last and type(line.Flash) == "function" then
+                        line:Flash()
+                    end
+                    line._lastQuant = qty or 0
+                else
+                    local r, g, b = GetObjectiveColor(0)
+                    button:AddLine(format("  %s", desc), nil, r, g, b)
+                end
+
+                if duration and elapsed and elapsed < duration and type(button.AddTimerBar) == "function" then
+                    local timerBar = button:AddTimerBar(duration, GetTime() - elapsed)
+                    if timerBar and type(timerBar.SetStatusBarColor) == "function" then
+                        timerBar:SetStatusBarColor(
+                            opt_colors.ScenarioTimer[1],
+                            opt_colors.ScenarioTimer[2],
+                            opt_colors.ScenarioTimer[3]
+                        )
+                    end
+                end
+            end
+        end
+    end
+
+    if button.fresh then
+        local lines = button.lines
+        for i = 1, #lines do
+            local line = lines[i]
+            if line then
+                if type(line.Glow) == "function" then
+                    line:Glow(
+                        opt_colors.ObjectiveAlertGlow[1],
+                        opt_colors.ObjectiveAlertGlow[2],
+                        opt_colors.ObjectiveAlertGlow[3]
+                    )
+                elseif type(line.Pulse) == "function" then
+                    line:Pulse()
+                end
+            end
+        end
+    end
 end
 
 function QuestKing:UpdateTrackerAchievements()
-	local trackedAchievements = { GetTrackedAchievements() }
-	local numTrackedAchievements = #trackedAchievements
+    local cache
+    if QuestKing.SyncTrackedAchievementCacheFromAPIs then
+        cache = QuestKing:SyncTrackedAchievementCacheFromAPIs()
+    else
+        cache = EnsureTrackedAchievementCache()
+    end
 
-	-- header
-	local showAchievements = true
-	if (QuestKingDBPerChar.displayMode == "combined") then
-		local headerName = "Achievements"
-		if numTrackedAchievements > 0 then
-			local button = WatchButton:GetKeyed("collapser", "Achievements")
-			button._headerName = headerName
+    local ids = {}
 
-			if QuestKingDBPerChar.collapsedHeaders[headerName] then
-				button.title:SetTextIcon("|TInterface\\AddOns\\QuestKing\\textures\\UI-SortArrow_sm_right:8:8:0:-1:0:0:0:0:0:0:1:1:1|t "..headerName)
-				button.title:SetTextColor(opt_colors.AchievementHeaderCollapsed[1], opt_colors.AchievementHeaderCollapsed[2], opt_colors.AchievementHeaderCollapsed[3])
-			else
-				button.title:SetTextIcon("|TInterface\\AddOns\\QuestKing\\textures\\UI-SortArrow_sm_down:8:8:0:-1:0:0:0:0:0:0:1:1:1|t "..headerName)
-				button.title:SetTextColor(opt_colors.AchievementHeader[1], opt_colors.AchievementHeader[2], opt_colors.AchievementHeader[3])
-			end
-		end
+    for id, tracked in pairs(cache) do
+        if tracked and type(id) == "number" then
+            ids[#ids + 1] = id
+        end
+    end
 
-		if QuestKingDBPerChar.collapsedHeaders[headerName] then
-			showAchievements = false
-		end
-	elseif (inScenario) and (QuestKingDBPerChar.displayMode == "achievements") then
-		local achheader = WatchButton:GetKeyed("header", "Achievements")
-		achheader.title:SetText("Achievements")
-		achheader.title:SetTextColor(opt_colors.AchievementHeader[1], opt_colors.AchievementHeader[2], opt_colors.AchievementHeader[3])
-	end
+    if #ids == 0 then
+        return
+    end
 
-	-- achievements
-	if showAchievements then
-		for i = 1, numTrackedAchievements do
-			local achievementID = trackedAchievements[i]
+    sort(ids)
 
-			local button = WatchButton:GetKeyed("achievement", achievementID)
-			setButtonToAchievement(button, achievementID)
-		end
-	end
+    local header = addHeader()
+
+    for i = 1, #ids do
+        local achievementID = ids[i]
+        local button = WatchButton:GetKeyed("achievement", achievementID)
+        button._previousHeader = header
+        setButtonToAchievement(button, achievementID)
+    end
 end
 
-function setButtonToAchievement (button, achievementID)
-	button.mouseHandler = mouseHandlerAchievement
-
-	local id, achievementName, points, achievemntCompleted, _, _, _, achievementDesc, flags, image, rewardText, isGuildAch = GetAchievementInfo(achievementID)
-	button.achievementID = achievementID
-
-	local collapseCriteria = QuestKingDBPerChar.collapsedAchievements[achievementID]
-
-	-- set title
-	button.title:SetText(achievementName)
-	if completed then
-		button.title:SetTextColor(opt_colors.AchievementTitleComplete[1], opt_colors.AchievementTitleComplete[2], opt_colors.AchievementTitleComplete[3])
-	else
-		if isGuildAch then
-			button.title:SetTextColor(opt_colors.AchievementTitleGuild[1], opt_colors.AchievementTitleGuild[2], opt_colors.AchievementTitleGuild[3])
-		else
-			button.title:SetTextColor(opt_colors.AchievementTitle[1], opt_colors.AchievementTitle[2], opt_colors.AchievementTitle[3])
-		end
-	end
-
-	if collapseCriteria then
-		button.title:SetAlpha(0.6)
-	end
-
-	-- criteria setup
-	local numCriteria = GetAchievementNumCriteria(achievementID)
-	local foundTimer = false
-	local timeNow -- avoid multiple calls to GetTime()
-
-	-- no criteria
-	if (numCriteria == 0) then
-		if (not collapseCriteria) then
-			button:AddLine("  "..achievementDesc, nil, opt_colors.AchievementDescription[1], opt_colors.AchievementDescription[2], opt_colors.AchievementDescription[3]) -- no criteria exist, show desc line
-		end
-	end
-
-	-- criteria loop
-	for i = 1, numCriteria do
-		local _
-		local criteriaString, criteriaType, criteriaCompleted, quantity, totalQuantity, name, flags, assetID, quantityString, criteriaID, eligible, duration, elapsed = GetAchievementCriteriaInfo(achievementID, i)
-
-		-- set string
-		if (bit.band(flags, EVALUATION_TREE_FLAG_PROGRESS_BAR) == EVALUATION_TREE_FLAG_PROGRESS_BAR) then
-			criteriaString = quantityString
-		else
-			if (criteriaType == CRITERIA_TYPE_ACHIEVEMENT and assetID) then -- meta achievement
-				_, criteriaString = GetAchievementInfo(assetID)
-			end
-		end
-
-		-- display criteria depending on timer state
-		-- kinda wanna seperate this out, but display is dependent on timer logic (e.g. timeLeft > 0 forces display)
-
-		--[[]
-		local timerTable = achievementTimers[criteriaID]
-		if (timerTable) then
-			duration = timerTable.duration
-			elapsed = GetTime() - timerTable.startTime
-		end
-		if ((timerTable) and (duration) and (elapsed) and (elapsed < duration)) then
-		--]]
-		if ((duration) and (elapsed) and (elapsed < duration)) then
-			foundTimer = true
-
-			-- timer is running, force showing criteria
-			if criteriaCompleted then
-				button:AddLine("  "..criteriaString, nil, opt_colors.AchievementCriteriaComplete[1], opt_colors.AchievementCriteriaComplete[2], opt_colors.AchievementCriteriaComplete[3]) -- timer running, force showing completed objective
-			else
-				button:AddLine("  "..criteriaString, nil, opt_colors.AchievementCriteria[1], opt_colors.AchievementCriteria[2], opt_colors.AchievementCriteria[3]) -- timer running, force showing normal objective
-			end
-
-			-- adding timer line
-			local timerBar = button:AddTimerBar(duration, GetTime() - elapsed)
-			timerBar:SetStatusBarColor(opt_colors.AchievementTimer[1], opt_colors.AchievementTimer[2], opt_colors.AchievementTimer[3])
-
-		else
-			-- no timer exists / timer expired
-
-			local timerTable = achievementTimers[criteriaID]
-			if (timerTable) then
-				achievementTimers[criteriaID] = nil
-				achievementTimersMeta[achievementID] = nil
-			end
-
-			if (not criteriaCompleted) and (not collapseCriteria) then
-				button:AddLine("  "..criteriaString, nil, opt_colors.AchievementCriteria[1], opt_colors.AchievementCriteria[2], opt_colors.AchievementCriteria[3]) -- no timer, show normally unless completed/collapsed
-			end
-		end
-
-	end
-
-	-- show "meta" timer if there is a timer on this achievement, but no associated criteria are found in GetAchievementNumCriteria (Salt and Pepper?)
-	-- multiple timers would be a problem (it sets/unsets with whichever criteria timer fires last), but it's better than nothing
-	if ((foundTimer == false) and (achievementTimersMeta[achievementID])) then
-		local timerTable = achievementTimersMeta[achievementID]
-		local duration = timerTable.duration
-		local elapsed = GetTime() - timerTable.startTime
-
-		if ((duration) and (elapsed) and (elapsed < duration)) then
-			foundTimer = true
-
-			local timerBar = button:AddTimerBar(timerTable.duration, timerTable.startTime)
-			timerBar:SetStatusBarColor(opt_colors.AchievementTimerMeta[1], opt_colors.AchievementTimerMeta[2], opt_colors.AchievementTimerMeta[3])
-		end
-	end
-
-	-- D(achievementName, foundTimer)
-
-	if (foundTimer == false) then
-		button:SetBackdropColor(0, 0, 0, 0)
-		button:SetScript("OnUpdate", nil)
-	else
-		button.title:SetTextColor(opt_colors.AchievementTimedTitle[1], opt_colors.AchievementTimedTitle[2], opt_colors.AchievementTimedTitle[3])
-		button:SetBackdropColor(opt_colors.AchievementTimedBackground[1], opt_colors.AchievementTimedBackground[2], opt_colors.AchievementTimedBackground[3], opt_colors.AchievementTimedBackground[4])
-	end
-
+function QuestKing:OnTrackedAchievementListChanged(...)
+    QuestKing:QueueAchievementTrackerRefresh()
 end
 
-function mouseHandlerAchievement:TitleButtonOnEnter (motion)
-	local button = self.parent
-
-	local link = GetAchievementLink(button.achievementID)
-	if link then
-		GameTooltip:SetOwner(self, opt.tooltipAnchor)
-
-		if opt.tooltipScale then
-			if not GameTooltip.__QuestKingPreviousScale then
-				GameTooltip.__QuestKingPreviousScale = GameTooltip:GetScale()
-			end
-			GameTooltip:SetScale(opt.tooltipScale)
-		end
-
-		GameTooltip:SetHyperlink(link)
-		GameTooltip:Show()
-	end
+function QuestKing:OnTrackedAchievementUpdate(...)
+    QuestKing:QueueAchievementTrackerRefresh()
 end
 
-function mouseHandlerAchievement:TitleButtonOnClick (mouse, down)
-	local button = self.parent
+function QuestKing:OnAchievementCriteriaUpdate(...)
+    QuestKing:QueueAchievementTrackerRefresh()
+end
 
-	if (IsModifiedClick("CHATLINK") and ChatEdit_GetActiveWindow()) then
-		local achievementLink = GetAchievementLink(button.achievementID)
-		if (achievementLink) then
-			ChatEdit_InsertLink(achievementLink)
-			return
-		end
-	end
-
-	if IsAltKeyDown() then
-		if mouse == "RightButton" then
-			RemoveTrackedAchievement(button.achievementID)
-			QuestKing:UpdateTracker()
-			return
-		else
-			if QuestKingDBPerChar.collapsedAchievements[button.achievementID] then
-				QuestKingDBPerChar.collapsedAchievements[button.achievementID] = nil
-			else
-				QuestKingDBPerChar.collapsedAchievements[button.achievementID] = true
-			end
-			QuestKing:UpdateTracker()
-			return
-		end
-	end
-
-	if (not AchievementFrame) then AchievementFrame_LoadUI() end
-
-	if (not AchievementFrame:IsShown()) then
-		AchievementFrame_ToggleAchievementFrame()
-		AchievementFrame_SelectAchievement(button.achievementID)
-	else
-		if (AchievementFrameAchievements.selection ~= button.achievementID) then
-			AchievementFrame_SelectAchievement(button.achievementID)
-		else
-			AchievementFrame_ToggleAchievementFrame()
-		end
-	end
+function QuestKing:OnAchievementEarned(...)
+    QuestKing:QueueAchievementTrackerRefresh()
 end
