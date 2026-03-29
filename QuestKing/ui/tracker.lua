@@ -95,6 +95,38 @@ local function PlaySoundSafe(soundKit)
     end
 end
 
+local function EnsureSavedVariables()
+    QuestKingDB = QuestKingDB or {}
+    QuestKingDBPerChar = QuestKingDBPerChar or {}
+end
+
+local function GetDefaultDragOffsets(point)
+    if point == "BOTTOMRIGHT" then
+        return -12, 220
+    elseif point == "BOTTOMLEFT" then
+        return 12, 220
+    elseif point == "TOPLEFT" then
+        return 12, -160
+    end
+
+    return -12, -160
+end
+
+local function GetSavedDragPoint()
+    EnsureSavedVariables()
+
+    local point = QuestKingDB.dragOrigin or "TOPRIGHT"
+    local relativePoint = QuestKingDB.dragRelativePoint or point
+    local x = tonumber(QuestKingDB.dragX)
+    local y = tonumber(QuestKingDB.dragY)
+
+    if x == nil or y == nil then
+        x, y = GetDefaultDragOffsets(point)
+    end
+
+    return point, relativePoint, x, y
+end
+
 function Tracker:RefreshLayoutMetrics()
     local width = opt.buttonWidth or 230
     local titleHeight = opt.titleHeight or 18
@@ -128,6 +160,8 @@ function Tracker:RefreshLayoutMetrics()
 end
 
 function Tracker:Init()
+    EnsureSavedVariables()
+
     self:SetClampedToScreen(true)
     self:SetFrameStrata("MEDIUM")
     self:SetWidth(opt.buttonWidth or 230)
@@ -414,61 +448,57 @@ function Tracker:StartDragging()
 end
 
 function Tracker:StopDragging()
+    if not self.isMoving then
+        return
+    end
+
+    EnsureSavedVariables()
+
     self.isMoving = false
     self:StopMovingOrSizing()
 
-    local dragOrigin = QuestKingDB.dragOrigin or "TOPRIGHT"
-    local scale = self:GetScale()
-    local uiScale = UIParent:GetScale() or 1
-    local x
-    local y
+    local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint(1)
 
-    if dragOrigin == "TOPRIGHT" then
-        x = (self:GetRight() * scale - UIParent:GetRight() * uiScale) / scale
-        y = (self:GetTop() * scale - UIParent:GetTop() * uiScale) / scale
-    elseif dragOrigin == "BOTTOMRIGHT" then
-        x = (self:GetRight() * scale - UIParent:GetRight() * uiScale) / scale
-        y = (self:GetBottom() * scale) / scale
-    elseif dragOrigin == "BOTTOMLEFT" then
-        x = (self:GetLeft() * scale) / scale
-        y = (self:GetBottom() * scale) / scale
-    else
-        x = (self:GetLeft() * scale) / scale
-        y = (self:GetTop() * scale - UIParent:GetTop() * uiScale) / scale
+    point = point or QuestKingDB.dragOrigin or "TOPRIGHT"
+    relativePoint = relativePoint or QuestKingDB.dragRelativePoint or point
+    xOfs = tonumber(xOfs)
+    yOfs = tonumber(yOfs)
+
+    if xOfs == nil or yOfs == nil then
+        xOfs, yOfs = GetDefaultDragOffsets(point)
     end
 
     self:ClearAllPoints()
-    self:SetPoint(dragOrigin, UIParent, dragOrigin, x, y)
+    self:SetPoint(point, UIParent, relativePoint, xOfs, yOfs)
 
-    QuestKingDB.dragX = x
-    QuestKingDB.dragY = y
+    QuestKingDB.dragOrigin = point
+    QuestKingDB.dragRelativePoint = relativePoint
+    QuestKingDB.dragX = xOfs
+    QuestKingDB.dragY = yOfs
 
     QuestKing:UpdateTracker()
 end
 
 function Tracker:InitDrag()
-    local dragOrigin = QuestKingDB.dragOrigin or "TOPRIGHT"
-    local dragX = QuestKingDB.dragX
-    local dragY = QuestKingDB.dragY
+    local point, relativePoint, xOfs, yOfs = GetSavedDragPoint()
 
     self:ClearAllPoints()
-
-    if dragX == nil or dragY == nil then
-        self:SetPoint(dragOrigin, UIParent, "CENTER", 0, 0)
-    else
-        self:SetPoint(dragOrigin, UIParent, dragOrigin, dragX, dragY)
-    end
+    self:SetPoint(point, UIParent, relativePoint, xOfs, yOfs)
 
     self:CheckDrag()
 end
 
 function Tracker:ToggleDrag()
+    EnsureSavedVariables()
+
     QuestKingDB.dragLocked = not QuestKingDB.dragLocked
     self:CheckDrag()
     return QuestKingDB.dragLocked
 end
 
 function Tracker:CheckDrag()
+    EnsureSavedVariables()
+
     local dragLocked = QuestKingDB.dragLocked
 
     if dragLocked == false then

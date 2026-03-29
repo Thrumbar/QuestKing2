@@ -502,13 +502,11 @@ local function EnsureSavedVariables()
         QuestKingDB.dbTrackerScale = nil
     end
 
-    if QuestKingDB.dragLocked == nil then
-        QuestKingDB.dragLocked = false
-    end
-
+    QuestKingDB.dragLocked = QuestKingDB.dragLocked == true
     QuestKingDB.dragOrigin = QuestKingDB.dragOrigin or "TOPRIGHT"
-    QuestKingDB.dragX = QuestKingDB.dragX or nil
-    QuestKingDB.dragY = QuestKingDB.dragY or nil
+    QuestKingDB.dragRelativePoint = QuestKingDB.dragRelativePoint or QuestKingDB.dragOrigin
+    QuestKingDB.dragX = tonumber(QuestKingDB.dragX)
+    QuestKingDB.dragY = tonumber(QuestKingDB.dragY)
 end
 
 local function HookTrackingFunctions()
