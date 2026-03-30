@@ -8,6 +8,12 @@
 --   - prey quests
 --   - scenarios
 --   - timers / challenge content
+--
+-- Auto-watch fixes:
+--   - handles modern QUEST_ACCEPTED payloads correctly
+--   - respects Blizzard autoQuestWatch for all newly accepted quests
+--   - does not skip task quests
+--   - retries once on the next frame if quest data is not ready yet
 
 local addonName, QuestKing = ...
 
@@ -88,6 +94,14 @@ local function GetNumQuestWatchesCompat()
     return 0
 end
 
+local function GetMaxQuestWatchesCompat()
+    if type(MAX_WATCHABLE_QUESTS) == "number" and MAX_WATCHABLE_QUESTS > 0 then
+        return MAX_WATCHABLE_QUESTS
+    end
+
+    return 25
+end
+
 local function GetQuestLogIndexByIDCompat(questID)
     if not questID then
         return nil
@@ -132,6 +146,34 @@ local function GetQuestIDFromQuestLogIndexCompat(questLogIndex)
     return nil
 end
 
+local function NormalizeQuestAcceptedPayload(...)
+    local a, b = ...
+
+    -- Mainline / Retail / Midnight:
+    -- QUEST_ACCEPTED(questID)
+    if b == nil then
+        local questID = a
+        local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+        return questLogIndex, questID
+    end
+
+    -- Classic-style payload:
+    -- QUEST_ACCEPTED(questLogIndex, questID)
+    return a, b
+end
+
+local function IsQuestWatchedCompat(questID, questLogIndex)
+    if questID and C_QuestLog and C_QuestLog.IsQuestWatched then
+        return C_QuestLog.IsQuestWatched(questID) and true or false
+    end
+
+    if questLogIndex and _G.IsQuestWatched then
+        return _G.IsQuestWatched(questLogIndex) and true or false
+    end
+
+    return false
+end
+
 local function AddQuestWatchCompat(questLogIndex, questID)
     if C_QuestLog and C_QuestLog.AddQuestWatch then
         if not questID then
@@ -139,12 +181,7 @@ local function AddQuestWatchCompat(questLogIndex, questID)
         end
 
         if questID then
-            if Enum and Enum.QuestWatchType and Enum.QuestWatchType.Automatic ~= nil then
-                C_QuestLog.AddQuestWatch(questID, Enum.QuestWatchType.Automatic)
-            else
-                C_QuestLog.AddQuestWatch(questID)
-            end
-            return true
+            return C_QuestLog.AddQuestWatch(questID) and true or false
         end
 
         return false
@@ -165,8 +202,7 @@ local function RemoveQuestWatchCompat(questLogIndex, questID)
         end
 
         if questID then
-            C_QuestLog.RemoveQuestWatch(questID)
-            return true
+            return C_QuestLog.RemoveQuestWatch(questID) and true or false
         end
 
         return false
@@ -219,6 +255,53 @@ local function IsPreyQuestCompat(questID)
 
     if C_QuestLog and C_QuestLog.GetActivePreyQuest then
         return C_QuestLog.GetActivePreyQuest() == questID
+    end
+
+    return false
+end
+
+local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
+    if not GetCVarBoolCompat("autoQuestWatch") then
+        return false
+    end
+
+    if not questID and questLogIndex then
+        questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
+    end
+
+    if not questLogIndex and questID then
+        questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    end
+
+    if IsQuestWatchedCompat(questID, questLogIndex) then
+        return true
+    end
+
+    if GetNumQuestWatchesCompat() >= GetMaxQuestWatchesCompat() then
+        return false
+    end
+
+    if AddQuestWatchCompat(questLogIndex, questID) then
+        return true
+    end
+
+    if not didRetry and C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            local retryQuestID = questID
+            local retryQuestLogIndex = questLogIndex
+
+            if not retryQuestID and retryQuestLogIndex then
+                retryQuestID = GetQuestIDFromQuestLogIndexCompat(retryQuestLogIndex)
+            end
+
+            if not retryQuestLogIndex and retryQuestID then
+                retryQuestLogIndex = GetQuestLogIndexByIDCompat(retryQuestID)
+            end
+
+            if TryAutoWatchQuest(retryQuestLogIndex, retryQuestID, true) then
+                QuestKing:UpdateTracker()
+            end
+        end)
     end
 
     return false
@@ -313,23 +396,16 @@ end
 -- -----------------------------------------------------------------------------
 
 Events.QUEST_ACCEPTED = function(self, event, ...)
-    local questLogIndex, questID = ...
+    local questLogIndex, questID = NormalizeQuestAcceptedPayload(...)
 
-    if not questID and questLogIndex then
-        questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
-    end
+    local isTaskQuest = IsTaskQuestCompat(questID)
 
-    if IsTaskQuestCompat(questID) then
+    -- Respect Blizzard auto-watch for all newly accepted quests, including campaign and task quests.
+    TryAutoWatchQuest(questLogIndex, questID, false)
+
+    if isTaskQuest then
         if SOUNDKIT and SOUNDKIT.UI_SCENARIO_STAGE_END then
             PlaySoundSafe(SOUNDKIT.UI_SCENARIO_STAGE_END)
-        end
-        QuestKing:OnQuestAccepted(questID)
-        return
-    end
-
-    if GetCVarBoolCompat("autoQuestWatch") then
-        if GetNumQuestWatchesCompat() < 25 then
-            AddQuestWatchCompat(questLogIndex, questID)
         end
     end
 
