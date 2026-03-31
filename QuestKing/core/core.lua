@@ -10,7 +10,7 @@ local WatchButton = QuestKing.WatchButton or {}
 local Tracker = QuestKing.Tracker or CreateFrame("Frame")
 
 local format = string.format
-local tonumber = tonumber
+local type = type
 local pairs = pairs
 local type = type
 local unpack = unpack
@@ -26,6 +26,14 @@ local function SafeCall(obj, method, ...)
     if type(fn) == "function" then
         return fn(obj, ...)
     end
+end
+
+local function SafePublicNumberOrNil(value)
+    if type(value) == "number" then
+        return value
+    end
+
+    return nil
 end
 
 local function SafeGetTrackedAchievementCount()
@@ -182,8 +190,16 @@ function QuestKing:StartCombatTimer()
 end
 
 function QuestKing:OnPlayerLevelUp(newLevel)
-    checkPendingPlayerLevel = tonumber(newLevel)
-    QueueUpdateChecker()
+    local safeLevel = SafePublicNumberOrNil(newLevel)
+
+    if safeLevel and safeLevel > 0 then
+        checkPendingPlayerLevel = safeLevel
+        QueueUpdateChecker()
+        return
+    end
+
+    checkPendingPlayerLevel = false
+    QuestKing:UpdateTracker()
 end
 
 local function MarkQuestFresh(questID)

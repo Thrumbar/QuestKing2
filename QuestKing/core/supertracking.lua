@@ -12,10 +12,10 @@ local supertrackPending = false
 local activeSuperTrackedQuestID = 0
 
 local function NormalizeQuestID(questID)
-    questID = tonumber(questID)
-    if not questID or questID < 1 then
+    if type(questID) ~= "number" or questID < 1 then
         return 0
     end
+
     return questID
 end
 

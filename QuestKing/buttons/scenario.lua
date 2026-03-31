@@ -8,7 +8,6 @@ local WatchButton = QuestKing.WatchButton
 local getObjectiveColor = QuestKing.GetObjectiveColor
 
 local format = string.format
-local tonumber = tonumber
 local type = type
 local min = math.min
 local max = math.max
@@ -32,6 +31,18 @@ local mouseHandlerScenario = {}
 -- ---------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------
+
+local function SafePublicNumber(value, fallback)
+    if type(value) == "number" then
+        return value
+    end
+
+    if fallback ~= nil then
+        return fallback
+    end
+
+    return 0
+end
 
 local function SafeGetScenarioInfo()
     if C_ScenarioInfo and C_ScenarioInfo.GetScenarioInfo then
@@ -77,7 +88,7 @@ local function SafeGetScenarioStepInfo(stepIndex)
         if info then
             return info.title or nil,
                 info.description or nil,
-                tonumber(info.numCriteria) or 0,
+                SafePublicNumber(info.numCriteria, 0),
                 info.stepFailed and true or false,
                 info.isBonusStep and true or false,
                 info.isForCurrentStepOnly and true or false,
@@ -149,14 +160,14 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
                 return info.description or "",
                     info.criteriaType,
                     info.completed and true or false,
-                    tonumber(info.quantity) or 0,
-                    tonumber(info.totalQuantity) or 0,
+                    SafePublicNumber(info.quantity, 0),
+                    SafePublicNumber(info.totalQuantity, 0),
                     info.flags,
                     info.assetID,
                     info.quantityString,
                     info.criteriaID,
-                    tonumber(info.duration) or 0,
-                    tonumber(info.elapsed) or 0,
+                    SafePublicNumber(info.duration, 0),
+                    SafePublicNumber(info.elapsed, 0),
                     info.failed and true or false,
                     info.isWeightedProgress and true or false
             end
@@ -168,14 +179,14 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
                 return info.description or "",
                     info.criteriaType,
                     info.completed and true or false,
-                    tonumber(info.quantity) or 0,
-                    tonumber(info.totalQuantity) or 0,
+                    SafePublicNumber(info.quantity, 0),
+                    SafePublicNumber(info.totalQuantity, 0),
                     info.flags,
                     info.assetID,
                     info.quantityString,
                     info.criteriaID,
-                    tonumber(info.duration) or 0,
-                    tonumber(info.elapsed) or 0,
+                    SafePublicNumber(info.duration, 0),
+                    SafePublicNumber(info.elapsed, 0),
                     info.failed and true or false,
                     info.isWeightedProgress and true or false
             end
@@ -201,14 +212,14 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
             return criteriaString or "",
                 criteriaType,
                 criteriaCompleted and true or false,
-                tonumber(quantity) or 0,
-                tonumber(totalQuantity) or 0,
+                SafePublicNumber(quantity, 0),
+                SafePublicNumber(totalQuantity, 0),
                 flags,
                 assetID,
                 quantityString,
                 criteriaID,
-                tonumber(duration) or 0,
-                tonumber(elapsed) or 0,
+                SafePublicNumber(duration, 0),
+                SafePublicNumber(elapsed, 0),
                 criteriaFailed and true or false,
                 isWeightedProgress and true or false
         end
@@ -232,14 +243,14 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
         return criteriaString or "",
             criteriaType,
             criteriaCompleted and true or false,
-            tonumber(quantity) or 0,
-            tonumber(totalQuantity) or 0,
+            SafePublicNumber(quantity, 0),
+            SafePublicNumber(totalQuantity, 0),
             flags,
             assetID,
             quantityString,
             criteriaID,
-            tonumber(duration) or 0,
-            tonumber(elapsed) or 0,
+            SafePublicNumber(duration, 0),
+            SafePublicNumber(elapsed, 0),
             criteriaFailed and true or false,
             isWeightedProgress and true or false
     end
@@ -248,7 +259,7 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
 end
 
 local function GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
-    declaredNumCriteria = tonumber(declaredNumCriteria) or 0
+    declaredNumCriteria = SafePublicNumber(declaredNumCriteria, 0)
     if declaredNumCriteria > 0 then
         return declaredNumCriteria
     end
@@ -264,7 +275,7 @@ local function GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
 end
 
 local function ClampPercent(value)
-    value = tonumber(value) or 0
+    value = SafePublicNumber(value, 0)
     if value < 0 then
         return 0
     end
@@ -287,8 +298,8 @@ local function GetCriteriaProgressText(quantity, totalQuantity, quantityString)
 end
 
 local function GetCriteriaProgressValue(quantity, totalQuantity, isWeightedProgress)
-    quantity = tonumber(quantity) or 0
-    totalQuantity = tonumber(totalQuantity) or 0
+    quantity = SafePublicNumber(quantity, 0)
+    totalQuantity = SafePublicNumber(totalQuantity, 0)
 
     if totalQuantity > 0 then
         return min(quantity / totalQuantity, 1)
@@ -663,7 +674,7 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
             if line then
                 shownLines = shownLines + 1
 
-                local lastQuant = tonumber(line._lastQuant)
+                local lastQuant = type(line._lastQuant) == "number" and line._lastQuant or nil
                 if lastQuant and quantity > lastQuant and not isNewStep then
                     line:Flash()
                 end

@@ -26,7 +26,6 @@ local opt_showCompletedObjectives = opt.showCompletedObjectives
 local format = string.format
 local match = string.match
 local sort = table.sort
-local tonumber = tonumber
 local wipe = wipe
 
 local UNKNOWN = UNKNOWN or "Unknown"
@@ -594,7 +593,7 @@ local function AddQuestObjectiveLine(button, row, isQuestComplete, isNewQuest)
     end
 
     if not row.finished and not isNewQuest and type(row.numFulfilled) == "number" then
-        local lastQuant = tonumber(line._lastQuant)
+        local lastQuant = type(line._lastQuant) == "number" and line._lastQuant or nil
         if lastQuant and row.numFulfilled > lastQuant and line.Flash then
             line:Flash()
         end

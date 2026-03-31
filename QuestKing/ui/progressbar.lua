@@ -21,7 +21,9 @@ local progressBackdrop = {
 }
 
 local function ClampPercent(percent)
-    percent = tonumber(percent) or 0
+    if type(percent) ~= "number" then
+        percent = 0
+    end
     if percent < 0 then
         return 0
     end

@@ -9,7 +9,6 @@ local getObjectiveColor = QuestKing.GetObjectiveColor
 
 local format = string.format
 local match = string.match
-local tonumber = tonumber
 local type = type
 local pairs = pairs
 local UNKNOWN = UNKNOWN or "Unknown"
@@ -242,8 +241,20 @@ local function shouldSkipTrackedTaskQuest(questID)
     return false
 end
 
+local function SafePublicNumber(value, fallback)
+    if type(value) == "number" then
+        return value
+    end
+
+    if fallback ~= nil then
+        return fallback
+    end
+
+    return 0
+end
+
 local function clamp01(value)
-    value = tonumber(value) or 0
+    value = SafePublicNumber(value, 0)
     if value < 0 then
         return 0
     end
@@ -254,10 +265,7 @@ local function clamp01(value)
 end
 
 local function normalizeObjectiveNumbers(curValue, maxValue)
-    curValue = tonumber(curValue)
-    maxValue = tonumber(maxValue)
-
-    if not curValue or not maxValue or maxValue <= 0 then
+    if type(curValue) ~= "number" or type(maxValue) ~= "number" or maxValue <= 0 then
         return nil, nil
     end
 
@@ -399,7 +407,7 @@ function QuestKing:UpdateTrackerBonusObjectives()
             local supersededIndex = getSupersedingStep(bonusStepIndex)
             if supersededIndex then
                 local _, _, numCriteria, stepFailed = C_Scenario.GetStepInfo(bonusStepIndex)
-                numCriteria = tonumber(numCriteria) or 0
+                numCriteria = SafePublicNumber(numCriteria, 0)
 
                 local completed = true
 
@@ -489,7 +497,7 @@ function setButtonToBonusTask(button, questID)
         end
 
         if objectiveType == "progressbar" then
-            local percent = tonumber(getQuestProgressBarPercentCompat(questID)) or 0
+            local percent = SafePublicNumber(getQuestProgressBarPercentCompat(questID), 0)
             if percent < 0 then
                 percent = 0
             elseif percent > 100 then
@@ -510,7 +518,7 @@ function setButtonToBonusTask(button, questID)
             local line = button:AddLine(format("  %s", leftText), rightText, r, g, b)
 
             if line and currentValue then
-                local lastQuant = tonumber(line._lastQuant)
+                local lastQuant = type(line._lastQuant) == "number" and line._lastQuant or nil
                 if lastQuant and currentValue > lastQuant then
                     line:Flash()
                 end
@@ -627,7 +635,7 @@ function QuestKing:OnCriteriaComplete(id)
         local button = WatchButton:GetKeyedRaw("bonus_step", bonusStepIndex)
 
         local _, _, numCriteria = C_Scenario.GetStepInfo(bonusStepIndex)
-        numCriteria = tonumber(numCriteria) or 0
+        numCriteria = SafePublicNumber(numCriteria, 0)
 
         local matchedCriteria = false
         local allCriteriaComplete = numCriteria > 0
