@@ -59,20 +59,8 @@
                 self:UnregisterEvent("BAG_UPDATE_COOLDOWN");
             </OnHide>
 
-            <OnEnter>
-                if self.questLogIndex and GameTooltip then
-                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
-                    if GameTooltip.SetQuestLogSpecialItem then
-                        GameTooltip:SetQuestLogSpecialItem(self.questLogIndex);
-                    end
-                end
-            </OnEnter>
-
-            <OnLeave>
-                if GameTooltip then
-                    GameTooltip:Hide();
-                end
-            </OnLeave>
+            <OnEnter function="QuestKing_QuestObjectiveItem_OnEnter"/>
+            <OnLeave function="QuestKing_QuestObjectiveItem_OnLeave"/>
         </Scripts>
 
         <NormalTexture parentKey="NormalTexture" file="Interface\Buttons\UI-Quickslot2">

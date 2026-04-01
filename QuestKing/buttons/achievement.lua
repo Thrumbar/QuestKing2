@@ -1,5 +1,9 @@
 -- achievement.lua (QuestKing)
 -- Renders tracked achievements in the custom watch window.
+-- Midnight-safe tooltip handling:
+--   - never stores addon state on GameTooltip
+--   - never rescales Blizzard's shared GameTooltip
+--   - only uses SetOwner / AddLine / Show
 
 local addonName, QuestKing = ...
 
@@ -12,6 +16,10 @@ local format = string.format
 local sort = table.sort
 local tinsert = table.insert
 local tconcat = table.concat
+local type = type
+local pairs = pairs
+local tostring = tostring
+local GetTime = GetTime
 
 local HAS_CONTENT_TRACKING = C_ContentTracking and Enum and Enum.ContentTrackingType
 local HAS_C_ACHIEVEMENTINFO = C_AchievementInfo and C_AchievementInfo.GetAchievementInfo
@@ -127,17 +135,17 @@ local function Safe_GetAchievementCriteriaInfo(achievementID, index)
         local c = C_AchievementInfo.GetCriteriaInfo(achievementID, index)
         if c then
             return c.description or "",
-                   c.criteriaType or 0,
-                   c.completed or false,
-                   c.quantity or 0,
-                   c.requiredQuantity or c.maxQuantity or 0,
-                   c.flags,
-                   c.assetID,
-                   c.quantityString,
-                   c.criteriaID,
-                   c.isEligible,
-                   c.duration,
-                   c.elapsed
+                c.criteriaType or 0,
+                c.completed or false,
+                c.quantity or 0,
+                c.requiredQuantity or c.maxQuantity or 0,
+                c.flags,
+                c.assetID,
+                c.quantityString,
+                c.criteriaID,
+                c.isEligible,
+                c.duration,
+                c.elapsed
         end
     end
 
@@ -325,16 +333,12 @@ function mouseHandlerAchievement:TitleButtonOnEnter()
     local achievementID = button.achievementID
     local name, points, completed, month, day, year, desc = Safe_GetAchievementInfo(achievementID)
 
-    GameTooltip:SetOwner(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
-
-    if opt.tooltipScale then
-        if not GameTooltip.__QuestKingPreviousScale then
-            GameTooltip.__QuestKingPreviousScale = GameTooltip:GetScale()
-        end
-        GameTooltip:SetScale(opt.tooltipScale)
+    if not GameTooltip then
+        return
     end
 
-    GameTooltip:AddLine(name or "Achievement", 1, 0.914, 0.682, 1)
+    GameTooltip:SetOwner(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    GameTooltip:SetText(name or "Achievement", 1, 0.914, 0.682, 1)
 
     if points and points > 0 then
         local pointsText
@@ -348,7 +352,7 @@ function mouseHandlerAchievement:TitleButtonOnEnter()
 
     GameTooltip:AddLine(" ")
 
-    if desc and #desc > 0 then
+    if desc and desc ~= "" then
         GameTooltip:AddLine(desc, 1, 1, 1, 1)
     end
 

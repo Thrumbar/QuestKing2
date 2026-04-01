@@ -8,9 +8,22 @@ local animatingData = nil
 local tinsert = table.insert
 local tremove = table.remove
 local type = type
-local unpack = unpack
+local tonumber = tonumber
+local unpack = table.unpack or unpack
 
 local REWARD_SOUND_KIT = 45142
+
+local function SafeUpdateTracker()
+    if QuestKing and QuestKing.UpdateTracker then
+        QuestKing:UpdateTracker()
+    end
+end
+
+local function SafeClearDummyTask(questID)
+    if QuestKing and QuestKing.ClearDummyTask then
+        QuestKing:ClearDummyTask(questID)
+    end
+end
 
 local function GetPlayerMaxLevelSafe()
     if type(IsPlayerAtEffectiveMaxLevel) == "function" then
@@ -112,8 +125,8 @@ local function QueueDummyTaskCleanup(questID, delay)
     end
 
     local function Cleanup()
-        QuestKing:ClearDummyTask(questID)
-        QuestKing:UpdateTracker()
+        SafeClearDummyTask(questID)
+        SafeUpdateTracker()
     end
 
     if C_Timer and type(C_Timer.After) == "function" then
@@ -149,11 +162,35 @@ local function EnsureRewardFramePool(rewardsFrame)
     return rewardsFrame.rewardFrames
 end
 
+local function ResetRewardItemFrame(rewardItem)
+    if not rewardItem then
+        return
+    end
+
+    if rewardItem.Anim and rewardItem.Anim:IsPlaying() then
+        rewardItem.Anim:Stop()
+    end
+
+    if rewardItem.Count then
+        rewardItem.Count:SetText("")
+        rewardItem.Count:Hide()
+    end
+
+    if rewardItem.Label then
+        rewardItem.Label:SetText("")
+    end
+
+    if rewardItem.ItemIcon then
+        rewardItem.ItemIcon:SetTexture(nil)
+    end
+end
+
 local function AcquireRewardItemFrame(rewardsFrame, index)
     local frames = EnsureRewardFramePool(rewardsFrame)
     local rewardItem = frames[index]
 
     if rewardItem then
+        ResetRewardItemFrame(rewardItem)
         return rewardItem
     end
 
@@ -166,6 +203,7 @@ local function AcquireRewardItemFrame(rewardsFrame, index)
         rewardItem:SetPoint("TOPLEFT", frames[index - 1], "BOTTOMLEFT", 0, -4)
     end
 
+    ResetRewardItemFrame(rewardItem)
     return rewardItem
 end
 
@@ -174,9 +212,7 @@ local function HideUnusedRewardFrames(rewardsFrame, firstUnusedIndex)
     for index = firstUnusedIndex, #frames do
         local frame = frames[index]
         if frame then
-            if frame.Anim and frame.Anim:IsPlaying() then
-                frame.Anim:Stop()
-            end
+            ResetRewardItemFrame(frame)
             frame:Hide()
         end
     end
@@ -279,7 +315,7 @@ function QuestKing:AddReward(button, questID, xp, money)
         money = GetQuestRewardMoneyCompat(questID)
     end
 
-    if type(money) == "number" and money > 0 then
+    if type(money) == "number" and money > 0 and type(GetMoneyString) == "function" then
         data.rewards[#data.rewards + 1] = {
             label = GetMoneyString(money),
             texture = "Interface\\Icons\\inv_misc_coin_01",
@@ -299,6 +335,7 @@ end
 function QuestKing:AnimateReward()
     local rewardsFrame = GetRewardsFrame()
     if not rewardsFrame then
+        animatingData = nil
         return
     end
 
@@ -307,6 +344,7 @@ function QuestKing:AnimateReward()
     end
 
     if #rewardQueue == 0 then
+        animatingData = nil
         rewardsFrame:Hide()
         return
     end
@@ -328,7 +366,7 @@ function QuestKing:AnimateReward()
     for index = 1, numRewards do
         local rewardItem = AcquireRewardItemFrame(rewardsFrame, index)
         local rewardData = data.rewards[index]
-        local count = rewardData.count or 0
+        local count = tonumber(rewardData.count) or 0
 
         if count > 1 then
             rewardItem.Count:Show()
@@ -338,7 +376,9 @@ function QuestKing:AnimateReward()
             rewardItem.Count:SetText("")
         end
 
-        rewardItem.Label:SetFontObject(rewardData.font)
+        if rewardItem.Label and rewardData.font and rewardItem.Label.SetFontObject then
+            rewardItem.Label:SetFontObject(rewardData.font)
+        end
         rewardItem.Label:SetText(rewardData.label or "")
         rewardItem.ItemIcon:SetTexture(rewardData.texture)
         rewardItem:Show()

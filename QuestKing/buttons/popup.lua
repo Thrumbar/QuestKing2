@@ -6,6 +6,7 @@ local WatchButton = QuestKing.WatchButton
 
 local pairs = pairs
 local tonumber = tonumber
+local type = type
 local find = string.find
 local gsub = string.gsub
 
@@ -18,6 +19,18 @@ local itemPopups = {}
 local questStartItemSet = nil
 
 local mouseHandlerPopup = {}
+
+local function ResetPopupButtonState(button)
+    if not button then
+        return
+    end
+
+    button._popupType = nil
+    button._itemID = nil
+    button.questIndex = nil
+    button.questLogIndex = nil
+    button.questID = nil
+end
 
 local function PlaySoundCompat(soundKitID, legacyID)
     if not PlaySound then
@@ -296,6 +309,8 @@ local function BuildQuestStartItemSet()
 end
 
 local function SetButtonToItemPopup(button, itemID, itemName)
+    ResetPopupButtonState(button)
+
     button.mouseHandler = mouseHandlerPopup
     button._popupType = "ITEM"
     button._itemID = itemID
@@ -313,6 +328,8 @@ end
 local function SetButtonToPopup(button, questID, popupType)
     local questLogIndex = GetQuestLogIndexByIDCompat(questID)
     local taggedTitle
+
+    ResetPopupButtonState(button)
 
     button.mouseHandler = mouseHandlerPopup
     button._popupType = popupType
@@ -400,36 +417,48 @@ function QuestKing:UpdateTrackerPopups()
 end
 
 function mouseHandlerPopup:ButtonOnClick(mouse)
-    if self._popupType == "ITEM" then
+    local popupType = self._popupType
+
+    if popupType == "ITEM" then
+        local itemID = self._itemID
+        if not itemID then
+            return
+        end
+
         if mouse == "RightButton" then
-            itemPopups[self._itemID] = nil
+            itemPopups[itemID] = nil
             QuestKing:UpdateTracker()
             return
         end
 
-        UseContainerItemByID(self._itemID)
-        itemPopups[self._itemID] = nil
+        UseContainerItemByID(itemID)
+        itemPopups[itemID] = nil
         QuestKing:UpdateTracker()
+        return
+    end
+
+    local questID = self.questID
+    if not questID then
         return
     end
 
     if mouse == "RightButton" then
-        RemoveAutoQuestPopUpCompat(self.questID)
+        RemoveAutoQuestPopUpCompat(questID)
         QuestKing:UpdateTracker()
         return
     end
 
-    if self._popupType == "OFFER" then
+    if popupType == "OFFER" then
         if self.questIndex and ShowQuestOffer then
             ShowQuestOffer(self.questIndex)
         end
-        RemoveAutoQuestPopUpCompat(self.questID)
+        RemoveAutoQuestPopUpCompat(questID)
         QuestKing:UpdateTracker()
-    elseif self._popupType == "COMPLETE" then
+    elseif popupType == "COMPLETE" then
         if self.questIndex and ShowQuestComplete then
             ShowQuestComplete(self.questIndex)
         end
-        RemoveAutoQuestPopUpCompat(self.questID)
+        RemoveAutoQuestPopUpCompat(questID)
         QuestKing:UpdateTracker()
     end
 end

@@ -36,7 +36,7 @@
         </Layers>
 
         <Animations>
-            <AnimationGroup parentKey="Anim">
+            <AnimationGroup parentKey="Anim" setToFinalAlpha="true">
                 <Alpha childKey="ItemIcon" startDelay="0.95" duration="0.30" order="1" fromAlpha="0" toAlpha="1"/>
                 <Alpha childKey="ItemIcon" startDelay="6.00" duration="1.00" order="2" fromAlpha="1" toAlpha="0"/>
 

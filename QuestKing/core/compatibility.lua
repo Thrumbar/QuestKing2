@@ -6,6 +6,9 @@ local Compat = {}
 local setupComplete = false
 local updateHookInstalled = false
 
+local hookedObjectiveFrames = setmetatable({}, { __mode = "k" })
+local compatibilityHeaders = setmetatable({}, { __mode = "k" })
+
 local function IsAddOnLoadedCompat(name)
     if C_AddOns and C_AddOns.IsAddOnLoaded then
         return C_AddOns.IsAddOnLoaded(name)
@@ -71,7 +74,8 @@ local function CreateCompatibilityHeader(parentFrame)
     end
 
     local header = QuestKing.WatchButton:Create()
-    header.__QuestKingCompatibilityHeader = true
+    compatibilityHeaders[header] = true
+
     header:SetParent(parentFrame)
     header.mouseHandler = header.mouseHandler or {}
     header.mouseHandler.TitleButtonOnClick = function()
@@ -91,7 +95,7 @@ local function EnsureHeader(frame)
         return nil
     end
 
-    if not frame.Header or not frame.Header.__QuestKingCompatibilityHeader then
+    if not frame.Header or not compatibilityHeaders[frame.Header] then
         frame.Header = CreateCompatibilityHeader(frame)
     end
 
@@ -200,11 +204,11 @@ local function AddQuestKingUpdateHook(frame)
 end
 
 local function HookPetTrackerObjectives(frame)
-    if not frame or frame.__QuestKingCompatibilityHooked then
+    if not frame or hookedObjectiveFrames[frame] then
         return
     end
 
-    frame.__QuestKingCompatibilityHooked = true
+    hookedObjectiveFrames[frame] = true
 
     if hooksecurefunc and type(frame.Startup) == "function" then
         SafeCall(hooksecurefunc, frame, "Startup", function(self)

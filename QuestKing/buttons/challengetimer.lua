@@ -6,6 +6,8 @@ local GetTimeStringFromSecondsShort = QuestKing.GetTimeStringFromSecondsShort
 
 local ceil = math.ceil
 local GetTime = GetTime
+local type = type
+local tonumber = tonumber
 
 local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
 local CHALLENGE_BAR_HEIGHT = 17
@@ -83,8 +85,14 @@ local function GetWorldElapsedTimerTypeValue(name, fallback)
     return fallback
 end
 
-local WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE = GetWorldElapsedTimerTypeValue("ChallengeMode", LE_WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE or 2)
-local WORLD_ELAPSED_TIMER_TYPE_PROVING_GROUND = GetWorldElapsedTimerTypeValue("ProvingGrounds", LE_WORLD_ELAPSED_TIMER_TYPE_PROVING_GROUND or 1)
+local WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE = GetWorldElapsedTimerTypeValue(
+    "ChallengeMode",
+    LE_WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE or 2
+)
+local WORLD_ELAPSED_TIMER_TYPE_PROVING_GROUND = GetWorldElapsedTimerTypeValue(
+    "ProvingGrounds",
+    LE_WORLD_ELAPSED_TIMER_TYPE_PROVING_GROUND or 1
+)
 
 local function ResetChallengeBarVisuals(challengeBar)
     if not challengeBar then
@@ -102,6 +110,8 @@ local function ResetChallengeBarVisuals(challengeBar)
         challengeBar.barPulserAnim:Stop()
         challengeBar.barPulserAnim.cycles = 0
     end
+
+    soundPlayed = false
 
     challengeBar.duration = nil
     challengeBar.elapsed = nil
@@ -130,7 +140,7 @@ local function OnUpdateProvingGroundsTimer(self, elapsed)
     local elapsedNew = (self.elapsed or 0) + elapsed
     self.elapsed = elapsedNew
 
-    local duration = self.duration or 0
+    local duration = tonumber(self.duration) or 0
     local timeLeft = duration - elapsedNew
     if timeLeft < 0 then
         timeLeft = 0
@@ -162,13 +172,13 @@ local function SetButtonToProvingGroundsTimer(button, elapsed, diffID, currWave,
         challengeBar:SetStatusBarColor(0.76, 0.38, 0.15)
         challengeBarIcon:SetTexture([[Interface\Challenges\challenges-bronze-sm]])
     elseif diffID == 2 then
-        challengeBar:SetStatusBarColor(0.64, 0.6, 0.6)
+        challengeBar:SetStatusBarColor(0.64, 0.60, 0.60)
         challengeBarIcon:SetTexture([[Interface\Challenges\challenges-silver-sm]])
     elseif diffID == 3 then
         challengeBar:SetStatusBarColor(0.93, 0.67, 0.25)
         challengeBarIcon:SetTexture([[Interface\Challenges\challenges-gold-sm]])
     elseif diffID == 4 then
-        challengeBar:SetStatusBarColor(0.6, 0.75, 0.7)
+        challengeBar:SetStatusBarColor(0.60, 0.75, 0.70)
         challengeBarIcon:SetTexture([[Interface\Challenges\challenges-plat-sm]])
     else
         challengeBar:SetStatusBarColor(0.3, 0.3, 0.3)
@@ -319,11 +329,24 @@ function QuestKing.ProvingGroundsScoreUpdate(score)
 end
 
 local function UpdateChallengeMedal(self, elapsedTime)
+    local medalTimes = self._medalTimes
+    if type(medalTimes) ~= "table" or #medalTimes == 0 then
+        self._currentMedalTime = nil
+        self._currentMedal = nil
+        self:SetScript("OnUpdate", nil)
+        self.text:SetText(CHALLENGES_TIMER_NO_MEDAL or "No Medal")
+        self:SetMinMaxValues(0, 1)
+        self:SetValue(1)
+        self:SetStatusBarColor(0.3, 0.3, 0.3)
+        self.icon:Hide()
+        return
+    end
+
     local prevMedal = self._currentMedal
     local prevMedalTime = 0
 
-    for i = #self._medalTimes, 1, -1 do
-        local curMedalTime = self._medalTimes[i]
+    for i = #medalTimes, 1, -1 do
+        local curMedalTime = medalTimes[i]
         if elapsedTime < curMedalTime then
             self._currentMedalTime = curMedalTime
             self._currentMedal = i
@@ -334,14 +357,20 @@ local function UpdateChallengeMedal(self, elapsedTime)
                 self.icon:SetTexture([[Interface\Challenges\challenges-bronze-sm]])
                 self.icon:Show()
                 if prevMedal then
-                    PlaySoundCompat(SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDAL_EXPIRES_SILVER_TO_BRONZE, "UI_Challenges_MedalExpires_SilvertoBronze")
+                    PlaySoundCompat(
+                        SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDAL_EXPIRES_SILVER_TO_BRONZE,
+                        "UI_Challenges_MedalExpires_SilvertoBronze"
+                    )
                 end
             elseif i == 2 then
                 self:SetStatusBarColor(0.68, 0.64, 0.64)
                 self.icon:SetTexture([[Interface\Challenges\challenges-silver-sm]])
                 self.icon:Show()
                 if prevMedal then
-                    PlaySoundCompat(SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDAL_EXPIRES_GOLD_TO_SILVER, "UI_Challenges_MedalExpires_GoldtoSilver")
+                    PlaySoundCompat(
+                        SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDAL_EXPIRES_GOLD_TO_SILVER,
+                        "UI_Challenges_MedalExpires_GoldtoSilver"
+                    )
                 end
             elseif i == 3 then
                 self:SetStatusBarColor(0.93, 0.67, 0.25)
@@ -420,8 +449,12 @@ local function SetButtonToChallengeTimer(button, timerID, elapsedTime, ...)
     local challengeBar = button:AddChallengeBar()
     challengeBar._medalTimes = challengeBar._medalTimes or {}
 
-    for i = 1, select("#", ...) do
+    local count = select("#", ...)
+    for i = 1, count do
         challengeBar._medalTimes[i] = select(i, ...)
+    end
+    for i = count + 1, #challengeBar._medalTimes do
+        challengeBar._medalTimes[i] = nil
     end
 
     challengeBar._currentMedalTime = -1
@@ -441,11 +474,11 @@ end
 local function ParseChallengeTimers(...)
     for i = 1, select("#", ...) do
         local timerID = select(i, ...)
-        local description, elapsedTime, timerType = GetWorldElapsedTime(timerID)
+        local _, elapsedTime, timerType = GetWorldElapsedTime(timerID)
         local _, _, _, _, _, _, _, mapID = GetInstanceInfo()
 
         if timerID == 1 and timerType == 0 and mapID == 1148 then
-            description, elapsedTime, timerType = GetWorldElapsedTime(2)
+            _, elapsedTime, timerType = GetWorldElapsedTime(2)
         end
 
         if timerType == WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE then

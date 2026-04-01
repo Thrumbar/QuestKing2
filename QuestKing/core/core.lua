@@ -10,27 +10,28 @@ local WatchButton = QuestKing.WatchButton or {}
 local Tracker = QuestKing.Tracker or CreateFrame("Frame")
 
 local format = string.format
-local type = type
 local pairs = pairs
 local type = type
-local unpack = unpack
+local tostring = tostring
+local tonumber = tonumber
+local unpack = table.unpack or unpack
 
 local UpdateCheckFrame = CreateFrame("Frame", "QuestKing_UpdateCheckFrame")
 
 local checkCombat = false
 local checkPendingPlayerLevel = false
 local initialized = false
+local trackingHooksInstalled = false
 
 local function SafeCall(obj, method, ...)
     local fn = obj and obj[method]
-    if type(fn) == "function" then
-        return fn(obj, ...)
+    if type(fn) ~= "function" then
+        return nil
     end
-end
 
-local function SafePublicNumberOrNil(value)
-    if type(value) == "number" then
-        return value
+    local ok, result = pcall(fn, obj, ...)
+    if ok then
+        return result
     end
 
     return nil
@@ -190,16 +191,8 @@ function QuestKing:StartCombatTimer()
 end
 
 function QuestKing:OnPlayerLevelUp(newLevel)
-    local safeLevel = SafePublicNumberOrNil(newLevel)
-
-    if safeLevel and safeLevel > 0 then
-        checkPendingPlayerLevel = safeLevel
-        QueueUpdateChecker()
-        return
-    end
-
-    checkPendingPlayerLevel = false
-    QuestKing:UpdateTracker()
+    checkPendingPlayerLevel = tonumber(newLevel)
+    QueueUpdateChecker()
 end
 
 local function MarkQuestFresh(questID)
@@ -526,6 +519,16 @@ local function EnsureSavedVariables()
 end
 
 local function HookTrackingFunctions()
+    if trackingHooksInstalled then
+        return
+    end
+
+    trackingHooksInstalled = true
+
+    if not hooksecurefunc then
+        return
+    end
+
     if C_QuestLog and C_QuestLog.AddQuestWatch then
         hooksecurefunc(C_QuestLog, "AddQuestWatch", hookAddQuestWatch_Retail)
     end

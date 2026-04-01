@@ -1,21 +1,21 @@
 local addonName, QuestKing = ...
 
-local opt = QuestKing.options
-
 local CQL = C_QuestLog
 local CST = C_SuperTrack
 
 local huge = math.huge
+local tonumber = tonumber
+local type = type
 
 local pendingQuestID = nil
 local supertrackPending = false
 local activeSuperTrackedQuestID = 0
 
 local function NormalizeQuestID(questID)
-    if type(questID) ~= "number" or questID < 1 then
+    questID = tonumber(questID)
+    if not questID or questID < 1 then
         return 0
     end
-
     return questID
 end
 

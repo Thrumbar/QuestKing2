@@ -324,3 +324,21 @@ function QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton)
         SafeSetItemButtonTextureVertexColor(itemButton, 1, 1, 1)
     end
 end
+
+function QuestKing_QuestObjectiveItem_OnEnter(self)
+    if not self or not self.questLogIndex or not GameTooltip then
+        return
+    end
+
+    GameTooltip:SetOwner(self, (opt and opt.tooltipAnchor) or "ANCHOR_RIGHT")
+
+    if GameTooltip.SetQuestLogSpecialItem then
+        GameTooltip:SetQuestLogSpecialItem(self.questLogIndex)
+    end
+end
+
+function QuestKing_QuestObjectiveItem_OnLeave(self)
+    if GameTooltip then
+        GameTooltip:Hide()
+    end
+end

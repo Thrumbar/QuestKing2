@@ -24,6 +24,8 @@ local CQL = C_QuestLog
 local QUEST_FREQUENCY_DAILY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Daily) or LE_QUEST_FREQUENCY_DAILY
 local QUEST_FREQUENCY_WEEKLY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Weekly) or LE_QUEST_FREQUENCY_WEEKLY
 
+local objectiveTrackerShowHookInstalled = false
+
 local function SafeGetQuestInfoByIndex(questIndex)
     if not questIndex or questIndex < 1 then
         return nil
@@ -35,7 +37,7 @@ local function SafeGetQuestInfoByIndex(questIndex)
             local questID = info.questID
             local level = info.level
 
-            if (level == nil) and CQL.GetQuestDifficultyLevel and questID then
+            if level == nil and CQL.GetQuestDifficultyLevel and questID then
                 level = CQL.GetQuestDifficultyLevel(questID)
             end
 
@@ -94,7 +96,8 @@ local function SafeGetQuestTagInfo(questID)
     end
 
     if GetQuestTagInfo and questID then
-        local tagID, tagName, worldQuestType, quality, isElite, tradeskillLineID, displayExpiration = GetQuestTagInfo(questID)
+        local tagID, tagName, worldQuestType, quality, isElite, tradeskillLineID, displayExpiration =
+            GetQuestTagInfo(questID)
         if tagID or tagName or worldQuestType or quality or isElite then
             return {
                 tagID = tagID,
@@ -194,13 +197,14 @@ function QuestKing:DisableBlizzard()
         if ObjectiveTrackerFrame then
             ObjectiveTrackerFrame:UnregisterAllEvents()
             ObjectiveTrackerFrame:Hide()
-            if not ObjectiveTrackerFrame.__QuestKingHideHooked then
+
+            if not objectiveTrackerShowHookInstalled and hooksecurefunc then
                 hooksecurefunc(ObjectiveTrackerFrame, "Show", function(frame)
                     if frame then
                         frame:Hide()
                     end
                 end)
-                ObjectiveTrackerFrame.__QuestKingHideHooked = true
+                objectiveTrackerShowHookInstalled = true
             end
         end
     end)
@@ -234,7 +238,8 @@ function QuestKing.GetObjectiveColor(progress)
         return complete[1], complete[2], complete[3]
     end
 
-    return colorGradient(progress,
+    return colorGradient(
+        progress,
         g0[1], g0[2], g0[3],
         g50[1], g50[2], g50[3],
         g99[1], g99[2], g99[3]

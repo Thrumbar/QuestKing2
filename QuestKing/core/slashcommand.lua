@@ -5,8 +5,11 @@ local Tracker = QuestKing.Tracker
 
 local format = string.format
 local lower = string.lower
+local upper = string.upper
+local tonumber = tonumber
+local tostring = tostring
 local tinsert = table.insert
-local unpack = unpack or table.unpack
+local unpack = table.unpack or unpack
 
 local VALID_ORIGINS = {
     TOPRIGHT = true,
@@ -41,6 +44,7 @@ local function EnsureSavedVariables()
     end
 
     QuestKingDB.dragOrigin = QuestKingDB.dragOrigin or "TOPRIGHT"
+    QuestKingDB.dragRelativePoint = QuestKingDB.dragRelativePoint or QuestKingDB.dragOrigin
 end
 
 local function UpdateTracker(forceBuild)
@@ -50,7 +54,7 @@ local function UpdateTracker(forceBuild)
 end
 
 local function GetTrackerSafe()
-    return QuestKing and QuestKing.Tracker or Tracker
+    return (QuestKing and QuestKing.Tracker) or Tracker
 end
 
 local function PrintHelp()
@@ -212,7 +216,7 @@ Command.origin = function(origin)
         return
     end
 
-    origin = string.upper(origin)
+    origin = upper(origin)
     if not VALID_ORIGINS[origin] then
         Print("Invalid origin. Valid origins are: |cffaaffaaTOPRIGHT BOTTOMRIGHT BOTTOMLEFT TOPLEFT|r")
         return
@@ -220,6 +224,7 @@ Command.origin = function(origin)
 
     QuestKingDB.dragLocked = false
     QuestKingDB.dragOrigin = origin
+    QuestKingDB.dragRelativePoint = origin
     QuestKingDB.dragX = nil
     QuestKingDB.dragY = nil
 
@@ -257,5 +262,3 @@ end
 SLASH_QUESTKING1 = "/questking"
 SLASH_QUESTKING2 = "/qk"
 SlashCmdList.QUESTKING = ParseSlash
-
-QuestKing.Print = Print

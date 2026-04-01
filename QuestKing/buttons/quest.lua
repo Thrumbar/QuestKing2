@@ -26,6 +26,9 @@ local opt_showCompletedObjectives = opt.showCompletedObjectives
 local format = string.format
 local match = string.match
 local sort = table.sort
+local tonumber = tonumber
+local tostring = tostring
+local type = type
 local wipe = wipe
 
 local UNKNOWN = UNKNOWN or "Unknown"
@@ -176,7 +179,8 @@ local function QK_GetTagInfo(questID)
     end
 
     if GetQuestTagInfo and questID then
-        local tagID, tagName, worldQuestType, quality, isElite, tradeskillLineID, displayExpiration = GetQuestTagInfo(questID)
+        local tagID, tagName, worldQuestType, quality, isElite, tradeskillLineID, displayExpiration =
+            GetQuestTagInfo(questID)
         if tagID or tagName or worldQuestType or quality or isElite then
             return {
                 tagID = tagID,
@@ -593,7 +597,7 @@ local function AddQuestObjectiveLine(button, row, isQuestComplete, isNewQuest)
     end
 
     if not row.finished and not isNewQuest and type(row.numFulfilled) == "number" then
-        local lastQuant = type(line._lastQuant) == "number" and line._lastQuant or nil
+        local lastQuant = tonumber(line._lastQuant)
         if lastQuant and row.numFulfilled > lastQuant and line.Flash then
             line:Flash()
         end
@@ -693,14 +697,11 @@ function mouseHandlerQuest:TitleButtonOnEnter()
     local questLogIndex = button.questLogIndex
     local questID = button.questID
 
-    GameTooltip:SetOwner(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
-
-    if opt.tooltipScale then
-        if not GameTooltip.__QuestKingPreviousScale then
-            GameTooltip.__QuestKingPreviousScale = GameTooltip:GetScale()
-        end
-        GameTooltip:SetScale(opt.tooltipScale)
+    if not GameTooltip then
+        return
     end
+
+    GameTooltip:SetOwner(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
 
     if questLogIndex and questLogIndex > 0 and QuestUtils_GetQuestName then
         GameTooltip:SetText(QuestUtils_GetQuestName(questID) or button.title:GetText() or QUESTS_LABEL, 1, 0.82, 0)

@@ -8,6 +8,7 @@ local WatchButton = QuestKing.WatchButton
 local getObjectiveColor = QuestKing.GetObjectiveColor
 
 local format = string.format
+local tonumber = tonumber
 local type = type
 local min = math.min
 local max = math.max
@@ -31,18 +32,6 @@ local mouseHandlerScenario = {}
 -- ---------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------
-
-local function SafePublicNumber(value, fallback)
-    if type(value) == "number" then
-        return value
-    end
-
-    if fallback ~= nil then
-        return fallback
-    end
-
-    return 0
-end
 
 local function SafeGetScenarioInfo()
     if C_ScenarioInfo and C_ScenarioInfo.GetScenarioInfo then
@@ -88,7 +77,7 @@ local function SafeGetScenarioStepInfo(stepIndex)
         if info then
             return info.title or nil,
                 info.description or nil,
-                SafePublicNumber(info.numCriteria, 0),
+                tonumber(info.numCriteria) or 0,
                 info.stepFailed and true or false,
                 info.isBonusStep and true or false,
                 info.isForCurrentStepOnly and true or false,
@@ -160,14 +149,14 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
                 return info.description or "",
                     info.criteriaType,
                     info.completed and true or false,
-                    SafePublicNumber(info.quantity, 0),
-                    SafePublicNumber(info.totalQuantity, 0),
+                    tonumber(info.quantity) or 0,
+                    tonumber(info.totalQuantity) or 0,
                     info.flags,
                     info.assetID,
                     info.quantityString,
                     info.criteriaID,
-                    SafePublicNumber(info.duration, 0),
-                    SafePublicNumber(info.elapsed, 0),
+                    tonumber(info.duration) or 0,
+                    tonumber(info.elapsed) or 0,
                     info.failed and true or false,
                     info.isWeightedProgress and true or false
             end
@@ -179,14 +168,14 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
                 return info.description or "",
                     info.criteriaType,
                     info.completed and true or false,
-                    SafePublicNumber(info.quantity, 0),
-                    SafePublicNumber(info.totalQuantity, 0),
+                    tonumber(info.quantity) or 0,
+                    tonumber(info.totalQuantity) or 0,
                     info.flags,
                     info.assetID,
                     info.quantityString,
                     info.criteriaID,
-                    SafePublicNumber(info.duration, 0),
-                    SafePublicNumber(info.elapsed, 0),
+                    tonumber(info.duration) or 0,
+                    tonumber(info.elapsed) or 0,
                     info.failed and true or false,
                     info.isWeightedProgress and true or false
             end
@@ -212,14 +201,14 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
             return criteriaString or "",
                 criteriaType,
                 criteriaCompleted and true or false,
-                SafePublicNumber(quantity, 0),
-                SafePublicNumber(totalQuantity, 0),
+                tonumber(quantity) or 0,
+                tonumber(totalQuantity) or 0,
                 flags,
                 assetID,
                 quantityString,
                 criteriaID,
-                SafePublicNumber(duration, 0),
-                SafePublicNumber(elapsed, 0),
+                tonumber(duration) or 0,
+                tonumber(elapsed) or 0,
                 criteriaFailed and true or false,
                 isWeightedProgress and true or false
         end
@@ -243,14 +232,14 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
         return criteriaString or "",
             criteriaType,
             criteriaCompleted and true or false,
-            SafePublicNumber(quantity, 0),
-            SafePublicNumber(totalQuantity, 0),
+            tonumber(quantity) or 0,
+            tonumber(totalQuantity) or 0,
             flags,
             assetID,
             quantityString,
             criteriaID,
-            SafePublicNumber(duration, 0),
-            SafePublicNumber(elapsed, 0),
+            tonumber(duration) or 0,
+            tonumber(elapsed) or 0,
             criteriaFailed and true or false,
             isWeightedProgress and true or false
     end
@@ -259,7 +248,7 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
 end
 
 local function GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
-    declaredNumCriteria = SafePublicNumber(declaredNumCriteria, 0)
+    declaredNumCriteria = tonumber(declaredNumCriteria) or 0
     if declaredNumCriteria > 0 then
         return declaredNumCriteria
     end
@@ -275,7 +264,7 @@ local function GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
 end
 
 local function ClampPercent(value)
-    value = SafePublicNumber(value, 0)
+    value = tonumber(value) or 0
     if value < 0 then
         return 0
     end
@@ -298,8 +287,8 @@ local function GetCriteriaProgressText(quantity, totalQuantity, quantityString)
 end
 
 local function GetCriteriaProgressValue(quantity, totalQuantity, isWeightedProgress)
-    quantity = SafePublicNumber(quantity, 0)
-    totalQuantity = SafePublicNumber(totalQuantity, 0)
+    quantity = tonumber(quantity) or 0
+    totalQuantity = tonumber(totalQuantity) or 0
 
     if totalQuantity > 0 then
         return min(quantity / totalQuantity, 1)
@@ -674,7 +663,7 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
             if line then
                 shownLines = shownLines + 1
 
-                local lastQuant = type(line._lastQuant) == "number" and line._lastQuant or nil
+                local lastQuant = tonumber(line._lastQuant)
                 if lastQuant and quantity > lastQuant and not isNewStep then
                     line:Flash()
                 end
@@ -751,6 +740,32 @@ function QuestKing:OnScenarioUpdate(newStage)
     QuestKing:UpdateTracker()
 end
 
+function mouseHandlerScenario:TitleButtonOnClick(mouse, down)
+    local button = self.parent
+    local stepIndex = button.stepIndex
+
+    if mouse == "RightButton" then
+        return
+    end
+
+    if not stepIndex or stepIndex <= 0 then
+        return
+    end
+
+    local _, _, _, _, _, _, _, _, _, rewardQuestIDFromStep = SafeGetScenarioStepInfo(stepIndex)
+    local rewardQuestID = GetScenarioRewardQuestID(stepIndex, rewardQuestIDFromStep)
+    local rewardQuestLogIndex = rewardQuestID and GetQuestLogIndexByIDCompat(rewardQuestID) or nil
+
+    if rewardQuestID and QuestMapFrame_OpenToQuestDetails then
+        QuestMapFrame_OpenToQuestDetails(rewardQuestID)
+        return
+    end
+
+    if rewardQuestLogIndex and QuestObjectiveTracker_OpenQuestMap then
+        QuestObjectiveTracker_OpenQuestMap(nil, rewardQuestLogIndex)
+    end
+end
+
 function mouseHandlerScenario:TitleButtonOnEnter(motion)
     local button = self.parent
     local stepIndex = button.stepIndex
@@ -778,19 +793,11 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
 
     local numCriteria = GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
 
-    if not scenarioName then
+    if not scenarioName or not GameTooltip then
         return
     end
 
     GameTooltip:SetOwner(self, GetTooltipAnchor())
-
-    if opt.tooltipScale then
-        if not GameTooltip.__QuestKingPreviousScale then
-            GameTooltip.__QuestKingPreviousScale = GameTooltip:GetScale()
-        end
-        GameTooltip:SetScale(opt.tooltipScale)
-    end
-
     GameTooltip:AddLine(scenarioName, NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b, 1)
     GameTooltip:AddLine(
         stageName or "Scenario",
@@ -827,7 +834,7 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
                 criteriaCompleted,
                 quantity,
                 totalQuantity,
-                flags,
+                criteriaFlags,
                 assetID,
                 quantityString,
                 criteriaID,
@@ -839,9 +846,9 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
             criteriaString = (criteriaString and criteriaString ~= "") and criteriaString or "Objective"
 
             if criteriaCompleted then
-                if totalQuantity > 0 then
+                if totalQuantity and totalQuantity > 0 then
                     GameTooltip:AddLine(
-                        format("- %s: %d/%d |cff808080(%s)|r", criteriaString, quantity, totalQuantity, COMPLETE),
+                        format("- %s: %d/%d |cff808080(%s)|r", criteriaString, quantity or 0, totalQuantity, COMPLETE),
                         0.2, 0.9, 0.2
                     )
                 elseif quantityString and quantityString ~= "" then
@@ -856,9 +863,9 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
                     )
                 end
             elseif criteriaFailed then
-                if totalQuantity > 0 then
+                if totalQuantity and totalQuantity > 0 then
                     GameTooltip:AddLine(
-                        format("- %s: %d/%d |cff808080(%s)|r", criteriaString, quantity, totalQuantity, FAILED),
+                        format("- %s: %d/%d |cff808080(%s)|r", criteriaString, quantity or 0, totalQuantity, FAILED),
                         1, 0.2, 0.2
                     )
                 elseif quantityString and quantityString ~= "" then
@@ -873,12 +880,21 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
                     )
                 end
             else
-                if totalQuantity > 0 then
-                    GameTooltip:AddLine(format("- %s: %d/%d", criteriaString, quantity, totalQuantity), 1, 1, 1)
+                if totalQuantity and totalQuantity > 0 then
+                    GameTooltip:AddLine(
+                        format("- %s: %d/%d", criteriaString, quantity or 0, totalQuantity),
+                        1, 1, 1
+                    )
                 elseif quantityString and quantityString ~= "" then
-                    GameTooltip:AddLine(format("- %s: %s", criteriaString, quantityString), 1, 1, 1)
+                    GameTooltip:AddLine(
+                        format("- %s: %s", criteriaString, quantityString),
+                        1, 1, 1
+                    )
                 else
-                    GameTooltip:AddLine(format("- %s", criteriaString), 1, 1, 1)
+                    GameTooltip:AddLine(
+                        format("- %s", criteriaString),
+                        1, 1, 1
+                    )
                 end
             end
         end
@@ -891,10 +907,8 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
     if rewardQuestLogIndex then
         local rewardXP = GetQuestLogRewardXP and (GetQuestLogRewardXP(rewardQuestLogIndex) or 0) or 0
         if rewardXP > 0 then
-            if not blankLine then
-                GameTooltip:AddLine(" ")
-                blankLine = true
-            end
+            GameTooltip:AddLine(" ")
+            blankLine = true
             AddTooltipRewardText(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, rewardXP), 1, 1, 1)
         end
 
@@ -916,14 +930,14 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
             local name, texture, numItems, quality = GetQuestLogRewardInfo(i, rewardQuestLogIndex)
             local text
 
-            if numItems and numItems > 1 then
+            if numItems and numItems > 1 and texture and name then
                 text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
             elseif texture and name then
                 text = format(BONUS_OBJECTIVE_REWARD_FORMAT, texture, name)
             end
 
             if text then
-                local color = ITEM_QUALITY_COLORS[quality or 1] or NORMAL_FONT_COLOR
+                local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality or 1] or NORMAL_FONT_COLOR
                 if not blankLine then
                     GameTooltip:AddLine(" ")
                     blankLine = true

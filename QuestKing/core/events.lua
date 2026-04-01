@@ -27,6 +27,9 @@ local Events = {}
 QuestKing.EventsFrame = EventsFrame
 QuestKing.Events = Events
 
+local pairs = pairs
+local type = type
+
 -- -----------------------------------------------------------------------------
 -- Compat / Helpers
 -- -----------------------------------------------------------------------------
@@ -41,7 +44,7 @@ local function PlaySoundSafe(kit)
         return
     end
 
-    if type(kit) == "string" then
+    if type(kit) == "string" or type(kit) == "number" then
         PlaySound(kit)
     end
 end
@@ -299,7 +302,9 @@ local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
             end
 
             if TryAutoWatchQuest(retryQuestLogIndex, retryQuestID, true) then
-                QuestKing:UpdateTracker()
+                if QuestKing and QuestKing.UpdateTracker then
+                    QuestKing:UpdateTracker()
+                end
             end
         end)
     end
@@ -308,7 +313,9 @@ local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
 end
 
 local function UpdateTracker()
-    QuestKing:UpdateTracker()
+    if QuestKing and QuestKing.UpdateTracker then
+        QuestKing:UpdateTracker()
+    end
 end
 
 -- -----------------------------------------------------------------------------
@@ -335,7 +342,9 @@ local function addonLoaded(self, event, name)
 
     self:SetScript("OnEvent", handleEvent)
 
-    QuestKing:Init()
+    if QuestKing and QuestKing.Init then
+        QuestKing:Init()
+    end
 end
 
 EventsFrame:SetScript("OnEvent", addonLoaded)
@@ -348,7 +357,9 @@ QuestKing.HandleEvent = handleEvent
 -- -----------------------------------------------------------------------------
 
 Events.CHAT_MSG_LOOT = function(self, event, ...)
-    QuestKing:ParseLoot(...)
+    if QuestKing and QuestKing.ParseLoot then
+        QuestKing:ParseLoot(...)
+    end
 end
 
 -- -----------------------------------------------------------------------------
@@ -356,7 +367,7 @@ end
 -- -----------------------------------------------------------------------------
 
 Events.PLAYER_MONEY = function()
-    if QuestKing.watchMoney then
+    if QuestKing and QuestKing.watchMoney and QuestKing.UpdateTracker then
         QuestKing:UpdateTracker()
     end
 end
@@ -369,26 +380,35 @@ Events.QUEST_LOG_UPDATE = UpdateTracker
 Events.QUEST_WATCH_LIST_CHANGED = UpdateTracker
 
 Events.QUEST_WATCH_UPDATE = function(self, event, questID)
-    if QuestKing.OnQuestObjectivesCompleted then
+    if QuestKing and QuestKing.OnQuestObjectivesCompleted then
         QuestKing:OnQuestObjectivesCompleted(questID)
     end
-    QuestKing:UpdateTracker()
+
+    UpdateTracker()
 end
 
 Events.UNIT_QUEST_LOG_CHANGED = function(self, event, unit)
     if unit == "player" then
-        QuestKing:UpdateTracker()
+        UpdateTracker()
     end
 end
 
 Events.QUEST_POI_UPDATE = function()
-    QuestKing:OnPOIUpdate()
+    if QuestKing and QuestKing.OnPOIUpdate then
+        QuestKing:OnPOIUpdate()
+    else
+        UpdateTracker()
+    end
 end
 
 Events.TRACKED_ACHIEVEMENT_LIST_CHANGED = UpdateTracker
 
 Events.TRACKED_ACHIEVEMENT_UPDATE = function(self, event, ...)
-    QuestKing:OnTrackedAchievementUpdate(...)
+    if QuestKing and QuestKing.OnTrackedAchievementUpdate then
+        QuestKing:OnTrackedAchievementUpdate(...)
+    else
+        UpdateTracker()
+    end
 end
 
 -- -----------------------------------------------------------------------------
@@ -397,27 +417,28 @@ end
 
 Events.QUEST_ACCEPTED = function(self, event, ...)
     local questLogIndex, questID = NormalizeQuestAcceptedPayload(...)
-
     local isTaskQuest = IsTaskQuestCompat(questID)
 
     -- Respect Blizzard auto-watch for all newly accepted quests, including campaign and task quests.
     TryAutoWatchQuest(questLogIndex, questID, false)
 
-    if isTaskQuest then
-        if SOUNDKIT and SOUNDKIT.UI_SCENARIO_STAGE_END then
-            PlaySoundSafe(SOUNDKIT.UI_SCENARIO_STAGE_END)
-        end
+    if isTaskQuest and SOUNDKIT and SOUNDKIT.UI_SCENARIO_STAGE_END then
+        PlaySoundSafe(SOUNDKIT.UI_SCENARIO_STAGE_END)
     end
 
-    QuestKing:OnQuestAccepted(questID)
+    if QuestKing and QuestKing.OnQuestAccepted then
+        QuestKing:OnQuestAccepted(questID)
+    else
+        UpdateTracker()
+    end
 end
 
 Events.QUEST_REMOVED = function(self, event, questID)
-    if QuestKing.ClearDummyTask then
+    if QuestKing and QuestKing.ClearDummyTask then
         QuestKing:ClearDummyTask(questID)
     end
 
-    QuestKing:UpdateTracker()
+    UpdateTracker()
 end
 
 -- -----------------------------------------------------------------------------
@@ -431,15 +452,17 @@ Events.QUEST_AUTOCOMPLETE = function(self, event, questID)
         end
     end
 
-    QuestKing:UpdateTracker()
+    UpdateTracker()
 end
 
 Events.QUEST_TURNED_IN = function(self, event, questID, xp, money)
-    if IsTaskQuestCompat(questID) or IsPreyQuestCompat(questID) then
-        QuestKing:OnTaskTurnedIn(questID, xp, money)
+    if QuestKing and QuestKing.OnTaskTurnedIn then
+        if IsTaskQuestCompat(questID) or IsPreyQuestCompat(questID) then
+            QuestKing:OnTaskTurnedIn(questID, xp, money)
+        end
     end
 
-    QuestKing:UpdateTracker()
+    UpdateTracker()
 end
 
 Events.QUEST_COMPLETE = UpdateTracker
@@ -450,7 +473,11 @@ Events.QUEST_FINISHED = UpdateTracker
 -- -----------------------------------------------------------------------------
 
 Events.SCENARIO_UPDATE = function(self, event, ...)
-    QuestKing:OnScenarioUpdate(...)
+    if QuestKing and QuestKing.OnScenarioUpdate then
+        QuestKing:OnScenarioUpdate(...)
+    else
+        UpdateTracker()
+    end
 end
 
 Events.SCENARIO_CRITERIA_UPDATE = UpdateTracker
@@ -460,11 +487,19 @@ Events.SCENARIO_POI_UPDATE = UpdateTracker
 Events.SCENARIO_BONUS_VISIBILITY_UPDATE = UpdateTracker
 
 Events.CRITERIA_COMPLETE = function(self, event, ...)
-    QuestKing:OnCriteriaComplete(...)
+    if QuestKing and QuestKing.OnCriteriaComplete then
+        QuestKing:OnCriteriaComplete(...)
+    else
+        UpdateTracker()
+    end
 end
 
 Events.SCENARIO_COMPLETED = function(self, event, ...)
-    QuestKing:OnScenarioCompleted(...)
+    if QuestKing and QuestKing.OnScenarioCompleted then
+        QuestKing:OnScenarioCompleted(...)
+    end
+
+    UpdateTracker()
 end
 
 -- -----------------------------------------------------------------------------
@@ -472,8 +507,10 @@ end
 -- -----------------------------------------------------------------------------
 
 Events.PROVING_GROUNDS_SCORE_UPDATE = function(self, event, score)
-    if score then
+    if score and QuestKing and QuestKing.ProvingGroundsScoreUpdate then
         QuestKing.ProvingGroundsScoreUpdate(score)
+    else
+        UpdateTracker()
     end
 end
 
@@ -485,12 +522,19 @@ Events.WORLD_STATE_TIMER_STOP = UpdateTracker
 -- -----------------------------------------------------------------------------
 
 Events.PLAYER_ENTERING_WORLD = function()
-    QuestKing:OnPlayerEnteringWorld()
-    QuestKing:UpdateTracker()
+    if QuestKing and QuestKing.OnPlayerEnteringWorld then
+        QuestKing:OnPlayerEnteringWorld()
+    end
+
+    UpdateTracker()
 end
 
 Events.PLAYER_LEVEL_UP = function(self, event, ...)
-    QuestKing:OnPlayerLevelUp(...)
+    if QuestKing and QuestKing.OnPlayerLevelUp then
+        QuestKing:OnPlayerLevelUp(...)
+    else
+        UpdateTracker()
+    end
 end
 
 -- -----------------------------------------------------------------------------
@@ -499,12 +543,15 @@ end
 
 Events.SUPER_TRACKING_CHANGED = function()
     local questID = GetSuperTrackedQuestIDCompat()
-    QuestKing:OnSuperTrackedQuestChanged(questID)
+
+    if QuestKing and QuestKing.OnSuperTrackedQuestChanged then
+        QuestKing:OnSuperTrackedQuestChanged(questID)
+    else
+        UpdateTracker()
+    end
 end
 
-Events.SUPER_TRACKING_PATH_UPDATED = function()
-    QuestKing:UpdateTracker()
-end
+Events.SUPER_TRACKING_PATH_UPDATED = UpdateTracker
 
 -- -----------------------------------------------------------------------------
 -- Optional quest watch helpers exposed on addon table

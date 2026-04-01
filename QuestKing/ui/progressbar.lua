@@ -5,6 +5,9 @@ local tremove = table.remove
 
 local opt = QuestKing.options
 
+local tonumber = tonumber
+local type = type
+
 local BAR_HEIGHT = 15
 local BAR_LEFT_INSET = 16
 local BAR_TOP_OFFSET = -1
@@ -21,9 +24,7 @@ local progressBackdrop = {
 }
 
 local function ClampPercent(percent)
-    if type(percent) ~= "number" then
-        percent = 0
-    end
+    percent = tonumber(percent) or 0
     if percent < 0 then
         return 0
     end
@@ -107,7 +108,7 @@ local function SetPercent(self, percent)
     self.text:SetFormattedText("%.1f%%", percent)
 
     local lastPercent = self._lastPercent
-    if lastPercent and percent ~= lastPercent then
+    if type(lastPercent) == "number" and percent ~= lastPercent then
         local delta = percent - lastPercent
         if delta < 0 then
             delta = 0
@@ -341,9 +342,12 @@ function QuestKing.WatchButton:AddProgressBar(duration, startTime)
 
         progressBar.baseButton = self
         progressBar.baseLine = line
-        progressBar._lastPercent = nil
+    else
+        progressBar.baseButton = self
+        progressBar.baseLine = line
     end
 
+    progressBar._lastPercent = nil
     progressBar:SetWidth(GetProgressBarWidth())
     progressBar:SetHeight(BAR_HEIGHT)
     progressBar:UpdateBurstWidths()

@@ -8,6 +8,9 @@ local GetTimeStringFromSecondsShort = QuestKing.GetTimeStringFromSecondsShort
 
 local opt = QuestKing.options
 
+local tonumber = tonumber
+local type = type
+
 local BAR_HEIGHT = 15
 local BAR_LEFT_INSET = 16
 local BAR_TOP_OFFSET = -1
@@ -22,6 +25,12 @@ local timerBackdrop = {
     bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
     insets = { left = 0, right = 0, top = 0, bottom = 0 },
 }
+
+local function SafeUpdateTracker()
+    if QuestKing and QuestKing.UpdateTracker then
+        QuestKing:UpdateTracker()
+    end
+end
 
 local function GetTimerBarWidth()
     local width = ((opt and opt.buttonWidth) or 230) - 36
@@ -75,13 +84,14 @@ local function FreeTimerBar(self)
     self.baseButton = nil
     self.duration = nil
     self.startTime = nil
+    self._expired = nil
 
     tinsert(timerBarPool, self)
 end
 
 local function TimerBar_OnUpdate(self)
-    local duration = self.duration
-    local startTime = self.startTime
+    local duration = tonumber(self.duration)
+    local startTime = tonumber(self.startTime)
 
     if not duration or not startTime or duration <= 0 then
         self:SetValue(0)
@@ -96,8 +106,14 @@ local function TimerBar_OnUpdate(self)
         if timeRemaining > -0.5 then
             timeRemaining = 0
         else
+            self:SetValue(0)
+            self.text:SetText("0:00")
             self:SetScript("OnUpdate", nil)
-            QuestKing:UpdateTracker()
+
+            if not self._expired then
+                self._expired = true
+                SafeUpdateTracker()
+            end
             return
         end
     end
@@ -169,6 +185,14 @@ function QuestKing.WatchButton:AddTimerBar(duration, startTime)
         timerBar.baseLine = line
     end
 
+    duration = tonumber(duration) or 0
+    startTime = tonumber(startTime) or GetTime()
+
+    if duration <= 0 then
+        duration = 1
+    end
+
+    timerBar._expired = nil
     timerBar:SetWidth(GetTimerBarWidth())
     timerBar:SetHeight(BAR_HEIGHT)
     EnsureBackdrop(timerBar)
@@ -177,7 +201,7 @@ function QuestKing.WatchButton:AddTimerBar(duration, startTime)
     timerBar:SetPoint("TOPLEFT", line, "TOPLEFT", BAR_LEFT_INSET, BAR_TOP_OFFSET)
     timerBar:Show()
 
-    timerBar:SetMinMaxValues(0, duration and duration > 0 and duration or 1)
+    timerBar:SetMinMaxValues(0, duration)
     timerBar.duration = duration
     timerBar.startTime = startTime
     timerBar:SetScript("OnUpdate", TimerBar_OnUpdate)

@@ -9,6 +9,7 @@ local getObjectiveColor = QuestKing.GetObjectiveColor
 
 local format = string.format
 local match = string.match
+local tonumber = tonumber
 local type = type
 local pairs = pairs
 local UNKNOWN = UNKNOWN or "Unknown"
@@ -241,20 +242,8 @@ local function shouldSkipTrackedTaskQuest(questID)
     return false
 end
 
-local function SafePublicNumber(value, fallback)
-    if type(value) == "number" then
-        return value
-    end
-
-    if fallback ~= nil then
-        return fallback
-    end
-
-    return 0
-end
-
 local function clamp01(value)
-    value = SafePublicNumber(value, 0)
+    value = tonumber(value) or 0
     if value < 0 then
         return 0
     end
@@ -265,7 +254,10 @@ local function clamp01(value)
 end
 
 local function normalizeObjectiveNumbers(curValue, maxValue)
-    if type(curValue) ~= "number" or type(maxValue) ~= "number" or maxValue <= 0 then
+    curValue = tonumber(curValue)
+    maxValue = tonumber(maxValue)
+
+    if not curValue or not maxValue or maxValue <= 0 then
         return nil, nil
     end
 
@@ -334,6 +326,71 @@ local function getObjectiveDisplayState(desc, isDone, objectiveInfo)
     end
 
     return desc, nil, nil, isDone and 1 or 0, false
+end
+
+local function showBonusRewardTooltip(owner, questID)
+    if not GameTooltip or not owner or not questID then
+        return
+    end
+
+    local hasQuestData = hasQuestDataSafe(questID)
+    local xp = getRewardXPCompat(questID)
+    local numQuestCurrencies = getNumRewardCurrenciesCompat(questID)
+    local numQuestRewards = getNumRewardsCompat(questID)
+    local money = getRewardMoneyCompat(questID)
+
+    if hasQuestData and xp == 0 and numQuestCurrencies == 0 and numQuestRewards == 0 and money == 0 then
+        GameTooltip:Hide()
+        return
+    end
+
+    GameTooltip:SetOwner(owner, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    GameTooltip:SetText(REWARDS, 1, 0.831, 0.380)
+
+    if not hasQuestData then
+        GameTooltip:AddLine(RETRIEVING_DATA, RED_FONT_COLOR.r, RED_FONT_COLOR.g, RED_FONT_COLOR.b)
+    else
+        GameTooltip:AddLine(BONUS_OBJECTIVE_TOOLTIP_DESCRIPTION, 1, 1, 1, 1)
+        GameTooltip:AddLine(" ")
+
+        if xp > 0 then
+            GameTooltip:AddLine(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
+        end
+
+        for i = 1, numQuestCurrencies do
+            local name, texture, numItems = getRewardCurrencyInfoCompat(i, questID)
+            if name and texture and numItems then
+                local text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
+                GameTooltip:AddLine(text, 1, 1, 1)
+            end
+        end
+
+        for i = 1, numQuestRewards do
+            local name, texture, numItems, quality = getRewardInfoCompat(i, questID)
+            local text
+
+            if numItems and numItems > 1 and texture and name then
+                text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
+            elseif texture and name then
+                text = format(BONUS_OBJECTIVE_REWARD_FORMAT, texture, name)
+            end
+
+            if text then
+                local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
+                if color then
+                    GameTooltip:AddLine(text, color.r, color.g, color.b)
+                else
+                    GameTooltip:AddLine(text, 1, 1, 1)
+                end
+            end
+        end
+
+        if money > 0 and SetTooltipMoney then
+            SetTooltipMoney(GameTooltip, money, nil)
+        end
+    end
+
+    GameTooltip:Show()
 end
 
 -- -----------------------------------------------------------------------------
@@ -407,7 +464,7 @@ function QuestKing:UpdateTrackerBonusObjectives()
             local supersededIndex = getSupersedingStep(bonusStepIndex)
             if supersededIndex then
                 local _, _, numCriteria, stepFailed = C_Scenario.GetStepInfo(bonusStepIndex)
-                numCriteria = SafePublicNumber(numCriteria, 0)
+                numCriteria = tonumber(numCriteria) or 0
 
                 local completed = true
 
@@ -497,7 +554,7 @@ function setButtonToBonusTask(button, questID)
         end
 
         if objectiveType == "progressbar" then
-            local percent = SafePublicNumber(getQuestProgressBarPercentCompat(questID), 0)
+            local percent = tonumber(getQuestProgressBarPercentCompat(questID)) or 0
             if percent < 0 then
                 percent = 0
             elseif percent > 100 then
@@ -512,13 +569,13 @@ function setButtonToBonusTask(button, questID)
             progressBar:SetPercent(percent)
             visibleObjectives = visibleObjectives + 1
         else
-            local displayText, currentValue, maxValue, progress, hasCount = getObjectiveDisplayState(desc, isDone, objectiveInfo)
+            local displayText, currentValue, maxValue, progress = getObjectiveDisplayState(desc, isDone, objectiveInfo)
             local leftText, rightText = buildObjectiveDisplayText(displayText, currentValue, maxValue, objectiveInfo)
             local r, g, b = getObjectiveColor(progress)
             local line = button:AddLine(format("  %s", leftText), rightText, r, g, b)
 
             if line and currentValue then
-                local lastQuant = type(line._lastQuant) == "number" and line._lastQuant or nil
+                local lastQuant = tonumber(line._lastQuant)
                 if lastQuant and currentValue > lastQuant then
                     line:Flash()
                 end
@@ -635,13 +692,14 @@ function QuestKing:OnCriteriaComplete(id)
         local button = WatchButton:GetKeyedRaw("bonus_step", bonusStepIndex)
 
         local _, _, numCriteria = C_Scenario.GetStepInfo(bonusStepIndex)
-        numCriteria = SafePublicNumber(numCriteria, 0)
+        numCriteria = tonumber(numCriteria) or 0
 
         local matchedCriteria = false
         local allCriteriaComplete = numCriteria > 0
 
         for criteriaIndex = 1, numCriteria do
-            local _, _, criteriaCompleted, _, _, _, _, _, criteriaID = C_Scenario.GetCriteriaInfoByStep(bonusStepIndex, criteriaIndex)
+            local _, _, criteriaCompleted, _, _, _, _, _, criteriaID =
+                C_Scenario.GetCriteriaInfoByStep(bonusStepIndex, criteriaIndex)
 
             if criteriaID == id then
                 matchedCriteria = true
@@ -653,7 +711,10 @@ function QuestKing:OnCriteriaComplete(id)
         end
 
         if matchedCriteria and allCriteriaComplete then
-            PlaySoundCompat(SOUNDKIT and SOUNDKIT.UI_SCENARIO_BONUS_OBJECTIVE_COMPLETE, "UI_Scenario_BonusObjective_Success")
+            PlaySoundCompat(
+                SOUNDKIT and SOUNDKIT.UI_SCENARIO_BONUS_OBJECTIVE_COMPLETE,
+                "UI_Scenario_BonusObjective_Success"
+            )
 
             local questID = C_Scenario.GetBonusStepRewardQuestID and C_Scenario.GetBonusStepRewardQuestID(bonusStepIndex) or 0
             if questID ~= 0 then
@@ -711,69 +772,5 @@ end
 
 function mouseHandlerBonusTask:TitleButtonOnEnter(motion)
     local button = self.parent
-    local questID = button.questID
-
-    local hasQuestData = hasQuestDataSafe(questID)
-    local xp = getRewardXPCompat(questID)
-    local numQuestCurrencies = getNumRewardCurrenciesCompat(questID)
-    local numQuestRewards = getNumRewardsCompat(questID)
-    local money = getRewardMoneyCompat(questID)
-
-    if hasQuestData and xp == 0 and numQuestCurrencies == 0 and numQuestRewards == 0 and money == 0 then
-        GameTooltip:Hide()
-        return
-    end
-
-    GameTooltip:ClearAllPoints()
-    GameTooltip:SetOwner(button, opt.tooltipAnchor)
-    GameTooltip:SetText(REWARDS, 1, 0.831, 0.380)
-
-    if opt.tooltipScale then
-        GameTooltip:SetScale(opt.tooltipScale)
-    end
-
-    if not hasQuestData then
-        GameTooltip:AddLine(RETRIEVING_DATA, RED_FONT_COLOR.r, RED_FONT_COLOR.g, RED_FONT_COLOR.b)
-    else
-        GameTooltip:AddLine(BONUS_OBJECTIVE_TOOLTIP_DESCRIPTION, 1, 1, 1, 1)
-        GameTooltip:AddLine(" ")
-
-        if xp > 0 then
-            GameTooltip:AddLine(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
-        end
-
-        for i = 1, numQuestCurrencies do
-            local name, texture, numItems = getRewardCurrencyInfoCompat(i, questID)
-            if name and texture and numItems then
-                local text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
-                GameTooltip:AddLine(text, 1, 1, 1)
-            end
-        end
-
-        for i = 1, numQuestRewards do
-            local name, texture, numItems, quality = getRewardInfoCompat(i, questID)
-            local text
-
-            if numItems and numItems > 1 and texture and name then
-                text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
-            elseif texture and name then
-                text = format(BONUS_OBJECTIVE_REWARD_FORMAT, texture, name)
-            end
-
-            if text then
-                local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
-                if color then
-                    GameTooltip:AddLine(text, color.r, color.g, color.b)
-                else
-                    GameTooltip:AddLine(text, 1, 1, 1)
-                end
-            end
-        end
-
-        if money > 0 and SetTooltipMoney then
-            SetTooltipMoney(GameTooltip, money, nil)
-        end
-    end
-
-    GameTooltip:Show()
+    showBonusRewardTooltip(button, button and button.questID)
 end

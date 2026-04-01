@@ -13,6 +13,12 @@ local TITLEBAR_RIGHT_PADDING = 2
 local TITLEBAR_TEXT_GAP = 4
 local DEFAULT_TITLEBAR_TEXT = "Unlocked - Drag me!"
 
+local type = type
+local tonumber = tonumber
+local tostring = tostring
+local unpack = table.unpack or unpack
+local wipe = wipe
+
 local function GetQuestCap()
     if C_QuestLog and C_QuestLog.GetMaxNumQuests then
         local count = C_QuestLog.GetMaxNumQuests()
@@ -45,6 +51,7 @@ local function SetFontStringStyle(fontString, r, g, b)
     fontString:SetFont(opt.font, opt.fontSize, opt.fontStyle)
     fontString:SetShadowOffset(1, -1)
     fontString:SetShadowColor(0, 0, 0, 1)
+
     if r and g and b then
         fontString:SetTextColor(r, g, b)
     end
@@ -98,6 +105,17 @@ end
 local function EnsureSavedVariables()
     QuestKingDB = QuestKingDB or {}
     QuestKingDBPerChar = QuestKingDBPerChar or {}
+
+    if QuestKingDB.dragLocked == nil then
+        QuestKingDB.dragLocked = false
+    end
+
+    QuestKingDB.dragOrigin = QuestKingDB.dragOrigin or "TOPRIGHT"
+    QuestKingDB.dragRelativePoint = QuestKingDB.dragRelativePoint or QuestKingDB.dragOrigin
+
+    QuestKingDBPerChar.trackerCollapsed = QuestKingDBPerChar.trackerCollapsed or 0
+    QuestKingDBPerChar.displayMode = QuestKingDBPerChar.displayMode or "combined"
+    QuestKingDBPerChar.trackerPositionPreset = QuestKingDBPerChar.trackerPositionPreset or 1
 end
 
 local function GetDefaultDragOffsets(point)
@@ -415,12 +433,12 @@ end
 
 function Tracker:SetPresetPosition()
     local presetIndex = (QuestKingDBPerChar and QuestKingDBPerChar.trackerPositionPreset) or 1
-    local preset = opt.positionPresets[presetIndex]
+    local preset = opt.positionPresets and opt.positionPresets[presetIndex]
 
     if not preset then
         presetIndex = 1
         QuestKingDBPerChar.trackerPositionPreset = presetIndex
-        preset = opt.positionPresets[presetIndex]
+        preset = opt.positionPresets and opt.positionPresets[presetIndex]
     end
 
     if not preset then
@@ -432,7 +450,7 @@ function Tracker:SetPresetPosition()
 end
 
 function Tracker:CyclePresetPosition()
-    local maxPresets = #opt.positionPresets
+    local maxPresets = opt.positionPresets and #opt.positionPresets or 0
     if maxPresets <= 0 then
         return
     end
@@ -531,6 +549,8 @@ function Tracker:CheckDrag()
 end
 
 function Tracker.MinimizeButtonOnClick(self, mouse)
+    EnsureSavedVariables()
+
     if IsShiftKeyDown() and (not opt.allowDrag) then
         Tracker:CyclePresetPosition()
         return
@@ -577,6 +597,8 @@ function Tracker.MinimizeButtonOnMouseWheel(self, direction)
 end
 
 function Tracker.ModeButtonOnClick(self, mouse)
+    EnsureSavedVariables()
+
     if mouse == "RightButton" then
         if IsAltKeyDown() then
             QuestKing:SetSuperTrackedQuestID(0)
