@@ -122,6 +122,12 @@ local function AcquireItemButton(baseButton)
     local itemButton = baseButton.itemButton
     if itemButton then
         itemButton.baseButton = baseButton
+        if itemButton:GetParent() ~= QuestKing.Tracker then
+            itemButton:SetParent(QuestKing.Tracker)
+        end
+        if baseButton.GetFrameLevel and itemButton.SetFrameLevel then
+            itemButton:SetFrameLevel(baseButton:GetFrameLevel() + 20)
+        end
         return itemButton
     end
 
@@ -141,6 +147,10 @@ local function AcquireItemButton(baseButton)
 
     baseButton.itemButton = itemButton
     itemButton.baseButton = baseButton
+    itemButton:SetParent(QuestKing.Tracker)
+    if baseButton.GetFrameLevel and itemButton.SetFrameLevel then
+        itemButton:SetFrameLevel(baseButton:GetFrameLevel() + 20)
+    end
     itemButton:ClearAllPoints()
     itemButton:Show()
 
@@ -261,6 +271,7 @@ function QuestKing.WatchButton:RemoveItemButton()
     itemButton.rangeTimer = nil
 
     itemButton:SetAttribute("item", nil)
+    itemButton:SetParent(UIParent)
     itemButton.baseButton = nil
     self.itemButton = nil
 

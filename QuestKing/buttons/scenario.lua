@@ -381,9 +381,9 @@ local function GetScenarioRewardQuestID(stepIndex, rewardQuestIDFromStep)
     return nil
 end
 
-local function AddTooltipRewardText(text, r, g, b)
-    if text and text ~= "" then
-        GameTooltip:AddLine(text, r or 1, g or 1, b or 1)
+local function AddTooltipRewardText(tooltip, text, r, g, b)
+    if tooltip and text and text ~= "" then
+        tooltip:AddLine(text, r or 1, g or 1, b or 1)
     end
 end
 
@@ -793,13 +793,13 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
 
     local numCriteria = GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
 
-    if not scenarioName or not GameTooltip then
+    local tooltip = QuestKing.PrepareTooltip and QuestKing:PrepareTooltip(self, GetTooltipAnchor())
+    if not scenarioName or not tooltip then
         return
     end
 
-    GameTooltip:SetOwner(self, GetTooltipAnchor())
-    GameTooltip:AddLine(scenarioName, NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b, 1)
-    GameTooltip:AddLine(
+    tooltip:AddLine(scenarioName, NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b, 1)
+    tooltip:AddLine(
         stageName or "Scenario",
         opt_colors.ScenarioStageTitle[1],
         opt_colors.ScenarioStageTitle[2],
@@ -808,25 +808,25 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
     )
 
     if isBonusStep then
-        GameTooltip:AddLine("Bonus Objective", 1, 0.914, 0.682, 1)
+        tooltip:AddLine("Bonus Objective", 1, 0.914, 0.682, 1)
     else
-        GameTooltip:AddLine(format(SCENARIO_STAGE_STATUS, currentStage, numStages), 1, 0.914, 0.682, 1)
+        tooltip:AddLine(format(SCENARIO_STAGE_STATUS, currentStage, numStages), 1, 0.914, 0.682, 1)
     end
 
-    GameTooltip:AddLine(" ")
+    tooltip:AddLine(" ")
 
     if stageDescription and stageDescription ~= "" then
-        GameTooltip:AddLine(stageDescription, 1, 1, 1, 1)
+        tooltip:AddLine(stageDescription, 1, 1, 1, 1)
     end
 
     if type(weightedProgress) == "number" then
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(format("Progress: %d%%", ClampPercent(weightedProgress)), 1, 1, 1, 1)
+        tooltip:AddLine(" ")
+        tooltip:AddLine(format("Progress: %d%%", ClampPercent(weightedProgress)), 1, 1, 1, 1)
     end
 
     if numCriteria > 0 then
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(QUEST_TOOLTIP_REQUIREMENTS, NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b, 1)
+        tooltip:AddLine(" ")
+        tooltip:AddLine(QUEST_TOOLTIP_REQUIREMENTS, NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b, 1)
 
         for i = 1, numCriteria do
             local criteriaString,
@@ -847,51 +847,51 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
 
             if criteriaCompleted then
                 if totalQuantity and totalQuantity > 0 then
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s: %d/%d |cff808080(%s)|r", criteriaString, quantity or 0, totalQuantity, COMPLETE),
                         0.2, 0.9, 0.2
                     )
                 elseif quantityString and quantityString ~= "" then
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s: %s |cff808080(%s)|r", criteriaString, quantityString, COMPLETE),
                         0.2, 0.9, 0.2
                     )
                 else
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s |cff808080(%s)|r", criteriaString, COMPLETE),
                         0.2, 0.9, 0.2
                     )
                 end
             elseif criteriaFailed then
                 if totalQuantity and totalQuantity > 0 then
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s: %d/%d |cff808080(%s)|r", criteriaString, quantity or 0, totalQuantity, FAILED),
                         1, 0.2, 0.2
                     )
                 elseif quantityString and quantityString ~= "" then
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s: %s |cff808080(%s)|r", criteriaString, quantityString, FAILED),
                         1, 0.2, 0.2
                     )
                 else
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s |cff808080(%s)|r", criteriaString, FAILED),
                         1, 0.2, 0.2
                     )
                 end
             else
                 if totalQuantity and totalQuantity > 0 then
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s: %d/%d", criteriaString, quantity or 0, totalQuantity),
                         1, 1, 1
                     )
                 elseif quantityString and quantityString ~= "" then
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s: %s", criteriaString, quantityString),
                         1, 1, 1
                     )
                 else
-                    GameTooltip:AddLine(
+                    tooltip:AddLine(
                         format("- %s", criteriaString),
                         1, 1, 1
                     )
@@ -907,9 +907,9 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
     if rewardQuestLogIndex then
         local rewardXP = GetQuestLogRewardXP and (GetQuestLogRewardXP(rewardQuestLogIndex) or 0) or 0
         if rewardXP > 0 then
-            GameTooltip:AddLine(" ")
+            tooltip:AddLine(" ")
             blankLine = true
-            AddTooltipRewardText(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, rewardXP), 1, 1, 1)
+            AddTooltipRewardText(tooltip, format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, rewardXP), 1, 1, 1)
         end
 
         local numQuestCurrencies = GetNumQuestLogRewardCurrencies and (GetNumQuestLogRewardCurrencies(rewardQuestLogIndex) or 0) or 0
@@ -918,10 +918,10 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
             if name and texture and numItems then
                 local text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
                 if not blankLine then
-                    GameTooltip:AddLine(" ")
+                    tooltip:AddLine(" ")
                     blankLine = true
                 end
-                AddTooltipRewardText(text, 1, 1, 1)
+                AddTooltipRewardText(tooltip, text, 1, 1, 1)
             end
         end
 
@@ -939,38 +939,38 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
             if text then
                 local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality or 1] or NORMAL_FONT_COLOR
                 if not blankLine then
-                    GameTooltip:AddLine(" ")
+                    tooltip:AddLine(" ")
                     blankLine = true
                 end
-                AddTooltipRewardText(text, color.r, color.g, color.b)
+                AddTooltipRewardText(tooltip, text, color.r, color.g, color.b)
             end
         end
 
         local rewardMoney = GetQuestLogRewardMoney and (GetQuestLogRewardMoney(rewardQuestLogIndex) or 0) or 0
         if rewardMoney > 0 then
             if not blankLine then
-                GameTooltip:AddLine(" ")
+                tooltip:AddLine(" ")
                 blankLine = true
             end
-            SetTooltipMoney(GameTooltip, rewardMoney, nil)
+            SetTooltipMoney(tooltip, rewardMoney, nil)
         end
     else
         if xp and xp > 0 then
             if not blankLine then
-                GameTooltip:AddLine(" ")
+                tooltip:AddLine(" ")
                 blankLine = true
             end
-            AddTooltipRewardText(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
+            AddTooltipRewardText(tooltip, format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
         end
 
         if money and money > 0 then
             if not blankLine then
-                GameTooltip:AddLine(" ")
+                tooltip:AddLine(" ")
                 blankLine = true
             end
-            SetTooltipMoney(GameTooltip, money, nil)
+            SetTooltipMoney(tooltip, money, nil)
         end
     end
 
-    GameTooltip:Show()
+    tooltip:Show()
 end

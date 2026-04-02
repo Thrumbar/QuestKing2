@@ -329,7 +329,7 @@ local function getObjectiveDisplayState(desc, isDone, objectiveInfo)
 end
 
 local function showBonusRewardTooltip(owner, questID)
-    if not GameTooltip or not owner or not questID then
+    if not owner or not questID then
         return
     end
 
@@ -340,28 +340,34 @@ local function showBonusRewardTooltip(owner, questID)
     local money = getRewardMoneyCompat(questID)
 
     if hasQuestData and xp == 0 and numQuestCurrencies == 0 and numQuestRewards == 0 and money == 0 then
-        GameTooltip:Hide()
+        if QuestKing and QuestKing.HideTooltip then
+            QuestKing:HideTooltip()
+        end
         return
     end
 
-    GameTooltip:SetOwner(owner, opt.tooltipAnchor or "ANCHOR_RIGHT")
-    GameTooltip:SetText(REWARDS, 1, 0.831, 0.380)
+    local tooltip = QuestKing.PrepareTooltip and QuestKing:PrepareTooltip(owner, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    if not tooltip then
+        return
+    end
+
+    tooltip:SetText(REWARDS, 1, 0.831, 0.380)
 
     if not hasQuestData then
-        GameTooltip:AddLine(RETRIEVING_DATA, RED_FONT_COLOR.r, RED_FONT_COLOR.g, RED_FONT_COLOR.b)
+        tooltip:AddLine(RETRIEVING_DATA, RED_FONT_COLOR.r, RED_FONT_COLOR.g, RED_FONT_COLOR.b)
     else
-        GameTooltip:AddLine(BONUS_OBJECTIVE_TOOLTIP_DESCRIPTION, 1, 1, 1, 1)
-        GameTooltip:AddLine(" ")
+        tooltip:AddLine(BONUS_OBJECTIVE_TOOLTIP_DESCRIPTION, 1, 1, 1, 1)
+        tooltip:AddLine(" ")
 
         if xp > 0 then
-            GameTooltip:AddLine(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
+            tooltip:AddLine(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
         end
 
         for i = 1, numQuestCurrencies do
             local name, texture, numItems = getRewardCurrencyInfoCompat(i, questID)
             if name and texture and numItems then
                 local text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
-                GameTooltip:AddLine(text, 1, 1, 1)
+                tooltip:AddLine(text, 1, 1, 1)
             end
         end
 
@@ -378,19 +384,19 @@ local function showBonusRewardTooltip(owner, questID)
             if text then
                 local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
                 if color then
-                    GameTooltip:AddLine(text, color.r, color.g, color.b)
+                    tooltip:AddLine(text, color.r, color.g, color.b)
                 else
-                    GameTooltip:AddLine(text, 1, 1, 1)
+                    tooltip:AddLine(text, 1, 1, 1)
                 end
             end
         end
 
         if money > 0 and SetTooltipMoney then
-            SetTooltipMoney(GameTooltip, money, nil)
+            SetTooltipMoney(tooltip, money, nil)
         end
     end
 
-    GameTooltip:Show()
+    tooltip:Show()
 end
 
 -- -----------------------------------------------------------------------------

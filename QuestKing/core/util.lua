@@ -263,6 +263,46 @@ function QuestKing.GetTimeStringFromSecondsShort(timeAmount)
     return format("%d:%.2d", minutes, seconds)
 end
 
+function QuestKing:GetTooltip()
+    local tooltip = self.privateTooltip
+    if tooltip and tooltip:IsObjectType("GameTooltip") then
+        return tooltip
+    end
+
+    tooltip = CreateFrame("GameTooltip", "QuestKingTooltip", UIParent, "GameTooltipTemplate")
+    tooltip:SetFrameStrata("TOOLTIP")
+    tooltip:SetClampedToScreen(true)
+
+    self.privateTooltip = tooltip
+    return tooltip
+end
+
+function QuestKing:PrepareTooltip(owner, anchor)
+    local tooltip = self:GetTooltip()
+    if not tooltip or not owner then
+        return nil
+    end
+
+    tooltip:SetOwner(owner, anchor or (self.options and self.options.tooltipAnchor) or "ANCHOR_RIGHT")
+    tooltip:ClearLines()
+
+    local scale = self.options and self.options.tooltipScale
+    if type(scale) == "number" and scale > 0 and tooltip.SetScale then
+        tooltip:SetScale(scale)
+    elseif tooltip.SetScale then
+        tooltip:SetScale(1)
+    end
+
+    return tooltip
+end
+
+function QuestKing:HideTooltip()
+    local tooltip = self.privateTooltip
+    if tooltip then
+        tooltip:Hide()
+    end
+end
+
 local knownTypesTag = {
     [0] = "",
     [1] = "G",

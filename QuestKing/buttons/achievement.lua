@@ -333,12 +333,12 @@ function mouseHandlerAchievement:TitleButtonOnEnter()
     local achievementID = button.achievementID
     local name, points, completed, month, day, year, desc = Safe_GetAchievementInfo(achievementID)
 
-    if not GameTooltip then
+    local tooltip = QuestKing.PrepareTooltip and QuestKing:PrepareTooltip(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    if not tooltip then
         return
     end
 
-    GameTooltip:SetOwner(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
-    GameTooltip:SetText(name or "Achievement", 1, 0.914, 0.682, 1)
+    tooltip:SetText(name or "Achievement", 1, 0.914, 0.682, 1)
 
     if points and points > 0 then
         local pointsText
@@ -347,25 +347,25 @@ function mouseHandlerAchievement:TitleButtonOnEnter()
         else
             pointsText = ("%d points"):format(points)
         end
-        GameTooltip:AddLine(pointsText, 1, 1, 1, 1)
+        tooltip:AddLine(pointsText, 1, 1, 1, 1)
     end
 
-    GameTooltip:AddLine(" ")
+    tooltip:AddLine(" ")
 
     if desc and desc ~= "" then
-        GameTooltip:AddLine(desc, 1, 1, 1, 1)
+        tooltip:AddLine(desc, 1, 1, 1, 1)
     end
 
     if completed then
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(ACHIEVEMENT_COMPLETED or "Completed", 0.2, 0.9, 0.2, 1)
+        tooltip:AddLine(" ")
+        tooltip:AddLine(ACHIEVEMENT_COMPLETED or "Completed", 0.2, 0.9, 0.2, 1)
 
         if month and day and year and type(GUILD_NEWS_FORMAT_TIME) == "string" then
-            GameTooltip:AddLine(format(GUILD_NEWS_FORMAT_TIME, month, day, year), 0.8, 0.8, 0.8, 1)
+            tooltip:AddLine(format(GUILD_NEWS_FORMAT_TIME, month, day, year), 0.8, 0.8, 0.8, 1)
         end
     end
 
-    GameTooltip:Show()
+    tooltip:Show()
 end
 
 local function ShouldShowCompletedAchievementObjective()

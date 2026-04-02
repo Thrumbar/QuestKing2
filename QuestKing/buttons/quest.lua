@@ -26,6 +26,7 @@ local opt_showCompletedObjectives = opt.showCompletedObjectives
 local format = string.format
 local match = string.match
 local sort = table.sort
+local floor = math.floor
 local tonumber = tonumber
 local tostring = tostring
 local type = type
@@ -289,6 +290,18 @@ local function QK_GetQuestPercent(questID)
     end
 
     return nil
+end
+
+local function QK_GetQuestLogSpecialItemInfo(questLogIndex)
+    if not questLogIndex or questLogIndex <= 0 then
+        return nil, nil, nil, nil
+    end
+
+    if GetQuestLogSpecialItemInfo then
+        return GetQuestLogSpecialItemInfo(questLogIndex)
+    end
+
+    return nil, nil, nil, nil
 end
 
 local function QK_GetActivePreyQuest()
@@ -767,6 +780,18 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         return
     end
 
+    local itemLink, itemTexture, itemCharges = QK_GetQuestLogSpecialItemInfo(questLogIndex)
+    local itemAnchorSide = (opt.itemAnchorSide == "left") and "left" or "right"
+    local itemScale = tonumber(QuestKing.itemButtonScale) or tonumber(opt.itemButtonScale) or 1
+    if itemScale <= 0 then
+        itemScale = 1
+    end
+
+    local itemInset = 0
+    if itemLink and itemTexture then
+        itemInset = floor(((opt.lineHeight or 16) * 2 * itemScale) + 10)
+    end
+
     button.currentLine = 0
     button.mouseHandler = mouseHandlerQuest
     button.questID = data.questID
@@ -785,6 +810,17 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         displayTitle = ("%s %s"):format(title, data.tagBracket)
     end
 
+    local titleLeftInset = LINE_LEFT_PADDING
+    local titleRightInset = LINE_RIGHT_PADDING
+
+    if itemInset > 0 then
+        if itemAnchorSide == "right" then
+            titleRightInset = titleRightInset + itemInset
+        else
+            titleLeftInset = titleLeftInset + itemInset
+        end
+    end
+
     if button.title then
         if data.isComplete and button.title.SetFormattedTextIcon then
             button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t %s", displayTitle)
@@ -795,23 +831,29 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         end
 
         button.title:ClearAllPoints()
-        button.title:SetPoint("TOPLEFT", button, "TOPLEFT", LINE_LEFT_PADDING, -4)
-        button.title:SetPoint("RIGHT", button, "RIGHT", -LINE_RIGHT_PADDING, 0)
+        button.title:SetPoint("TOPLEFT", button, "TOPLEFT", titleLeftInset, -4)
+        button.title:SetPoint("RIGHT", button, "RIGHT", -titleRightInset, 0)
         button.title:SetJustifyH("LEFT")
     end
 
     if button.level then
         local col = QK_GetDifficultyColor(data.level)
         local lvlText = (data.level and data.level > 0) and ("[" .. tostring(data.level) .. "]") or ""
+        local levelLeftInset = 4
+
+        if itemInset > 0 and itemAnchorSide == "left" then
+            levelLeftInset = levelLeftInset + itemInset
+        end
+
         button.level:SetText(lvlText)
         button.level:SetTextColor(col.r or 1, col.g or 0.82, col.b or 0)
         button.level:ClearAllPoints()
-        button.level:SetPoint("TOPLEFT", button, "TOPLEFT", 4, -4)
+        button.level:SetPoint("TOPLEFT", button, "TOPLEFT", levelLeftInset, -4)
 
         if button.title and lvlText ~= "" then
             button.title:ClearAllPoints()
             button.title:SetPoint("TOPLEFT", button.level, "TOPRIGHT", LEVEL_GAP_X, 0)
-            button.title:SetPoint("RIGHT", button, "RIGHT", -LINE_RIGHT_PADDING, 0)
+            button.title:SetPoint("RIGHT", button, "RIGHT", -titleRightInset, 0)
         end
     end
 
@@ -837,6 +879,18 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         and (not data.isComplete or opt_showCompletedObjectives or opt_showCompletedObjectives == "always") then
         AddQuestProgressBar(button, data.percent)
         visibleObjectives = visibleObjectives + 1
+    end
+
+    if itemLink and itemTexture then
+        button:SetItemButton(
+            questLogIndex,
+            itemLink,
+            itemTexture,
+            itemCharges,
+            visibleObjectives
+        )
+    else
+        button:RemoveItemButton()
     end
 
     if visibleObjectives == 0 and data.isComplete then

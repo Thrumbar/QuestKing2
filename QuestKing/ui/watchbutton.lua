@@ -14,6 +14,7 @@ local opt_colors = opt.colors
 -- import
 local tinsert = table.insert
 local tremove = table.remove
+local floor = math.floor
 local max = math.max
 local tonumber = tonumber
 
@@ -67,6 +68,15 @@ end
 local function GetItemAnchorSide()
     return opt.itemAnchorSide == "left" and "left" or "right"
 end
+
+local function GetItemInset(lineHeight, itemButtonScale, hasItemButton)
+    if not hasItemButton then
+        return 0
+    end
+
+    return floor((lineHeight * 2 * itemButtonScale) + 10)
+end
+
 
 do
     local buttonCounter = 0
@@ -644,10 +654,29 @@ do
         local lineHeight = GetLineHeight()
         local itemButtonScale = GetItemButtonScale()
         local itemAnchorSide = GetItemAnchorSide()
+        local itemInset = GetItemInset(lineHeight, itemButtonScale, self.itemButton ~= nil)
 
         self:SetWidth(buttonWidth)
         self.titleButton:SetWidth(buttonWidth)
-        self.title:SetWidth(buttonWidth)
+
+        if self.title then
+            local titleLeftInset = 0
+            local titleRightInset = 0
+
+            if itemInset > 0 then
+                if itemAnchorSide == "right" then
+                    titleRightInset = itemInset
+                else
+                    titleLeftInset = itemInset
+                end
+            end
+
+            self.title:ClearAllPoints()
+            self.title:SetPoint("TOPLEFT", self.titleButton, "TOPLEFT", titleLeftInset, 0)
+            self.title:SetPoint("TOPRIGHT", self.titleButton, "TOPRIGHT", -titleRightInset, 0)
+            self.title:SetWidth(buttonWidth - titleLeftInset - titleRightInset)
+            self.title:SetHeight(self.titleButton:GetHeight())
+        end
 
         for i = 1, #self.lines do
             local line = self.lines[i]
@@ -670,22 +699,43 @@ do
                 line:ClearAllPoints()
                 right:ClearAllPoints()
 
+                local lineLeftInset = LINE_INDENT_LEFT
+                local lineRightInset = LINE_RIGHT_PADDING
+
+                if itemInset > 0 then
+                    if itemAnchorSide == "right" then
+                        lineRightInset = lineRightInset + itemInset
+                    else
+                        lineLeftInset = lineLeftInset + itemInset
+                    end
+                end
+
                 if lastRegion == nil then
                     if noTitle then
-                        line:SetPoint("TOPLEFT", self, "TOPLEFT", LINE_INDENT_LEFT, 0)
+                        line:SetPoint("TOPLEFT", self, "TOPLEFT", lineLeftInset, 0)
                     else
-                        line:SetPoint("TOPLEFT", self.title, "BOTTOMLEFT", LINE_INDENT_LEFT, -TITLE_TO_FIRST_LINE_GAP)
+                        line:SetPoint("TOPLEFT", self.title, "BOTTOMLEFT", 0, -TITLE_TO_FIRST_LINE_GAP)
                     end
                 else
                     line:SetPoint("TOPLEFT", lastRegion, "BOTTOMLEFT", 0, -LINE_GAP)
                 end
 
                 if hasRightText then
-                    right:SetPoint("TOPRIGHT", self, "TOPRIGHT", -LINE_RIGHT_PADDING, 0)
-                    local availableWidth = GetLineAvailableWidth(line)
+                    right:SetPoint("TOPRIGHT", self, "TOPRIGHT", -lineRightInset, 0)
+
+                    local rightWidth = right:GetStringWidth() or 0
+                    if rightWidth < 0 then
+                        rightWidth = 0
+                    end
+
+                    local availableWidth = buttonWidth - lineLeftInset - lineRightInset - rightWidth
+                    if availableWidth < 40 then
+                        availableWidth = 40
+                    end
+
                     line:SetWidth(availableWidth)
                 else
-                    line:SetWidth(buttonWidth - LINE_INDENT_LEFT - LINE_RIGHT_PADDING)
+                    line:SetWidth(buttonWidth - lineLeftInset - lineRightInset)
                 end
 
                 if line.flash then
@@ -742,23 +792,18 @@ do
                 QuestKing:StartCombatTimer()
             else
                 self.itemButton:ClearAllPoints()
+                if self.itemButton.SetFrameStrata and self.GetFrameStrata then
+                    self.itemButton:SetFrameStrata(self:GetFrameStrata())
+                end
+                if self.itemButton.SetFrameLevel and self.GetFrameLevel then
+                    self.itemButton:SetFrameLevel(self:GetFrameLevel() + 20)
+                end
+                self.itemButton:EnableMouse(true)
 
                 if itemAnchorSide == "right" then
-                    self.itemButton:SetPoint(
-                        "TOPLEFT",
-                        UIParent,
-                        "BOTTOMLEFT",
-                        self:GetRight() / itemButtonScale + 4,
-                        self:GetTop() / itemButtonScale - 1
-                    )
+                    self.itemButton:SetPoint("TOPRIGHT", self, "TOPRIGHT", -4, -1)
                 else
-                    self.itemButton:SetPoint(
-                        "TOPRIGHT",
-                        UIParent,
-                        "BOTTOMLEFT",
-                        self:GetLeft() / itemButtonScale - 4,
-                        self:GetTop() / itemButtonScale - 1
-                    )
+                    self.itemButton:SetPoint("TOPLEFT", self, "TOPLEFT", 4, -1)
                 end
             end
         end
