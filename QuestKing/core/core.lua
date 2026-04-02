@@ -23,6 +23,10 @@ local checkPendingPlayerLevel = false
 local initialized = false
 local trackingHooksInstalled = false
 
+local function IsInCombatLockdownSafe()
+    return InCombatLockdown and InCombatLockdown()
+end
+
 local function SafeCall(obj, method, ...)
     local fn = obj and obj[method]
     if type(fn) ~= "function" then
@@ -435,6 +439,13 @@ local function LayoutRequestedButtons(postCombat)
 end
 
 function QuestKing:UpdateTracker(forceBuild, postCombat)
+    if not postCombat and IsInCombatLockdownSafe() then
+        if self.StartCombatTimer then
+            self:StartCombatTimer()
+        end
+        return
+    end
+
     SafeCall(self, "CheckQuestSortTable", forceBuild)
     self.watchMoney = false
 

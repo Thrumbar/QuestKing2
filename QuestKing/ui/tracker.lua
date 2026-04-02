@@ -19,6 +19,16 @@ local tostring = tostring
 local unpack = table.unpack or unpack
 local wipe = wipe
 
+local function IsInCombatLockdownSafe()
+    return InCombatLockdown and InCombatLockdown()
+end
+
+local function QueueTrackerLayoutRefresh()
+    if QuestKing and QuestKing.StartCombatTimer then
+        QuestKing:StartCombatTimer()
+    end
+end
+
 local function GetQuestCap()
     if C_QuestLog and C_QuestLog.GetMaxNumQuests then
         local count = C_QuestLog.GetMaxNumQuests()
@@ -148,6 +158,11 @@ end
 function Tracker:RefreshLayoutMetrics()
     local width = opt.buttonWidth or 230
     local titleHeight = opt.titleHeight or 18
+
+    if IsInCombatLockdownSafe() then
+        QueueTrackerLayoutRefresh()
+        return false
+    end
 
     self:SetWidth(width)
 
@@ -401,6 +416,11 @@ end
 
 function Tracker:Resize(lastShown)
     local titleHeight = opt.titleHeight or 18
+
+    if IsInCombatLockdownSafe() then
+        QueueTrackerLayoutRefresh()
+        return
+    end
 
     self:RefreshLayoutMetrics()
 
