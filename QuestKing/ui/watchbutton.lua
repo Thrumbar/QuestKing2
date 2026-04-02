@@ -792,7 +792,6 @@ do
                 QuestKing:StartCombatTimer()
             else
                 self.itemButton:ClearAllPoints()
-                self.itemButton:EnableMouse(true)
 
                 if itemAnchorSide == "right" then
                     self.itemButton:SetPoint("TOPRIGHT", self, "TOPRIGHT", -4, -1)
