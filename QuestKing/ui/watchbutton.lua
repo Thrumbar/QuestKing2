@@ -792,12 +792,6 @@ do
                 QuestKing:StartCombatTimer()
             else
                 self.itemButton:ClearAllPoints()
-                if self.itemButton.SetFrameStrata and self.GetFrameStrata then
-                    self.itemButton:SetFrameStrata(self:GetFrameStrata())
-                end
-                if self.itemButton.SetFrameLevel and self.GetFrameLevel then
-                    self.itemButton:SetFrameLevel(self:GetFrameLevel() + 20)
-                end
                 self.itemButton:EnableMouse(true)
 
                 if itemAnchorSide == "right" then
