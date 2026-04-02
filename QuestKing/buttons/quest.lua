@@ -18,6 +18,8 @@ local addonName, QuestKing = ...
 
 local CQL = C_QuestLog
 local CTQ = C_TaskQuest
+local CST = C_SuperTrack
+
 local WatchButton = QuestKing.WatchButton
 local opt = QuestKing.options
 local opt_colors = opt.colors
@@ -72,6 +74,26 @@ local function QK_GetQuestLogIndexByID(questID)
         if index and index > 0 then
             return index
         end
+    end
+
+    return nil
+end
+
+local function QK_GetQuestIDForQuestLogIndex(questLogIndex)
+    if not questLogIndex or questLogIndex <= 0 then
+        return nil
+    end
+
+    if CQL and CQL.GetInfo then
+        local info = CQL.GetInfo(questLogIndex)
+        if info and info.questID then
+            return info.questID
+        end
+    end
+
+    if GetQuestLogTitle then
+        local _, _, _, _, _, _, _, questID = GetQuestLogTitle(questLogIndex)
+        return questID
     end
 
     return nil
@@ -153,9 +175,9 @@ local function QK_GetDifficultyLevel(info)
     end
 
     if CQL and CQL.GetQuestDifficultyLevel and info.questID then
-        local lvl = CQL.GetQuestDifficultyLevel(info.questID)
-        if type(lvl) == "number" then
-            return lvl
+        local level = CQL.GetQuestDifficultyLevel(info.questID)
+        if type(level) == "number" then
+            return level
         end
     end
 
@@ -182,6 +204,7 @@ local function QK_GetTagInfo(questID)
     if GetQuestTagInfo and questID then
         local tagID, tagName, worldQuestType, quality, isElite, tradeskillLineID, displayExpiration =
             GetQuestTagInfo(questID)
+
         if tagID or tagName or worldQuestType or quality or isElite then
             return {
                 tagID = tagID,
@@ -271,21 +294,22 @@ local function QK_GetRequiredMoney(questID)
     if CQL and CQL.GetRequiredMoney and questID then
         return CQL.GetRequiredMoney(questID) or 0
     end
+
     return 0
 end
 
 local function QK_GetQuestPercent(questID)
     if CQL and CQL.GetQuestProgressBarPercent and questID then
-        local p = CQL.GetQuestProgressBarPercent(questID)
-        if type(p) == "number" and p >= 0 and p <= 100 then
-            return p
+        local percent = CQL.GetQuestProgressBarPercent(questID)
+        if type(percent) == "number" and percent >= 0 and percent <= 100 then
+            return percent
         end
     end
 
     if GetQuestProgressBarPercent and questID then
-        local p = GetQuestProgressBarPercent(questID)
-        if type(p) == "number" and p >= 0 and p <= 100 then
-            return p
+        local percent = GetQuestProgressBarPercent(questID)
+        if type(percent) == "number" and percent >= 0 and percent <= 100 then
+            return percent
         end
     end
 
@@ -308,6 +332,7 @@ local function QK_GetActivePreyQuest()
     if CQL and CQL.GetActivePreyQuest then
         return CQL.GetActivePreyQuest()
     end
+
     return nil
 end
 
@@ -383,6 +408,18 @@ local function QK_IsPreyQuest(questID)
     end
 
     return QK_GetActivePreyQuest() == questID
+end
+
+local function QK_GetSuperTrackedQuestID()
+    if CST and CST.GetSuperTrackedQuestID then
+        return CST.GetSuperTrackedQuestID() or 0
+    end
+
+    if GetSuperTrackedQuestID then
+        return GetSuperTrackedQuestID() or 0
+    end
+
+    return 0
 end
 
 function QuestKing:GetQuestKind(questID, info)
@@ -544,13 +581,16 @@ local LINE_LEFT_PADDING = 16
 local LINE_RIGHT_PADDING = 8
 local LEVEL_GAP_X = 6
 local COMPLETED_ALPHA = 0.65
+
 local FINISHED_COLOR = {
     r = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[1]) or 0.60,
     g = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[2]) or 1.00,
     b = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[3]) or 0.60,
 }
+
 local UNFINISHED_COLOR = { r = 0.95, g = 0.95, b = 0.95 }
 local TITLE_COLOR = { r = 1.00, g = 0.82, b = 0.00 }
+
 local TITLE_COMPLETE_COLOR = {
     r = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[1]) or 0.20,
     g = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[2]) or 1.00,
@@ -602,6 +642,7 @@ local function AddQuestObjectiveLine(button, row, isQuestComplete, isNewQuest)
 
     local color = row.finished and FINISHED_COLOR or UNFINISHED_COLOR
     local line = button:AddLine(("  %s"):format(row.text or ""), nil, color.r, color.g, color.b)
+
     FreeLineBars(line)
 
     line:SetAlpha(row.finished and COMPLETED_ALPHA or 1)
@@ -645,6 +686,60 @@ local function AddQuestProgressBar(button, percent)
 end
 
 -- ============================================================================
+-- Tooltip helpers
+-- ============================================================================
+
+local function AddTooltipLine(tooltip, text, r, g, b)
+    if tooltip and text and text ~= "" then
+        tooltip:AddLine(text, r or 1, g or 1, b or 1, true)
+    end
+end
+
+local function AddQuestTypeLine(tooltip, kind)
+    if kind == QUEST_KIND.CAMPAIGN then
+        AddTooltipLine(tooltip, "Campaign quest", 0.8, 0.9, 1)
+    elseif kind == QUEST_KIND.WORLD_QUEST then
+        AddTooltipLine(tooltip, "World quest", 0.8, 0.9, 1)
+    elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
+        AddTooltipLine(tooltip, "Special Assignment", 0.8, 0.9, 1)
+    elseif kind == QUEST_KIND.PREY then
+        AddTooltipLine(tooltip, "Prey quest", 0.8, 0.9, 1)
+    elseif kind == QUEST_KIND.TASK then
+        AddTooltipLine(tooltip, "Task / objective quest", 0.8, 0.9, 1)
+    end
+end
+
+local function AddQuestTooltipObjectives(tooltip, questID)
+    local objectives = QuestKing:GetQuestObjectivesText(questID)
+    if not objectives or #objectives == 0 then
+        return
+    end
+
+    AddTooltipLine(tooltip, " ")
+    AddTooltipLine(
+        tooltip,
+        QUEST_TOOLTIP_REQUIREMENTS or "Objectives",
+        NORMAL_FONT_COLOR and NORMAL_FONT_COLOR.r or 1,
+        NORMAL_FONT_COLOR and NORMAL_FONT_COLOR.g or 0.82,
+        NORMAL_FONT_COLOR and NORMAL_FONT_COLOR.b or 0
+    )
+
+    for i = 1, #objectives do
+        local row = objectives[i]
+        if row then
+            local text = row.text or ""
+            if text ~= "" then
+                if row.finished then
+                    AddTooltipLine(tooltip, "- " .. text, FINISHED_COLOR.r, FINISHED_COLOR.g, FINISHED_COLOR.b)
+                else
+                    AddTooltipLine(tooltip, "- " .. text, 1, 1, 1)
+                end
+            end
+        end
+    end
+end
+
+-- ============================================================================
 -- Mouse / tooltip behavior for quest buttons
 -- ============================================================================
 
@@ -660,24 +755,22 @@ function mouseHandlerQuest:TitleButtonOnClick(mouse)
     end
 
     if IsModifiedClick and IsModifiedClick("CHATLINK") and ChatEdit_GetActiveWindow then
-        local link
-        if GetQuestLink and questLogIndex then
-            link = GetQuestLink(questLogIndex)
-        end
-        if link then
-            ChatEdit_InsertLink(link)
-            return
+        local activeWindow = ChatEdit_GetActiveWindow()
+        if activeWindow then
+            local link
+            if GetQuestLink and questLogIndex then
+                link = GetQuestLink(questLogIndex)
+            end
+            if link then
+                ChatEdit_InsertLink(link)
+                return
+            end
         end
     end
 
     if mouse == "RightButton" then
         if QuestKing.SetSuperTrackedQuestID then
-            local currentID = 0
-            if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
-                currentID = C_SuperTrack.GetSuperTrackedQuestID() or 0
-            elseif GetSuperTrackedQuestID then
-                currentID = GetSuperTrackedQuestID() or 0
-            end
+            local currentID = QK_GetSuperTrackedQuestID()
 
             if currentID == questID then
                 QuestKing:SetSuperTrackedQuestID(0)
@@ -710,32 +803,42 @@ function mouseHandlerQuest:TitleButtonOnEnter()
     local questLogIndex = button.questLogIndex
     local questID = button.questID
 
-    if not GameTooltip then
+    if not questID then
         return
     end
 
-    GameTooltip:SetOwner(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    local tooltip = QuestKing.PrepareTooltip and QuestKing:PrepareTooltip(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    if not tooltip then
+        return
+    end
+
+    local titleText = nil
 
     if questLogIndex and questLogIndex > 0 and QuestUtils_GetQuestName then
-        GameTooltip:SetText(QuestUtils_GetQuestName(questID) or button.title:GetText() or QUESTS_LABEL, 1, 0.82, 0)
-    else
-        GameTooltip:SetText(button.title:GetText() or QUESTS_LABEL, 1, 0.82, 0)
+        titleText = QuestUtils_GetQuestName(questID)
     end
 
-    local kind = button.questKind
-    if kind == QUEST_KIND.CAMPAIGN then
-        GameTooltip:AddLine("Campaign quest", 0.8, 0.9, 1)
-    elseif kind == QUEST_KIND.WORLD_QUEST then
-        GameTooltip:AddLine("World quest", 0.8, 0.9, 1)
-    elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
-        GameTooltip:AddLine("Special Assignment", 0.8, 0.9, 1)
-    elseif kind == QUEST_KIND.PREY then
-        GameTooltip:AddLine("Prey quest", 0.8, 0.9, 1)
-    elseif kind == QUEST_KIND.TASK then
-        GameTooltip:AddLine("Task / objective quest", 0.8, 0.9, 1)
+    if not titleText or titleText == "" then
+        titleText = button.title and button.title:GetText() or QUESTS_LABEL or UNKNOWN
     end
 
-    GameTooltip:Show()
+    tooltip:SetText(titleText, 1, 0.82, 0)
+
+    AddQuestTypeLine(tooltip, button.questKind)
+
+    local tagBracket = QuestKing:GetQuestTagBracket(questID)
+    if tagBracket then
+        AddTooltipLine(tooltip, tagBracket, 0.85, 0.85, 0.85)
+    end
+
+    local superTrackedQuestID = QK_GetSuperTrackedQuestID()
+    if superTrackedQuestID == questID then
+        AddTooltipLine(tooltip, "Super tracked", 1, 0.82, 0.2)
+    end
+
+    AddQuestTooltipObjectives(tooltip, questID)
+
+    tooltip:Show()
 end
 
 -- ============================================================================
@@ -933,8 +1036,7 @@ local function GetQuestIDForWatchIndexCompat(watchIndex)
     if GetQuestIndexForWatch and GetQuestLogTitle then
         local questLogIndex = GetQuestIndexForWatch(watchIndex)
         if questLogIndex then
-            local _, _, _, _, _, _, _, questID = GetQuestLogTitle(questLogIndex)
-            return questID
+            return QK_GetQuestIDForQuestLogIndex(questLogIndex)
         end
     end
 

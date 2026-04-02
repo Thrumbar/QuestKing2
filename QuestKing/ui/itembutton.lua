@@ -4,6 +4,8 @@ local opt = QuestKing.options
 
 local tinsert = table.insert
 local tremove = table.remove
+local tonumber = tonumber
+local type = type
 
 local itemButtonPool = {}
 local numItemButtons = 0
@@ -37,7 +39,7 @@ local function GetCurrentItemButtonAlpha()
     return alpha
 end
 
-local function IsInCombatLockdown()
+local function IsInCombatLockdownCompat()
     return InCombatLockdown and InCombatLockdown()
 end
 
@@ -118,6 +120,92 @@ local function SafeSetItemButtonTextureVertexColor(itemButton, r, g, b)
     end
 end
 
+local function SafeHideTooltip()
+    if QuestKing and QuestKing.HideTooltip then
+        QuestKing:HideTooltip()
+    end
+
+    if GameTooltip then
+        GameTooltip:Hide()
+    end
+end
+
+local function SafeSetHyperlink(tooltip, link)
+    if not tooltip or not link then
+        return false
+    end
+
+    if tooltip.SetHyperlink then
+        local ok = pcall(tooltip.SetHyperlink, tooltip, link)
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function SafeSetItemByID(tooltip, itemID)
+    if not tooltip or not itemID then
+        return false
+    end
+
+    if tooltip.SetItemByID then
+        local ok = pcall(tooltip.SetItemByID, tooltip, itemID)
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function SafeGetItemName(link, itemID)
+    if GetItemInfo then
+        local name = GetItemInfo(link or itemID)
+        if name and name ~= "" then
+            return name
+        end
+    end
+
+    if C_Item and C_Item.GetItemNameByID and itemID then
+        local name = C_Item.GetItemNameByID(itemID)
+        if name and name ~= "" then
+            return name
+        end
+    end
+
+    return nil
+end
+
+local function SafeGetItemIDFromLink(link)
+    if not link or type(link) ~= "string" then
+        return nil
+    end
+
+    if C_Item and C_Item.GetItemIDForItemInfo then
+        local itemID = C_Item.GetItemIDForItemInfo(link)
+        if itemID then
+            return itemID
+        end
+    end
+
+    if GetItemInfoInstant then
+        local itemID = GetItemInfoInstant(link)
+        if itemID then
+            return itemID
+        end
+    end
+
+    local itemID = link:match("item:(%d+)")
+    itemID = tonumber(itemID)
+    if itemID and itemID > 0 then
+        return itemID
+    end
+
+    return nil
+end
+
 local function AcquireItemButton(baseButton)
     local itemButton = baseButton.itemButton
     if itemButton then
@@ -125,7 +213,7 @@ local function AcquireItemButton(baseButton)
         return itemButton
     end
 
-    if IsInCombatLockdown() then
+    if IsInCombatLockdownCompat() then
         if QuestKing.StartCombatTimer then
             QuestKing:StartCombatTimer()
         end
@@ -210,7 +298,7 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
         return nil
     end
 
-    if IsInCombatLockdown() then
+    if IsInCombatLockdownCompat() then
         local currentQuestLogIndex = itemButton.questLogIndex
         local currentItemLink = itemButton:GetAttribute("item")
 
@@ -228,6 +316,8 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
     itemButton.questLogIndex = questLogIndex
     itemButton.charges = charges
     itemButton.rangeTimer = 0
+    itemButton.itemLink = link
+    itemButton.itemID = SafeGetItemIDFromLink(link)
 
     SafeSetItemButtonTexture(itemButton, itemTexture)
     SafeSetItemButtonCount(itemButton, charges)
@@ -245,28 +335,27 @@ function QuestKing.WatchButton:RemoveItemButton()
         return
     end
 
-    if IsInCombatLockdown() then
+    if IsInCombatLockdownCompat() then
         if QuestKing.StartCombatTimer then
             QuestKing:StartCombatTimer()
         end
         return
     end
 
+    SafeHideTooltip()
+
     itemButton:Hide()
     itemButton:ClearAllPoints()
-    itemButton:SetScript("OnUpdate", QuestKing_QuestObjectiveItem_OnUpdate)
 
     itemButton.questLogIndex = nil
     itemButton.charges = nil
     itemButton.rangeTimer = nil
+    itemButton.itemLink = nil
+    itemButton.itemID = nil
 
     itemButton:SetAttribute("item", nil)
     itemButton.baseButton = nil
     self.itemButton = nil
-
-    if GameTooltip and GameTooltip:IsOwned(itemButton) then
-        GameTooltip:Hide()
-    end
 
     ResetRangeIndicator(itemButton)
     SafeSetItemButtonCount(itemButton, 0)
@@ -298,6 +387,9 @@ function QuestKing_QuestObjectiveItem_OnUpdate(self, elapsed)
         return
     end
 
+    self.itemLink = link
+    self.itemID = SafeGetItemIDFromLink(link)
+
     UpdateRangeIndicator(self)
     self.rangeTimer = RANGE_UPDATE_TIME
 end
@@ -326,19 +418,40 @@ function QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton)
 end
 
 function QuestKing_QuestObjectiveItem_OnEnter(self)
-    if not self or not self.questLogIndex or not GameTooltip then
+    if not self then
         return
     end
 
-    GameTooltip:SetOwner(self, (opt and opt.tooltipAnchor) or "ANCHOR_RIGHT")
+    local tooltip = QuestKing.PrepareTooltip and QuestKing:PrepareTooltip(self, (opt and opt.tooltipAnchor) or "ANCHOR_RIGHT")
+    if not tooltip then
+        return
+    end
 
-    if GameTooltip.SetQuestLogSpecialItem then
-        GameTooltip:SetQuestLogSpecialItem(self.questLogIndex)
+    local shown = false
+
+    if self.itemLink then
+        shown = SafeSetHyperlink(tooltip, self.itemLink)
+    end
+
+    if not shown and self.itemID then
+        shown = SafeSetItemByID(tooltip, self.itemID)
+    end
+
+    if not shown then
+        local itemName = SafeGetItemName(self.itemLink, self.itemID)
+        if itemName and itemName ~= "" then
+            tooltip:SetText(itemName, 1, 1, 1)
+            shown = true
+        end
+    end
+
+    if shown then
+        tooltip:Show()
+    else
+        QuestKing:HideTooltip()
     end
 end
 
 function QuestKing_QuestObjectiveItem_OnLeave(self)
-    if GameTooltip then
-        GameTooltip:Hide()
-    end
+    SafeHideTooltip()
 end

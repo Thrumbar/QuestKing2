@@ -328,6 +328,18 @@ local function getObjectiveDisplayState(desc, isDone, objectiveInfo)
     return desc, nil, nil, isDone and 1 or 0, false
 end
 
+local function addMoneyTooltipLine(tooltip, money)
+    if not tooltip or not money or money <= 0 then
+        return
+    end
+
+    if GetMoneyString then
+        tooltip:AddLine(GetMoneyString(money), 1, 1, 1)
+    else
+        tooltip:AddLine(format("%d", money), 1, 1, 1)
+    end
+end
+
 local function showBonusRewardTooltip(owner, questID)
     if not owner or not questID then
         return
@@ -391,8 +403,8 @@ local function showBonusRewardTooltip(owner, questID)
             end
         end
 
-        if money > 0 and SetTooltipMoney then
-            SetTooltipMoney(tooltip, money, nil)
+        if money > 0 then
+            addMoneyTooltipLine(tooltip, money)
         end
     end
 

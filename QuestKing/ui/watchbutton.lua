@@ -77,6 +77,15 @@ local function GetItemInset(lineHeight, itemButtonScale, hasItemButton)
     return floor((lineHeight * 2 * itemButtonScale) + 10)
 end
 
+local function HideQuestKingTooltips()
+    if QuestKing and QuestKing.HideTooltip then
+        QuestKing:HideTooltip()
+    end
+
+    if GameTooltip then
+        GameTooltip:Hide()
+    end
+end
 
 do
     local buttonCounter = 0
@@ -813,9 +822,7 @@ function WatchButton:TitleButtonOnEnter(motion)
 end
 
 function WatchButton:TitleButtonOnLeave(motion)
-    if GameTooltip then
-        GameTooltip:Hide()
-    end
+    HideQuestKingTooltips()
 end
 
 function WatchButton:TitleButtonOnClick(mouse, down)
@@ -849,9 +856,7 @@ function WatchButton:ButtonOnEnter(motion)
 end
 
 function WatchButton:ButtonOnLeave(motion)
-    if GameTooltip then
-        GameTooltip:Hide()
-    end
+    HideQuestKingTooltips()
 end
 
 function WatchButton:ButtonOnClick(mouse, down)

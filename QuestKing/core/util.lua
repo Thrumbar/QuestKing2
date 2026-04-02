@@ -18,6 +18,7 @@ local match = string.match
 local modf = math.modf
 local select = select
 local tostring = tostring
+local type = type
 
 local CQL = C_QuestLog
 
@@ -263,6 +264,43 @@ function QuestKing.GetTimeStringFromSecondsShort(timeAmount)
     return format("%d:%.2d", minutes, seconds)
 end
 
+local function ResetPrivateTooltipState(tooltip)
+    if not tooltip then
+        return
+    end
+
+    tooltip:Hide()
+    tooltip:ClearLines()
+
+    if tooltip.SetScale then
+        tooltip:SetScale(1)
+    end
+
+    if tooltip.NineSlice and tooltip.NineSlice.Hide then
+        tooltip.NineSlice:Hide()
+    end
+
+    if tooltip.StatusBar and tooltip.StatusBar.Hide then
+        tooltip.StatusBar:Hide()
+    end
+
+    local name = tooltip:GetName()
+    if name then
+        for i = 1, 30 do
+            local left = _G[name .. "TextLeft" .. i]
+            local right = _G[name .. "TextRight" .. i]
+
+            if left then
+                left:SetText("")
+            end
+
+            if right then
+                right:SetText("")
+            end
+        end
+    end
+end
+
 function QuestKing:GetTooltip()
     local tooltip = self.privateTooltip
     if tooltip and tooltip:IsObjectType("GameTooltip") then
@@ -283,6 +321,8 @@ function QuestKing:PrepareTooltip(owner, anchor)
         return nil
     end
 
+    ResetPrivateTooltipState(tooltip)
+
     tooltip:SetOwner(owner, anchor or (self.options and self.options.tooltipAnchor) or "ANCHOR_RIGHT")
     tooltip:ClearLines()
 
@@ -298,9 +338,11 @@ end
 
 function QuestKing:HideTooltip()
     local tooltip = self.privateTooltip
-    if tooltip then
-        tooltip:Hide()
+    if not tooltip then
+        return
     end
+
+    ResetPrivateTooltipState(tooltip)
 end
 
 local knownTypesTag = {

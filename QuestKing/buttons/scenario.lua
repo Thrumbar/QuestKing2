@@ -387,6 +387,18 @@ local function AddTooltipRewardText(tooltip, text, r, g, b)
     end
 end
 
+local function AddTooltipMoneyText(tooltip, money)
+    if not tooltip or not money or money <= 0 then
+        return
+    end
+
+    if GetMoneyString then
+        tooltip:AddLine(GetMoneyString(money), 1, 1, 1)
+    else
+        tooltip:AddLine(format("%d", money), 1, 1, 1)
+    end
+end
+
 local function GetScenarioDisplayHeader(currentStage, numStages, inChallengeMode, inProvingGrounds, dungeonDisplay)
     if inProvingGrounds then
         return "Proving Grounds"
@@ -952,7 +964,7 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
                 tooltip:AddLine(" ")
                 blankLine = true
             end
-            SetTooltipMoney(tooltip, rewardMoney, nil)
+            AddTooltipMoneyText(tooltip, rewardMoney)
         end
     else
         if xp and xp > 0 then
@@ -968,7 +980,7 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
                 tooltip:AddLine(" ")
                 blankLine = true
             end
-            SetTooltipMoney(tooltip, money, nil)
+            AddTooltipMoneyText(tooltip, money)
         end
     end
 
