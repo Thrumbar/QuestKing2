@@ -53,6 +53,7 @@ opt.showCompletedObjectives = false
 opt.hideSupersedingObjectives = true
 opt.allowDrag = true
 opt.disableBlizzard = true
+opt.enablePetTrackerCompatibility = false
 
 -- ---------------------------------------------------------------------------
 -- Tooltip handling

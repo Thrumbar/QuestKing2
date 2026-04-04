@@ -18,14 +18,12 @@ local match = string.match
 local modf = math.modf
 local select = select
 local tostring = tostring
-local type = type
 
 local CQL = C_QuestLog
 
 local QUEST_FREQUENCY_DAILY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Daily) or LE_QUEST_FREQUENCY_DAILY
 local QUEST_FREQUENCY_WEEKLY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Weekly) or LE_QUEST_FREQUENCY_WEEKLY
 
-local objectiveTrackerShowHookInstalled = false
 
 local function SafeGetQuestInfoByIndex(questIndex)
     if not questIndex or questIndex < 1 then
@@ -179,37 +177,81 @@ function QuestKing.MatchObjectiveRep(objectiveDesc)
     return quantCur, quantMax, quantName
 end
 
-function QuestKing:DisableBlizzard()
-    pcall(function()
-        if ScenarioBlocksFrame then
-            ScenarioBlocksFrame:UnregisterAllEvents()
-            ScenarioBlocksFrame:Hide()
-        end
-    end)
+local blizzardTrackerVisualHooksInstalled = false
 
-    pcall(function()
-        if ObjectiveTrackerBlocksFrame then
-            ObjectiveTrackerBlocksFrame:UnregisterAllEvents()
-            ObjectiveTrackerBlocksFrame:Hide()
-        end
-    end)
+local function ApplyBlizzardTrackerVisualState()
+    if not ObjectiveTrackerFrame then
+        return
+    end
 
-    pcall(function()
-        if ObjectiveTrackerFrame then
-            ObjectiveTrackerFrame:UnregisterAllEvents()
-            ObjectiveTrackerFrame:Hide()
-
-            if not objectiveTrackerShowHookInstalled and hooksecurefunc then
-                hooksecurefunc(ObjectiveTrackerFrame, "Show", function(frame)
-                    if frame then
-                        frame:Hide()
-                    end
-                end)
-                objectiveTrackerShowHookInstalled = true
-            end
+    if opt.disableBlizzard then
+        if ObjectiveTrackerFrame.SetAlpha then
+            ObjectiveTrackerFrame:SetAlpha(0)
         end
-    end)
+        if ObjectiveTrackerFrame.EnableMouse then
+            ObjectiveTrackerFrame:EnableMouse(false)
+        end
+        if ObjectiveTrackerFrame.BlocksFrame and ObjectiveTrackerFrame.BlocksFrame.SetAlpha then
+            ObjectiveTrackerFrame.BlocksFrame:SetAlpha(0)
+        end
+        if ScenarioBlocksFrame and ScenarioBlocksFrame.SetAlpha then
+            ScenarioBlocksFrame:SetAlpha(0)
+        end
+        if ObjectiveTrackerBlocksFrame and ObjectiveTrackerBlocksFrame.SetAlpha then
+            ObjectiveTrackerBlocksFrame:SetAlpha(0)
+        end
+    else
+        if ObjectiveTrackerFrame.SetAlpha then
+            ObjectiveTrackerFrame:SetAlpha(1)
+        end
+        if ObjectiveTrackerFrame.EnableMouse then
+            ObjectiveTrackerFrame:EnableMouse(true)
+        end
+        if ObjectiveTrackerFrame.BlocksFrame and ObjectiveTrackerFrame.BlocksFrame.SetAlpha then
+            ObjectiveTrackerFrame.BlocksFrame:SetAlpha(1)
+        end
+        if ScenarioBlocksFrame and ScenarioBlocksFrame.SetAlpha then
+            ScenarioBlocksFrame:SetAlpha(1)
+        end
+        if ObjectiveTrackerBlocksFrame and ObjectiveTrackerBlocksFrame.SetAlpha then
+            ObjectiveTrackerBlocksFrame:SetAlpha(1)
+        end
+    end
 end
+
+function QuestKing:DisableBlizzard()
+    -- Taint-safe visual suppression only.
+    -- Do not unregister, reparent, or hard-hide Blizzard tracker frames.
+    ApplyBlizzardTrackerVisualState()
+
+    if blizzardTrackerVisualHooksInstalled or not hooksecurefunc then
+        return
+    end
+
+    blizzardTrackerVisualHooksInstalled = true
+
+    if ObjectiveTrackerFrame then
+        hooksecurefunc(ObjectiveTrackerFrame, "Show", ApplyBlizzardTrackerVisualState)
+    end
+
+    if ObjectiveTracker_Update then
+        hooksecurefunc("ObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
+    end
+
+    if BonusObjectiveTracker_Update then
+        hooksecurefunc("BonusObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
+    end
+
+    if ScenarioObjectiveTracker_Update then
+        hooksecurefunc("ScenarioObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
+    end
+
+    if WatchFrame_Update then
+        hooksecurefunc("WatchFrame_Update", ApplyBlizzardTrackerVisualState)
+    end
+end
+
+QuestKing.ApplyBlizzardTrackerVisualState = ApplyBlizzardTrackerVisualState
 
 local function colorGradient(perc, ...)
     if perc >= 1 then

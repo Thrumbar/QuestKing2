@@ -42,9 +42,16 @@ opt.dbAllowTrackerAlpha = true          -- allow persisting alpha in SVs
 -- Behavior toggles
 ----------------------------------------------------------------------
 
--- If true, QuestKing will hide Blizzard's Objective Tracker entirely
--- (You can still toggle back by setting this to false in overrides.)
+-- If true, QuestKing will attempt to suppress Blizzard's Objective Tracker.
+-- Warning: aggressive suppression of Blizzard tracker/map UI can taint protected
+-- code paths on modern Retail clients. Keep this false unless you are doing
+-- targeted testing and know the risk.
 opt.disableBlizzard = false
+
+-- If true, QuestKing will enable PetTracker integration helpers.
+-- This is disabled by default because reparenting third-party objective frames
+-- into a custom tracker is a common taint source on modern clients.
+opt.enablePetTrackerCompatibility = false
 
 -- Show special popup when looting an item that starts a quest
 opt.enableItemPopups = true
