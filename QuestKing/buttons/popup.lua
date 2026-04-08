@@ -182,6 +182,68 @@ local function RemoveAutoQuestPopUpCompat(questID)
     end
 end
 
+local function IsTaskQuestCompat(questID)
+    if not questID then
+        return false
+    end
+
+    if C_QuestLog and C_QuestLog.IsQuestTask then
+        return C_QuestLog.IsQuestTask(questID) and true or false
+    end
+
+    if C_TaskQuest and C_TaskQuest.IsActive then
+        return C_TaskQuest.IsActive(questID) and true or false
+    end
+
+    if IsQuestTask then
+        return IsQuestTask(questID) and true or false
+    end
+
+    return false
+end
+
+local function CallQuestPopupAPICompat(func, questID, questLogIndex)
+    if type(func) ~= "function" then
+        return false
+    end
+
+    if questID then
+        local ok = pcall(func, questID)
+        if ok then
+            return true
+        end
+    end
+
+    if questLogIndex then
+        local ok = pcall(func, questLogIndex)
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function GetPopupOfferLineText()
+    return QUEST_WATCH_POPUP_CLICK_TO_VIEW
+        or QUEST_WATCH_POPUP_QUEST_DISCOVERED
+        or QUEST_WATCH_QUEST_READY
+        or "Click to view"
+end
+
+local function GetPopupCompleteLineText(questID)
+    if IsTaskQuestCompat(questID) then
+        return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE_TASK
+            or QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
+            or QUEST_WATCH_QUEST_READY
+            or "Click to complete"
+    end
+
+    return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
+        or QUEST_WATCH_QUEST_READY
+        or "Click to complete"
+end
+
 local function BuildQuestStartItemSet()
     if questStartItemSet then
         return questStartItemSet
@@ -339,7 +401,11 @@ local function SetButtonToPopup(button, questID, popupType)
 
     if questLogIndex then
         taggedTitle = QuestKing.GetQuestTaggedTitle(questLogIndex)
-    else
+    elseif C_QuestLog and C_QuestLog.GetTitleForQuestID then
+        taggedTitle = C_QuestLog.GetTitleForQuestID(questID)
+    end
+
+    if not taggedTitle or taggedTitle == "" then
         taggedTitle = NEW_QUEST_AVAILABLE or "New Quest!"
     end
 
@@ -347,12 +413,24 @@ local function SetButtonToPopup(button, questID, popupType)
 
     if popupType == "COMPLETE" then
         button.title:SetTextColor(opt_colors.PopupCompleteTitle[1], opt_colors.PopupCompleteTitle[2], opt_colors.PopupCompleteTitle[3])
-        button:AddLine("  Quest Completed", nil, opt_colors.PopupCompleteDescription[1], opt_colors.PopupCompleteDescription[2], opt_colors.PopupCompleteDescription[3])
+        button:AddLine(
+            ("  %s"):format(GetPopupCompleteLineText(questID)),
+            nil,
+            opt_colors.PopupCompleteDescription[1],
+            opt_colors.PopupCompleteDescription[2],
+            opt_colors.PopupCompleteDescription[3]
+        )
         SetButtonBackdropColor(button, opt_colors.PopupCompleteBackground)
         button:SetIcon("QuestIcon-QuestionMark")
     else
         button.title:SetTextColor(opt_colors.PopupOfferTitle[1], opt_colors.PopupOfferTitle[2], opt_colors.PopupOfferTitle[3])
-        button:AddLine("  Quest Received", nil, opt_colors.PopupOfferDescription[1], opt_colors.PopupOfferDescription[2], opt_colors.PopupOfferDescription[3])
+        button:AddLine(
+            ("  %s"):format(GetPopupOfferLineText()),
+            nil,
+            opt_colors.PopupOfferDescription[1],
+            opt_colors.PopupOfferDescription[2],
+            opt_colors.PopupOfferDescription[3]
+        )
         SetButtonBackdropColor(button, opt_colors.PopupOfferBackground)
         button:SetIcon("QuestIcon-Exclamation")
     end
@@ -449,15 +527,11 @@ function mouseHandlerPopup:ButtonOnClick(mouse)
     end
 
     if popupType == "OFFER" then
-        if self.questIndex and ShowQuestOffer then
-            ShowQuestOffer(self.questIndex)
-        end
+        CallQuestPopupAPICompat(ShowQuestOffer, questID, self.questIndex)
         RemoveAutoQuestPopUpCompat(questID)
         QuestKing:UpdateTracker()
     elseif popupType == "COMPLETE" then
-        if self.questIndex and ShowQuestComplete then
-            ShowQuestComplete(self.questIndex)
-        end
+        CallQuestPopupAPICompat(ShowQuestComplete, questID, self.questIndex)
         RemoveAutoQuestPopUpCompat(questID)
         QuestKing:UpdateTracker()
     end
