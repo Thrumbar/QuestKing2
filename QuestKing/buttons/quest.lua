@@ -169,20 +169,12 @@ local function QK_IsComplete(questID)
     return false
 end
 
-local function QK_IsAutoComplete(questID, questLogIndex)
-    if not questID and not questLogIndex then
-        return false
-    end
-
+local function QK_IsAutoComplete(questLogIndex, questID)
     if CQL and CQL.IsAutoComplete and questID then
         return CQL.IsAutoComplete(questID) and true or false
     end
 
-    if not questLogIndex and questID then
-        questLogIndex = QK_GetQuestLogIndexByID(questID)
-    end
-
-    if questLogIndex and GetQuestLogIsAutoComplete then
+    if GetQuestLogIsAutoComplete and questLogIndex then
         return GetQuestLogIsAutoComplete(questLogIndex) and true or false
     end
 
@@ -257,15 +249,77 @@ local function QK_ObjectiveTextAlreadyHasProgress(text)
     return false
 end
 
-local function QK_GetQuestObjectives(questID)
+local function QK_GetQuestObjectives(questID, questLogIndex)
     local out = {}
+
+    if questLogIndex and GetNumQuestLeaderBoards and GetQuestLogLeaderBoard then
+        local numObjectives = GetNumQuestLeaderBoards(questLogIndex) or 0
+        for i = 1, numObjectives do
+            local text, objectiveType, finished = GetQuestLogLeaderBoard(i, questLogIndex, false)
+            if text and text ~= "" then
+                local fulfilled
+                local required
+
+                if GetQuestObjectiveInfo and questID then
+                    local _, _, _, numFulfilled, numRequired = GetQuestObjectiveInfo(questID, i, false)
+                    fulfilled = numFulfilled
+                    required = numRequired
+                end
+
+                out[#out + 1] = {
+                    text = text or "",
+                    type = objectiveType,
+                    finished = finished and true or false,
+                    numFulfilled = fulfilled,
+                    numRequired = required,
+                }
+            end
+        end
+
+        if #out > 0 then
+            return out
+        end
+    end
+
+    if questID and GetQuestObjectiveInfo then
+        local maxObjectives = 0
+
+        if questLogIndex and GetNumQuestLeaderBoards then
+            maxObjectives = GetNumQuestLeaderBoards(questLogIndex) or 0
+        end
+
+        if maxObjectives <= 0 then
+            maxObjectives = 20
+        end
+
+        for i = 1, maxObjectives do
+            local text, objectiveType, finished, numFulfilled, numRequired = GetQuestObjectiveInfo(questID, i, false)
+            if not text then
+                break
+            end
+
+            if text ~= "" then
+                out[#out + 1] = {
+                    text = text or "",
+                    type = objectiveType,
+                    finished = finished and true or false,
+                    numFulfilled = numFulfilled,
+                    numRequired = numRequired,
+                }
+            end
+        end
+
+        if #out > 0 then
+            return out
+        end
+    end
 
     if CQL and CQL.GetQuestObjectives and questID then
         local objectives = CQL.GetQuestObjectives(questID)
         if type(objectives) == "table" then
             for i = 1, #objectives do
                 local objective = objectives[i]
-                if objective then
+                if objective and objective.text and objective.text ~= "" then
                     out[#out + 1] = {
                         text = objective.text or "",
                         type = objective.type or objective.objectiveType,
@@ -275,35 +329,6 @@ local function QK_GetQuestObjectives(questID)
                     }
                 end
             end
-
-            if #out > 0 then
-                return out
-            end
-        end
-    end
-
-    local questLogIndex = QK_GetQuestLogIndexByID(questID)
-    if questLogIndex and GetNumQuestLeaderBoards and GetQuestLogLeaderBoard then
-        local numObjectives = GetNumQuestLeaderBoards(questLogIndex) or 0
-        for i = 1, numObjectives do
-            local text, objectiveType, finished = GetQuestLogLeaderBoard(i, questLogIndex, true)
-            if text then
-                out[#out + 1] = {
-                    text = text or "",
-                    type = objectiveType,
-                    finished = finished and true or false,
-                }
-            end
-        end
-    elseif questID and GetNumQuestLeaderBoards and GetQuestObjectiveInfo then
-        local numObjectives = GetNumQuestLeaderBoards(questLogIndex or 0) or 0
-        for i = 1, numObjectives do
-            local text, objectiveType, finished = GetQuestObjectiveInfo(questID, i, false)
-            out[#out + 1] = {
-                text = text or "",
-                type = objectiveType,
-                finished = finished and true or false,
-            }
         end
     end
 
@@ -539,9 +564,9 @@ function QuestKing:GetQuestTagBracket(questID)
     return nil
 end
 
-function QuestKing:GetQuestObjectivesText(questID)
+function QuestKing:GetQuestObjectivesText(questID, questLogIndex)
     local out = {}
-    local objectives = QK_GetQuestObjectives(questID)
+    local objectives = QK_GetQuestObjectives(questID, questLogIndex)
     local hasProgressBarObjective = false
 
     for index = 1, #objectives do
@@ -639,42 +664,6 @@ end
 
 local function GetQuestCompletionLineText()
     return QUEST_WATCH_QUEST_READY or QUEST_WATCH_QUEST_COMPLETE or COMPLETE or "Complete"
-end
-
-local function GetQuestAutoCompleteLineText()
-    return QUEST_WATCH_QUEST_READY or AUTO_QUEST_COMPLETE or "Click to complete"
-end
-
-local function HasUnfinishedQuestObjectiveRows(rows)
-    if type(rows) ~= "table" then
-        return false
-    end
-
-    for i = 1, #rows do
-        local row = rows[i]
-        if row and not row.finished then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function GetQuestReadyState(questID, questLogIndex, objectives, isComplete)
-    if isComplete then
-        return true, false
-    end
-
-    local isAutoComplete = QK_IsAutoComplete(questID, questLogIndex)
-    if not isAutoComplete then
-        return false, false
-    end
-
-    if HasUnfinishedQuestObjectiveRows(objectives) then
-        return false, true
-    end
-
-    return true, true
 end
 
 local function FreeLineBars(line)
@@ -839,8 +828,8 @@ function mouseHandlerQuest:TitleButtonOnClick(mouse)
         return
     end
 
-    if button.isReadyForTurnIn and button.isAutoComplete and questLogIndex and ShowQuestComplete then
-        ShowQuestComplete(questLogIndex)
+    if button.isAutoComplete and button.isComplete and ShowQuestComplete then
+        ShowQuestComplete(questID)
         return
     end
 
@@ -914,10 +903,10 @@ function QuestKing:GetQuestDisplayData(questLogIndex)
 
     local questID = info.questID
     local kind = self:GetQuestKind(questID, info)
-    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID)
+    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID, questLogIndex)
     local percent = nil
     local isComplete = QK_IsComplete(questID)
-    local isReadyForTurnIn, isAutoComplete = GetQuestReadyState(questID, questLogIndex, objectives, isComplete)
+    local isAutoComplete = QK_IsAutoComplete(questLogIndex, questID)
 
     if hasProgressBarObjective then
         percent = QK_GetQuestPercent(questID)
@@ -929,8 +918,8 @@ function QuestKing:GetQuestDisplayData(questLogIndex)
         title = info.title or UNKNOWN,
         level = QK_GetDifficultyLevel(info),
         isComplete = isComplete,
-        isReadyForTurnIn = isReadyForTurnIn,
         isAutoComplete = isAutoComplete,
+        isReadyForTurnIn = isComplete and isAutoComplete,
         tagBracket = self:GetQuestTagBracket(questID),
         objectives = objectives,
         hasProgressBarObjective = hasProgressBarObjective,
@@ -965,8 +954,9 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     button.questID = data.questID
     button.questLogIndex = questLogIndex
     button.questKind = data.kind
-    button.isAutoComplete = data.isAutoComplete
-    button.isReadyForTurnIn = data.isReadyForTurnIn
+    button.isComplete = data.isComplete and true or false
+    button.isAutoComplete = data.isAutoComplete and true or false
+    button.isReadyForTurnIn = data.isReadyForTurnIn and true or false
 
     local kindPrefix = GetKindPrefix(data.kind)
     local title = data.title
@@ -991,17 +981,11 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         end
     end
 
-    if button.SetIcon then
-        if data.isReadyForTurnIn and data.isAutoComplete then
-            button:SetIcon("QuestIcon-QuestionMark")
-        else
-            button.icon:Hide()
-            button.icon.animGroup:Stop()
-        end
-    end
-
     if button.title then
         if data.isReadyForTurnIn and button.title.SetFormattedTextIcon then
+            button.title:SetFormattedTextIcon("|TInterface\\QUESTFRAME\\UI-Quest-BulletPoint:0:0:0:0:16:16:0:16:0:16|t %s", displayTitle)
+            button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
+        elseif data.isComplete and button.title.SetFormattedTextIcon then
             button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t %s", displayTitle)
             button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
         else
@@ -1072,8 +1056,9 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         button:RemoveItemButton()
     end
 
-    if visibleObjectives == 0 and data.isReadyForTurnIn then
-        local completionText = data.isAutoComplete and GetQuestAutoCompleteLineText() or GetQuestCompletionLineText()
+    if data.isReadyForTurnIn or (visibleObjectives == 0 and data.isComplete) then
+        local completionText = data.isReadyForTurnIn and "Click to complete" or GetQuestCompletionLineText()
+
         local line = button:AddLine(
             ("  %s"):format(completionText),
             nil,

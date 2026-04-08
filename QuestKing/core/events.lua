@@ -262,39 +262,6 @@ local function IsPreyQuestCompat(questID)
     return false
 end
 
-local questRefreshToken = 0
-
-local function UpdateTracker()
-    if QuestKing and QuestKing.UpdateTracker then
-        QuestKing:UpdateTracker()
-    end
-end
-
-local function QueueQuestStateRefresh()
-    if not (C_Timer and C_Timer.After) then
-        return
-    end
-
-    questRefreshToken = questRefreshToken + 1
-    local token = questRefreshToken
-
-    local function RunIfCurrent()
-        if token ~= questRefreshToken then
-            return
-        end
-
-        UpdateTracker()
-    end
-
-    C_Timer.After(0, RunIfCurrent)
-    C_Timer.After(0.15, RunIfCurrent)
-end
-
-local function UpdateTrackerAndQueueQuestStateRefresh()
-    UpdateTracker()
-    QueueQuestStateRefresh()
-end
-
 local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
     if not GetCVarBoolCompat("autoQuestWatch") then
         return false
@@ -365,6 +332,39 @@ function QuestKing:SetScenarioCriteriaVisibility(shouldShow)
     return RefreshScenarioCriteriaState(shouldShow)
 end
 
+local function UpdateTracker()
+    if QuestKing and QuestKing.UpdateTracker then
+        QuestKing:UpdateTracker()
+    end
+end
+
+local questRefreshToken = 0
+
+local function QueueQuestRefresh()
+    UpdateTracker()
+
+    if not (C_Timer and C_Timer.After) then
+        return
+    end
+
+    questRefreshToken = questRefreshToken + 1
+    local token = questRefreshToken
+
+    C_Timer.After(0, function()
+        if token ~= questRefreshToken then
+            return
+        end
+        UpdateTracker()
+    end)
+
+    C_Timer.After(0.10, function()
+        if token ~= questRefreshToken then
+            return
+        end
+        UpdateTracker()
+    end)
+end
+
 local function RefreshScenarioAndUpdate(shouldShow)
     RefreshScenarioCriteriaState(shouldShow)
     UpdateTracker()
@@ -428,20 +428,20 @@ end
 -- Quest / tracker update events
 -- -----------------------------------------------------------------------------
 
-Events.QUEST_LOG_UPDATE = UpdateTrackerAndQueueQuestStateRefresh
-Events.QUEST_WATCH_LIST_CHANGED = UpdateTrackerAndQueueQuestStateRefresh
+Events.QUEST_LOG_UPDATE = QueueQuestRefresh
+Events.QUEST_WATCH_LIST_CHANGED = QueueQuestRefresh
 
 Events.QUEST_WATCH_UPDATE = function(self, event, questID)
     if QuestKing and QuestKing.OnQuestObjectivesCompleted then
         QuestKing:OnQuestObjectivesCompleted(questID)
     end
 
-    UpdateTrackerAndQueueQuestStateRefresh()
+    QueueQuestRefresh()
 end
 
 Events.UNIT_QUEST_LOG_CHANGED = function(self, event, unit)
     if unit == "player" then
-        UpdateTrackerAndQueueQuestStateRefresh()
+        QueueQuestRefresh()
     end
 end
 
@@ -481,10 +481,8 @@ Events.QUEST_ACCEPTED = function(self, event, ...)
     if QuestKing and QuestKing.OnQuestAccepted then
         QuestKing:OnQuestAccepted(questID)
     else
-        UpdateTracker()
+        QueueQuestRefresh()
     end
-
-    QueueQuestStateRefresh()
 end
 
 Events.QUEST_REMOVED = function(self, event, questID)
@@ -492,7 +490,7 @@ Events.QUEST_REMOVED = function(self, event, questID)
         QuestKing:ClearDummyTask(questID)
     end
 
-    UpdateTrackerAndQueueQuestStateRefresh()
+    QueueQuestRefresh()
 end
 
 -- -----------------------------------------------------------------------------
@@ -506,7 +504,7 @@ Events.QUEST_AUTOCOMPLETE = function(self, event, questID)
         end
     end
 
-    UpdateTrackerAndQueueQuestStateRefresh()
+    QueueQuestRefresh()
 end
 
 Events.QUEST_TURNED_IN = function(self, event, questID, xp, money)
@@ -516,11 +514,11 @@ Events.QUEST_TURNED_IN = function(self, event, questID, xp, money)
         end
     end
 
-    UpdateTrackerAndQueueQuestStateRefresh()
+    QueueQuestRefresh()
 end
 
-Events.QUEST_COMPLETE = UpdateTrackerAndQueueQuestStateRefresh
-Events.QUEST_FINISHED = UpdateTrackerAndQueueQuestStateRefresh
+Events.QUEST_COMPLETE = QueueQuestRefresh
+Events.QUEST_FINISHED = QueueQuestRefresh
 
 -- -----------------------------------------------------------------------------
 -- Scenario / bonus-step content
