@@ -9,11 +9,10 @@
 --   - scenarios
 --   - timers / challenge content
 --
--- Auto-watch fixes:
---   - handles modern QUEST_ACCEPTED payloads correctly
---   - respects Blizzard autoQuestWatch for all newly accepted quests
---   - does not skip task quests
---   - retries once on the next frame if quest data is not ready yet
+-- Additional scenario integration fixes:
+--   - refreshes scenario criteria visibility cache on scenario events
+--   - handles SCENARIO_CRITERIA_SHOW_STATE_UPDATE explicitly
+--   - keeps scenario tracker state in sync when entering world / completing scenarios
 
 local addonName, QuestKing = ...
 
@@ -263,6 +262,39 @@ local function IsPreyQuestCompat(questID)
     return false
 end
 
+local questRefreshToken = 0
+
+local function UpdateTracker()
+    if QuestKing and QuestKing.UpdateTracker then
+        QuestKing:UpdateTracker()
+    end
+end
+
+local function QueueQuestStateRefresh()
+    if not (C_Timer and C_Timer.After) then
+        return
+    end
+
+    questRefreshToken = questRefreshToken + 1
+    local token = questRefreshToken
+
+    local function RunIfCurrent()
+        if token ~= questRefreshToken then
+            return
+        end
+
+        UpdateTracker()
+    end
+
+    C_Timer.After(0, RunIfCurrent)
+    C_Timer.After(0.15, RunIfCurrent)
+end
+
+local function UpdateTrackerAndQueueQuestStateRefresh()
+    UpdateTracker()
+    QueueQuestStateRefresh()
+end
+
 local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
     if not GetCVarBoolCompat("autoQuestWatch") then
         return false
@@ -312,10 +344,30 @@ local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
     return false
 end
 
-local function UpdateTracker()
-    if QuestKing and QuestKing.UpdateTracker then
-        QuestKing:UpdateTracker()
+local function RefreshScenarioCriteriaState(shouldShow)
+    if not QuestKing then
+        return nil
     end
+
+    if type(shouldShow) == "boolean" then
+        QuestKing.scenarioShouldShowCriteria = shouldShow
+        return shouldShow
+    end
+
+    if QuestKing.RefreshShouldShowScenarioCriteria then
+        return QuestKing:RefreshShouldShowScenarioCriteria()
+    end
+
+    return nil
+end
+
+function QuestKing:SetScenarioCriteriaVisibility(shouldShow)
+    return RefreshScenarioCriteriaState(shouldShow)
+end
+
+local function RefreshScenarioAndUpdate(shouldShow)
+    RefreshScenarioCriteriaState(shouldShow)
+    UpdateTracker()
 end
 
 -- -----------------------------------------------------------------------------
@@ -376,20 +428,20 @@ end
 -- Quest / tracker update events
 -- -----------------------------------------------------------------------------
 
-Events.QUEST_LOG_UPDATE = UpdateTracker
-Events.QUEST_WATCH_LIST_CHANGED = UpdateTracker
+Events.QUEST_LOG_UPDATE = UpdateTrackerAndQueueQuestStateRefresh
+Events.QUEST_WATCH_LIST_CHANGED = UpdateTrackerAndQueueQuestStateRefresh
 
 Events.QUEST_WATCH_UPDATE = function(self, event, questID)
     if QuestKing and QuestKing.OnQuestObjectivesCompleted then
         QuestKing:OnQuestObjectivesCompleted(questID)
     end
 
-    UpdateTracker()
+    UpdateTrackerAndQueueQuestStateRefresh()
 end
 
 Events.UNIT_QUEST_LOG_CHANGED = function(self, event, unit)
     if unit == "player" then
-        UpdateTracker()
+        UpdateTrackerAndQueueQuestStateRefresh()
     end
 end
 
@@ -431,6 +483,8 @@ Events.QUEST_ACCEPTED = function(self, event, ...)
     else
         UpdateTracker()
     end
+
+    QueueQuestStateRefresh()
 end
 
 Events.QUEST_REMOVED = function(self, event, questID)
@@ -438,7 +492,7 @@ Events.QUEST_REMOVED = function(self, event, questID)
         QuestKing:ClearDummyTask(questID)
     end
 
-    UpdateTracker()
+    UpdateTrackerAndQueueQuestStateRefresh()
 end
 
 -- -----------------------------------------------------------------------------
@@ -452,7 +506,7 @@ Events.QUEST_AUTOCOMPLETE = function(self, event, questID)
         end
     end
 
-    UpdateTracker()
+    UpdateTrackerAndQueueQuestStateRefresh()
 end
 
 Events.QUEST_TURNED_IN = function(self, event, questID, xp, money)
@@ -462,17 +516,19 @@ Events.QUEST_TURNED_IN = function(self, event, questID, xp, money)
         end
     end
 
-    UpdateTracker()
+    UpdateTrackerAndQueueQuestStateRefresh()
 end
 
-Events.QUEST_COMPLETE = UpdateTracker
-Events.QUEST_FINISHED = UpdateTracker
+Events.QUEST_COMPLETE = UpdateTrackerAndQueueQuestStateRefresh
+Events.QUEST_FINISHED = UpdateTrackerAndQueueQuestStateRefresh
 
 -- -----------------------------------------------------------------------------
 -- Scenario / bonus-step content
 -- -----------------------------------------------------------------------------
 
 Events.SCENARIO_UPDATE = function(self, event, ...)
+    RefreshScenarioCriteriaState()
+
     if QuestKing and QuestKing.OnScenarioUpdate then
         QuestKing:OnScenarioUpdate(...)
     else
@@ -480,21 +536,37 @@ Events.SCENARIO_UPDATE = function(self, event, ...)
     end
 end
 
-Events.SCENARIO_CRITERIA_UPDATE = UpdateTracker
-Events.SCENARIO_SPELL_UPDATE = UpdateTracker
-Events.SCENARIO_CRITERIA_SHOW_STATE_UPDATE = UpdateTracker
-Events.SCENARIO_POI_UPDATE = UpdateTracker
-Events.SCENARIO_BONUS_VISIBILITY_UPDATE = UpdateTracker
+Events.SCENARIO_CRITERIA_UPDATE = function()
+    RefreshScenarioAndUpdate()
+end
+
+Events.SCENARIO_SPELL_UPDATE = function()
+    RefreshScenarioAndUpdate()
+end
+
+Events.SCENARIO_CRITERIA_SHOW_STATE_UPDATE = function(self, event, shouldShow)
+    RefreshScenarioAndUpdate(shouldShow)
+end
+
+Events.SCENARIO_POI_UPDATE = function()
+    RefreshScenarioAndUpdate()
+end
+
+Events.SCENARIO_BONUS_VISIBILITY_UPDATE = function()
+    RefreshScenarioAndUpdate()
+end
 
 Events.CRITERIA_COMPLETE = function(self, event, ...)
     if QuestKing and QuestKing.OnCriteriaComplete then
         QuestKing:OnCriteriaComplete(...)
     else
-        UpdateTracker()
+        RefreshScenarioAndUpdate()
     end
 end
 
 Events.SCENARIO_COMPLETED = function(self, event, ...)
+    RefreshScenarioCriteriaState()
+
     if QuestKing and QuestKing.OnScenarioCompleted then
         QuestKing:OnScenarioCompleted(...)
     end
@@ -522,6 +594,8 @@ Events.WORLD_STATE_TIMER_STOP = UpdateTracker
 -- -----------------------------------------------------------------------------
 
 Events.PLAYER_ENTERING_WORLD = function()
+    RefreshScenarioCriteriaState()
+
     if QuestKing and QuestKing.OnPlayerEnteringWorld then
         QuestKing:OnPlayerEnteringWorld()
     end

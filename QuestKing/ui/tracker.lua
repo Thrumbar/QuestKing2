@@ -128,6 +128,18 @@ local function EnsureSavedVariables()
     QuestKingDBPerChar.trackerPositionPreset = QuestKingDBPerChar.trackerPositionPreset or 1
 end
 
+local function GetModeLabel(displayMode)
+    if displayMode == "combined" then
+        return "C"
+    elseif displayMode == "achievements" then
+        return "A"
+    elseif displayMode == "raids" then
+        return "R"
+    end
+
+    return "Q"
+end
+
 local function GetDefaultDragOffsets(point)
     if point == "BOTTOMRIGHT" then
         return -12, 220
@@ -319,7 +331,7 @@ function Tracker:Init()
     modeLabel:SetJustifyV("MIDDLE")
     modeLabel:SetPoint("CENTER", 0.5, 0)
     modeLabel:SetWordWrap(false)
-    modeLabel:SetText("Q")
+    modeLabel:SetText(GetModeLabel(QuestKingDBPerChar.displayMode))
     modeButton.label = modeLabel
     modeButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     modeButton:SetScript("OnClick", Tracker.ModeButtonOnClick)
@@ -619,20 +631,28 @@ end
 function Tracker.ModeButtonOnClick(self, mouse)
     EnsureSavedVariables()
 
+    local displayMode = QuestKingDBPerChar.displayMode or "combined"
+
     if mouse == "RightButton" then
         if IsAltKeyDown() then
             QuestKing:SetSuperTrackedQuestID(0)
-        elseif QuestKingDBPerChar.displayMode ~= "combined" then
+        else
+            QuestKingDBPerChar.displayMode = "combined"
+        end
+    else
+        if displayMode == "quests" then
+            QuestKingDBPerChar.displayMode = "raids"
+        elseif displayMode == "raids" then
+            QuestKingDBPerChar.displayMode = "achievements"
+        elseif displayMode == "achievements" then
             QuestKingDBPerChar.displayMode = "combined"
         else
             QuestKingDBPerChar.displayMode = "quests"
         end
-    else
-        if QuestKingDBPerChar.displayMode == "quests" then
-            QuestKingDBPerChar.displayMode = "achievements"
-        else
-            QuestKingDBPerChar.displayMode = "quests"
-        end
+    end
+
+    if self.label then
+        self.label:SetText(GetModeLabel(QuestKingDBPerChar.displayMode))
     end
 
     QuestKing:UpdateTracker()

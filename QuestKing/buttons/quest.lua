@@ -169,6 +169,26 @@ local function QK_IsComplete(questID)
     return false
 end
 
+local function QK_IsAutoComplete(questID, questLogIndex)
+    if not questID and not questLogIndex then
+        return false
+    end
+
+    if CQL and CQL.IsAutoComplete and questID then
+        return CQL.IsAutoComplete(questID) and true or false
+    end
+
+    if not questLogIndex and questID then
+        questLogIndex = QK_GetQuestLogIndexByID(questID)
+    end
+
+    if questLogIndex and GetQuestLogIsAutoComplete then
+        return GetQuestLogIsAutoComplete(questLogIndex) and true or false
+    end
+
+    return false
+end
+
 local function QK_GetDifficultyLevel(info)
     if not info then
         return nil
@@ -621,6 +641,42 @@ local function GetQuestCompletionLineText()
     return QUEST_WATCH_QUEST_READY or QUEST_WATCH_QUEST_COMPLETE or COMPLETE or "Complete"
 end
 
+local function GetQuestAutoCompleteLineText()
+    return QUEST_WATCH_QUEST_READY or AUTO_QUEST_COMPLETE or "Click to complete"
+end
+
+local function HasUnfinishedQuestObjectiveRows(rows)
+    if type(rows) ~= "table" then
+        return false
+    end
+
+    for i = 1, #rows do
+        local row = rows[i]
+        if row and not row.finished then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function GetQuestReadyState(questID, questLogIndex, objectives, isComplete)
+    if isComplete then
+        return true, false
+    end
+
+    local isAutoComplete = QK_IsAutoComplete(questID, questLogIndex)
+    if not isAutoComplete then
+        return false, false
+    end
+
+    if HasUnfinishedQuestObjectiveRows(objectives) then
+        return false, true
+    end
+
+    return true, true
+end
+
 local function FreeLineBars(line)
     if not line then
         return
@@ -783,6 +839,11 @@ function mouseHandlerQuest:TitleButtonOnClick(mouse)
         return
     end
 
+    if button.isReadyForTurnIn and button.isAutoComplete and questLogIndex and ShowQuestComplete then
+        ShowQuestComplete(questLogIndex)
+        return
+    end
+
     if QuestObjectiveTracker_OpenQuestMap and questLogIndex then
         QuestObjectiveTracker_OpenQuestMap(nil, questLogIndex)
         return
@@ -855,6 +916,8 @@ function QuestKing:GetQuestDisplayData(questLogIndex)
     local kind = self:GetQuestKind(questID, info)
     local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID)
     local percent = nil
+    local isComplete = QK_IsComplete(questID)
+    local isReadyForTurnIn, isAutoComplete = GetQuestReadyState(questID, questLogIndex, objectives, isComplete)
 
     if hasProgressBarObjective then
         percent = QK_GetQuestPercent(questID)
@@ -865,7 +928,9 @@ function QuestKing:GetQuestDisplayData(questLogIndex)
         kind = kind,
         title = info.title or UNKNOWN,
         level = QK_GetDifficultyLevel(info),
-        isComplete = QK_IsComplete(questID),
+        isComplete = isComplete,
+        isReadyForTurnIn = isReadyForTurnIn,
+        isAutoComplete = isAutoComplete,
         tagBracket = self:GetQuestTagBracket(questID),
         objectives = objectives,
         hasProgressBarObjective = hasProgressBarObjective,
@@ -900,6 +965,8 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     button.questID = data.questID
     button.questLogIndex = questLogIndex
     button.questKind = data.kind
+    button.isAutoComplete = data.isAutoComplete
+    button.isReadyForTurnIn = data.isReadyForTurnIn
 
     local kindPrefix = GetKindPrefix(data.kind)
     local title = data.title
@@ -924,8 +991,17 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         end
     end
 
+    if button.SetIcon then
+        if data.isReadyForTurnIn and data.isAutoComplete then
+            button:SetIcon("QuestIcon-QuestionMark")
+        else
+            button.icon:Hide()
+            button.icon.animGroup:Stop()
+        end
+    end
+
     if button.title then
-        if data.isComplete and button.title.SetFormattedTextIcon then
+        if data.isReadyForTurnIn and button.title.SetFormattedTextIcon then
             button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t %s", displayTitle)
             button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
         else
@@ -996,9 +1072,10 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         button:RemoveItemButton()
     end
 
-    if visibleObjectives == 0 and data.isComplete then
+    if visibleObjectives == 0 and data.isReadyForTurnIn then
+        local completionText = data.isAutoComplete and GetQuestAutoCompleteLineText() or GetQuestCompletionLineText()
         local line = button:AddLine(
-            ("  %s"):format(GetQuestCompletionLineText()),
+            ("  %s"):format(completionText),
             nil,
             FINISHED_COLOR.r,
             FINISHED_COLOR.g,

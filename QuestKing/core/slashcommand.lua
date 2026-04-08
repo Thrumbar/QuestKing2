@@ -18,6 +18,23 @@ local VALID_ORIGINS = {
     TOPLEFT = true,
 }
 
+local VALID_DISPLAY_MODES = {
+    q = "quests",
+    quest = "quests",
+    quests = "quests",
+
+    r = "raids",
+    raid = "raids",
+    raids = "raids",
+
+    a = "achievements",
+    achievement = "achievements",
+    achievements = "achievements",
+
+    c = "combined",
+    combined = "combined",
+}
+
 local function Print(msg, ...)
     if select("#", ...) > 0 then
         msg = format(msg, ...)
@@ -57,9 +74,48 @@ local function GetTrackerSafe()
     return (QuestKing and QuestKing.Tracker) or Tracker
 end
 
+local function GetDisplayModeLabel(mode)
+    if mode == "combined" then
+        return "C"
+    elseif mode == "achievements" then
+        return "A"
+    elseif mode == "raids" then
+        return "R"
+    end
+
+    return "Q"
+end
+
+local function ApplyDisplayMode(mode)
+    EnsureSavedVariables()
+
+    if not mode or mode == "" then
+        return false
+    end
+
+    mode = VALID_DISPLAY_MODES[lower(tostring(mode))]
+    if not mode then
+        return false
+    end
+
+    QuestKingDBPerChar.displayMode = mode
+
+    if QuestKing_TrackerModeButton and QuestKing_TrackerModeButton.label then
+        QuestKing_TrackerModeButton.label:SetText(GetDisplayModeLabel(mode))
+    end
+
+    UpdateTracker()
+    return mode
+end
+
 local function PrintHelp()
     Print("Valid commands:")
     Print("  help - show this help")
+    Print("  q / quest / quests - switch to quest mode")
+    Print("  r / raid / raids - switch to raid mode")
+    Print("  a / achievement / achievements - switch to achievement mode")
+    Print("  c / combined - switch to combined mode")
+    Print("  mode <q|r|a|c> - switch tracker mode directly")
     Print("  lock - toggle tracker dragging")
     Print("  origin <TOPRIGHT|BOTTOMRIGHT|BOTTOMLEFT|TOPLEFT> - reset drag origin")
     Print("  alpha <0-1|clear> - set tracker alpha override")
@@ -73,6 +129,43 @@ local Command = {}
 Command.help = function()
     PrintHelp()
 end
+
+Command.mode = function(mode)
+    local applied = ApplyDisplayMode(mode)
+    if not applied then
+        Print("Invalid mode. Use |cffaaffaaq|r, |cffaaffaar|r, |cffaaffaaa|r, or |cffaaffaac|r.")
+        return
+    end
+
+    Print("Tracker mode set to %s (%s).", applied, GetDisplayModeLabel(applied))
+end
+
+Command.q = function()
+    Command.mode("quests")
+end
+
+Command.quest = Command.q
+Command.quests = Command.q
+
+Command.r = function()
+    Command.mode("raids")
+end
+
+Command.raid = Command.r
+Command.raids = Command.r
+
+Command.a = function()
+    Command.mode("achievements")
+end
+
+Command.achievement = Command.a
+Command.achievements = Command.a
+
+Command.c = function()
+    Command.mode("combined")
+end
+
+Command.combined = Command.c
 
 Command.reset = function()
     EnsureSavedVariables()

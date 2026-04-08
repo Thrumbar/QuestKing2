@@ -79,21 +79,54 @@ opt.tooltipScale  = nil
 
 
 ----------------------------------------------------------------------
+-- Scenario / raid tracker behavior
+----------------------------------------------------------------------
+
+-- Master switch for scenario-style tracker content.
+-- If false, QuestKing will not render scenario / delve / dungeon / raid
+-- objective blocks through the scenario tracker path.
+opt.enableScenarioTracker = true
+
+-- Respect Blizzard's scenario-criteria visibility state when available.
+-- If true, QuestKing hides criteria rows when Blizzard reports they should
+-- not be shown and falls back to stage text where appropriate.
+-- If false, QuestKing will still try to render criteria whenever it has them.
+opt.respectScenarioCriteriaVisibility = true
+
+-- If true, instanceType == "raid" with valid scenario-backed data will be
+-- labeled as Raid in the tracker header.
+-- If false, QuestKing falls back to the normal scenario/dungeon labeling rules.
+opt.preferRaidScenarioLabel = true
+
+-- If true, QuestKing may show scenario-backed objective blocks in raids.
+-- This does not invent raid objectives on its own; Blizzard still has to
+-- expose them through the scenario APIs.
+opt.showScenarioObjectivesInRaids = true
+
+-- If true, QuestKing may still show scenario-backed blocks for party/dungeon
+-- content even when Blizzard is not using the simplest IsInScenario gate.
+opt.allowInstanceScenarioFallback = true
+
+-- If true, spell names from scenario steps may be listed in the tooltip.
+opt.showScenarioSpellsInTooltip = true
+
+
+----------------------------------------------------------------------
 -- Tracker placement & drag
 ----------------------------------------------------------------------
 
 -- If true, the tracker can be dragged (saves exact position per character)
 -- If false, the tracker uses preset points & you can cycle them with Shift+Click on the minimize button
-opt.allowDrag             = true
-opt.hideToggleButtonBorder= false
+opt.allowDrag              = true
+opt.hideToggleButtonBorder = false
 
 -- Preset position list used when allowDrag=false or when cycling with Shift+Click
 -- Format: { point, relativeTo, relativePoint, x, y }
 opt.positionPresets = {
-    { "TOPRIGHT",  "UIParent", "TOPRIGHT",  -8, -160 },
-    { "TOPRIGHT",  "UIParent", "TOPRIGHT", -180,  -20 },
-    { "TOPLEFT",   "UIParent", "TOPLEFT",     8, -160 },
-    { "BOTTOMRIGHT","UIParent","BOTTOMRIGHT", -8,  180 },
+    { "TOPRIGHT",   "UIParent", "TOPRIGHT",    -8, -160 },
+    { "TOPRIGHT",   "UIParent", "TOPRIGHT",  -180,  -20 },
+    { "TOPLEFT",    "UIParent", "TOPLEFT",      8, -160 },
+    { "BOTTOMRIGHT","UIParent", "BOTTOMRIGHT", -8,  180 },
 }
 
 
@@ -199,9 +232,9 @@ opt.colors = {
     AchievementTitleComplete   = { 0.30, 1.00, 0.60 },
     AchievementTitleGuild      = { 0.45, 0.90, 0.45 },
 
-    AchievementDescription         = { 0.70, 0.70, 0.70 },
-    AchievementCriteria            = { 0.70, 0.70, 0.70 },
-    AchievementCriteriaComplete    = { 0.00, 1.00, 0.00 },
+    AchievementDescription      = { 0.70, 0.70, 0.70 },
+    AchievementCriteria         = { 0.70, 0.70, 0.70 },
+    AchievementCriteriaComplete = { 0.00, 1.00, 0.00 },
 
     AchievementTimedTitle      = { 0.00, 1.00, 0.60 },
     AchievementTimedBackground = { 0.00, 0.90, 0.50, 0.50 }, -- RGBA

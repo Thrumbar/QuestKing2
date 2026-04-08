@@ -81,10 +81,6 @@ local function HideQuestKingTooltips()
     if QuestKing and QuestKing.HideTooltip then
         QuestKing:HideTooltip()
     end
-
-    if GameTooltip then
-        GameTooltip:Hide()
-    end
 end
 
 do
@@ -652,6 +648,7 @@ do
         line:Show()
         line:SetAlpha(0)
         line:SetAlpha(1)
+        return line
     end
 
     function WatchButton:Render()

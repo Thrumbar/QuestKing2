@@ -124,10 +124,6 @@ local function SafeHideTooltip()
     if QuestKing and QuestKing.HideTooltip then
         QuestKing:HideTooltip()
     end
-
-    if GameTooltip then
-        GameTooltip:Hide()
-    end
 end
 
 local function SafeSetHyperlink(tooltip, link)

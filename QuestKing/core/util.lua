@@ -24,7 +24,6 @@ local CQL = C_QuestLog
 local QUEST_FREQUENCY_DAILY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Daily) or LE_QUEST_FREQUENCY_DAILY
 local QUEST_FREQUENCY_WEEKLY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Weekly) or LE_QUEST_FREQUENCY_WEEKLY
 
-
 local function SafeGetQuestInfoByIndex(questIndex)
     if not questIndex or questIndex < 1 then
         return nil
@@ -177,78 +176,238 @@ function QuestKing.MatchObjectiveRep(objectiveDesc)
     return quantCur, quantMax, quantName
 end
 
-local blizzardTrackerVisualHooksInstalled = false
+local TRACKER_HIDER_FRAME_MODES = {
+    ObjectiveTrackerFrame = "retail",
+    WatchFrame = "legacy",
+    QuestWatchFrame = "legacy",
+}
 
-local function ApplyBlizzardTrackerVisualState()
-    if not ObjectiveTrackerFrame then
+local function TrackerHider_IsProtectedAndLockedDown(frame)
+    return frame and frame.IsProtected and frame:IsProtected() and InCombatLockdown and InCombatLockdown()
+end
+
+function QuestKing:TrackerHider_Init()
+    if self._trackerHider then
         return
     end
 
-    if opt.disableBlizzard then
-        if ObjectiveTrackerFrame.SetAlpha then
-            ObjectiveTrackerFrame:SetAlpha(0)
+    local hiddenParent = CreateFrame("Frame", nil, UIParent)
+    hiddenParent:Hide()
+
+    local state = {
+        hiddenParent = hiddenParent,
+        hooked = {},
+        orig = {},
+        pending = false,
+    }
+
+    self._trackerHider = state
+
+    local driver = CreateFrame("Frame", nil, UIParent)
+    state.driver = driver
+
+    driver:RegisterEvent("PLAYER_LOGIN")
+    driver:RegisterEvent("PLAYER_ENTERING_WORLD")
+    driver:RegisterEvent("PLAYER_REGEN_ENABLED")
+    driver:RegisterEvent("ADDON_LOADED")
+
+    driver:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_ENABLED" and not state.pending then
+            return
         end
-        if ObjectiveTrackerFrame.EnableMouse then
-            ObjectiveTrackerFrame:EnableMouse(false)
+
+        state.pending = false
+        self:TrackerHider_Apply()
+    end)
+end
+
+function QuestKing:TrackerHider_ShouldHide()
+    return opt.disableBlizzard == true
+end
+
+function QuestKing:TrackerHider_CaptureOriginal(frame, key)
+    local hider = self._trackerHider
+    if not hider or not frame or hider.orig[key] then
+        return
+    end
+
+    local mouseEnabled = true
+    if frame.IsMouseEnabled then
+        mouseEnabled = frame:IsMouseEnabled()
+    end
+
+    local parent = frame.GetParent and frame:GetParent() or UIParent
+    if not parent then
+        parent = UIParent
+    end
+
+    local alpha = 1
+    if frame.GetAlpha then
+        alpha = frame:GetAlpha()
+    end
+
+    local scale = 1
+    if frame.GetScale then
+        scale = frame:GetScale()
+    end
+
+    hider.orig[key] = {
+        parent = parent,
+        alpha = alpha,
+        scale = scale,
+        mouseEnabled = mouseEnabled,
+    }
+end
+
+function QuestKing:TrackerHider_SetRetailVisible(frame, key, visible)
+    local hider = self._trackerHider
+    if not hider or not frame then
+        return
+    end
+
+    if TrackerHider_IsProtectedAndLockedDown(frame) then
+        hider.pending = true
+        return
+    end
+
+    self:TrackerHider_CaptureOriginal(frame, key)
+    local orig = hider.orig[key] or {}
+
+    if visible then
+        if frame.SetAlpha then
+            frame:SetAlpha(orig.alpha or 1)
         end
-        if ObjectiveTrackerFrame.BlocksFrame and ObjectiveTrackerFrame.BlocksFrame.SetAlpha then
-            ObjectiveTrackerFrame.BlocksFrame:SetAlpha(0)
+        if frame.SetScale then
+            local scale = orig.scale
+            if type(scale) ~= "number" or scale <= 0 then
+                scale = 1
+            end
+            frame:SetScale(scale)
         end
-        if ScenarioBlocksFrame and ScenarioBlocksFrame.SetAlpha then
-            ScenarioBlocksFrame:SetAlpha(0)
+        if frame.EnableMouse then
+            frame:EnableMouse(orig.mouseEnabled ~= false)
         end
-        if ObjectiveTrackerBlocksFrame and ObjectiveTrackerBlocksFrame.SetAlpha then
-            ObjectiveTrackerBlocksFrame:SetAlpha(0)
+        return
+    end
+
+    if frame.SetAlpha then
+        frame:SetAlpha(0)
+    end
+    if frame.SetScale then
+        frame:SetScale(0.0001)
+    end
+    if frame.EnableMouse then
+        frame:EnableMouse(false)
+    end
+end
+
+function QuestKing:TrackerHider_SetLegacyVisible(frame, key, visible)
+    local hider = self._trackerHider
+    if not hider or not frame then
+        return
+    end
+
+    if TrackerHider_IsProtectedAndLockedDown(frame) then
+        hider.pending = true
+        return
+    end
+
+    self:TrackerHider_CaptureOriginal(frame, key)
+    local orig = hider.orig[key] or {}
+
+    if visible then
+        if frame.SetParent then
+            frame:SetParent(orig.parent or UIParent)
         end
-    else
-        if ObjectiveTrackerFrame.SetAlpha then
-            ObjectiveTrackerFrame:SetAlpha(1)
+        if frame.SetAlpha then
+            frame:SetAlpha(orig.alpha or 1)
         end
-        if ObjectiveTrackerFrame.EnableMouse then
-            ObjectiveTrackerFrame:EnableMouse(true)
+        if frame.SetScale then
+            local scale = orig.scale
+            if type(scale) ~= "number" or scale <= 0 then
+                scale = 1
+            end
+            frame:SetScale(scale)
         end
-        if ObjectiveTrackerFrame.BlocksFrame and ObjectiveTrackerFrame.BlocksFrame.SetAlpha then
-            ObjectiveTrackerFrame.BlocksFrame:SetAlpha(1)
+        if frame.EnableMouse then
+            frame:EnableMouse(orig.mouseEnabled ~= false)
         end
-        if ScenarioBlocksFrame and ScenarioBlocksFrame.SetAlpha then
-            ScenarioBlocksFrame:SetAlpha(1)
+        if frame.Show then
+            frame:Show()
         end
-        if ObjectiveTrackerBlocksFrame and ObjectiveTrackerBlocksFrame.SetAlpha then
-            ObjectiveTrackerBlocksFrame:SetAlpha(1)
+        return
+    end
+
+    if frame.SetParent then
+        frame:SetParent(hider.hiddenParent)
+    end
+    if frame.SetAlpha then
+        frame:SetAlpha(0)
+    end
+    if frame.SetScale then
+        frame:SetScale(0.0001)
+    end
+    if frame.EnableMouse then
+        frame:EnableMouse(false)
+    end
+    if frame.Hide then
+        frame:Hide()
+    end
+end
+
+function QuestKing:TrackerHider_HookFrame(name, mode)
+    local hider = self._trackerHider
+    if not hider or hider.hooked[name] then
+        return
+    end
+
+    local frame = _G[name]
+    if not frame or not frame.HookScript then
+        return
+    end
+
+    hider.hooked[name] = true
+
+    frame:HookScript("OnShow", function(f)
+        if not self:TrackerHider_ShouldHide() then
+            return
+        end
+
+        if mode == "legacy" then
+            self:TrackerHider_SetLegacyVisible(f, name, false)
+        else
+            self:TrackerHider_SetRetailVisible(f, name, false)
+        end
+    end)
+end
+
+function QuestKing:TrackerHider_Apply()
+    if not self._trackerHider then
+        self:TrackerHider_Init()
+    end
+
+    local hide = self:TrackerHider_ShouldHide()
+
+    for frameName, mode in pairs(TRACKER_HIDER_FRAME_MODES) do
+        local frame = _G[frameName]
+        if frame then
+            self:TrackerHider_HookFrame(frameName, mode)
+
+            if mode == "legacy" then
+                self:TrackerHider_SetLegacyVisible(frame, frameName, not hide)
+            else
+                self:TrackerHider_SetRetailVisible(frame, frameName, not hide)
+            end
         end
     end
 end
 
+local function ApplyBlizzardTrackerVisualState()
+    QuestKing:TrackerHider_Apply()
+end
+
 function QuestKing:DisableBlizzard()
-    -- Taint-safe visual suppression only.
-    -- Do not unregister, reparent, or hard-hide Blizzard tracker frames.
-    ApplyBlizzardTrackerVisualState()
-
-    if blizzardTrackerVisualHooksInstalled or not hooksecurefunc then
-        return
-    end
-
-    blizzardTrackerVisualHooksInstalled = true
-
-    if ObjectiveTrackerFrame then
-        hooksecurefunc(ObjectiveTrackerFrame, "Show", ApplyBlizzardTrackerVisualState)
-    end
-
-    if ObjectiveTracker_Update then
-        hooksecurefunc("ObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
-    end
-
-    if BonusObjectiveTracker_Update then
-        hooksecurefunc("BonusObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
-    end
-
-    if ScenarioObjectiveTracker_Update then
-        hooksecurefunc("ScenarioObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
-    end
-
-    if WatchFrame_Update then
-        hooksecurefunc("WatchFrame_Update", ApplyBlizzardTrackerVisualState)
-    end
+    self:TrackerHider_Apply()
 end
 
 QuestKing.ApplyBlizzardTrackerVisualState = ApplyBlizzardTrackerVisualState

@@ -11,7 +11,6 @@ local format = string.format
 local tonumber = tonumber
 local type = type
 local min = math.min
-local max = math.max
 local tinsert = table.insert
 local tremove = table.remove
 local GetTime = GetTime
@@ -26,8 +25,35 @@ local C_ScenarioInfo = C_ScenarioInfo
 local C_QuestLog = C_QuestLog
 
 local enteringWorldQueue = {}
-
 local mouseHandlerScenario = {}
+
+-- ---------------------------------------------------------------------
+-- Option helpers
+-- ---------------------------------------------------------------------
+
+local function IsScenarioTrackerEnabled()
+    return opt.enableScenarioTracker ~= false
+end
+
+local function ShouldRespectScenarioCriteriaVisibility()
+    return opt.respectScenarioCriteriaVisibility ~= false
+end
+
+local function ShouldPreferRaidScenarioLabel()
+    return opt.preferRaidScenarioLabel ~= false
+end
+
+local function ShouldShowScenarioObjectivesInRaids()
+    return opt.showScenarioObjectivesInRaids ~= false
+end
+
+local function ShouldAllowInstanceScenarioFallback()
+    return opt.allowInstanceScenarioFallback ~= false
+end
+
+local function ShouldShowScenarioSpellsInTooltip()
+    return opt.showScenarioSpellsInTooltip ~= false
+end
 
 -- ---------------------------------------------------------------------
 -- Helpers
@@ -41,30 +67,49 @@ local function SafeGetScenarioInfo()
                 info.currentStage or 0,
                 info.numStages or 0,
                 info.flags or 0,
-                false,
-                false,
+                info.hasBonusStep and true or false,
+                info.isBonusStepComplete and true or false,
                 info.isComplete and true or false,
                 info.xp or 0,
-                info.money or 0
+                info.money or 0,
+                info.scenarioType,
+                info.areaID,
+                info.textureKit,
+                info.scenarioID
         end
     end
 
-    if not (C_Scenario and C_Scenario.GetInfo) then
-        return nil, 0, 0, 0, false, false, false, 0, 0
+    if C_Scenario and C_Scenario.GetInfo then
+        local scenarioName,
+            currentStage,
+            numStages,
+            flags,
+            hasBonusStep,
+            isBonusStepComplete,
+            completed,
+            xp,
+            money,
+            scenarioType,
+            areaID,
+            textureKit,
+            scenarioID = C_Scenario.GetInfo()
+
+        return scenarioName,
+            currentStage or 0,
+            numStages or 0,
+            flags or 0,
+            hasBonusStep and true or false,
+            isBonusStepComplete and true or false,
+            completed and true or false,
+            xp or 0,
+            money or 0,
+            scenarioType,
+            areaID,
+            textureKit,
+            scenarioID
     end
 
-    local scenarioName, currentStage, numStages, flags, hasBonusStep, isBonusStepComplete, completed, xp, money =
-        C_Scenario.GetInfo()
-
-    return scenarioName,
-        currentStage or 0,
-        numStages or 0,
-        flags or 0,
-        hasBonusStep and true or false,
-        isBonusStepComplete and true or false,
-        completed and true or false,
-        xp or 0,
-        money or 0
+    return nil, 0, 0, 0, false, false, false, 0, 0, nil, nil, nil, nil
 end
 
 local function SafeGetScenarioStepInfo(stepIndex)
@@ -119,66 +164,146 @@ local function SafeGetScenarioStepInfo(stepIndex)
     return nil, nil, 0, false, false, false, 0, nil, nil, nil, nil
 end
 
-local function GetScenarioFlags(flags)
+local function GetScenarioInstanceInfo()
+    local instanceName,
+        instanceType,
+        difficultyID,
+        difficultyName,
+        maxPlayers,
+        dynamicDifficulty,
+        isDynamic,
+        mapID = GetInstanceInfo()
+
+    return instanceName,
+        instanceType or "",
+        difficultyID,
+        difficultyName,
+        maxPlayers,
+        dynamicDifficulty,
+        isDynamic,
+        mapID
+end
+
+local function GetScenarioFlags(flags, scenarioType)
     flags = flags or 0
 
     local inChallengeMode = false
     local inProvingGrounds = false
     local dungeonDisplay = false
+    local inWarfront = false
 
-    if SCENARIO_FLAG_CHALLENGE_MODE then
+    if type(scenarioType) == "number" then
+        if LE_SCENARIO_TYPE_CHALLENGE_MODE and scenarioType == LE_SCENARIO_TYPE_CHALLENGE_MODE then
+            inChallengeMode = true
+        end
+
+        if LE_SCENARIO_TYPE_PROVING_GROUNDS and scenarioType == LE_SCENARIO_TYPE_PROVING_GROUNDS then
+            inProvingGrounds = true
+        end
+
+        if LE_SCENARIO_TYPE_USE_DUNGEON_DISPLAY and scenarioType == LE_SCENARIO_TYPE_USE_DUNGEON_DISPLAY then
+            dungeonDisplay = true
+        end
+
+        if LE_SCENARIO_TYPE_WARFRONT and scenarioType == LE_SCENARIO_TYPE_WARFRONT then
+            inWarfront = true
+        end
+    end
+
+    if not inChallengeMode and SCENARIO_FLAG_CHALLENGE_MODE then
         inChallengeMode = band(flags, SCENARIO_FLAG_CHALLENGE_MODE) == SCENARIO_FLAG_CHALLENGE_MODE
     end
 
-    if SCENARIO_FLAG_PROVING_GROUNDS then
+    if not inProvingGrounds and SCENARIO_FLAG_PROVING_GROUNDS then
         inProvingGrounds = band(flags, SCENARIO_FLAG_PROVING_GROUNDS) == SCENARIO_FLAG_PROVING_GROUNDS
     end
 
-    if SCENARIO_FLAG_USE_DUNGEON_DISPLAY then
+    if not dungeonDisplay and SCENARIO_FLAG_USE_DUNGEON_DISPLAY then
         dungeonDisplay = band(flags, SCENARIO_FLAG_USE_DUNGEON_DISPLAY) == SCENARIO_FLAG_USE_DUNGEON_DISPLAY
     end
 
-    return inChallengeMode, inProvingGrounds, dungeonDisplay
+    return inChallengeMode, inProvingGrounds, dungeonDisplay, inWarfront
+end
+
+local function IsScenarioStageTextSuppressed(flags)
+    if not SCENARIO_FLAG_SUPRESS_STAGE_TEXT then
+        return false
+    end
+
+    return band(flags or 0, SCENARIO_FLAG_SUPRESS_STAGE_TEXT) == SCENARIO_FLAG_SUPRESS_STAGE_TEXT
 end
 
 local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
-    if C_ScenarioInfo then
-        if C_ScenarioInfo.GetCriteriaInfo then
-            local info = C_ScenarioInfo.GetCriteriaInfo(criteriaIndex)
-            if info then
-                return info.description or "",
-                    info.criteriaType,
-                    info.completed and true or false,
-                    tonumber(info.quantity) or 0,
-                    tonumber(info.totalQuantity) or 0,
-                    info.flags,
-                    info.assetID,
-                    info.quantityString,
-                    info.criteriaID,
-                    tonumber(info.duration) or 0,
-                    tonumber(info.elapsed) or 0,
-                    info.failed and true or false,
-                    info.isWeightedProgress and true or false
-            end
+    if C_ScenarioInfo and C_ScenarioInfo.GetCriteriaInfoByStep and stepIndex then
+        local info = C_ScenarioInfo.GetCriteriaInfoByStep(stepIndex, criteriaIndex)
+        if info then
+            return info.description or "",
+                info.criteriaType,
+                info.completed and true or false,
+                tonumber(info.quantity) or 0,
+                tonumber(info.totalQuantity) or 0,
+                info.flags,
+                info.assetID,
+                info.quantityString,
+                info.criteriaID,
+                tonumber(info.duration) or 0,
+                tonumber(info.elapsed) or 0,
+                info.failed and true or false,
+                info.isWeightedProgress and true or false,
+                info.isFormatted and true or false
         end
+    end
 
-        if C_ScenarioInfo.GetCriteriaInfoByStep then
-            local info = C_ScenarioInfo.GetCriteriaInfoByStep(stepIndex, criteriaIndex)
-            if info then
-                return info.description or "",
-                    info.criteriaType,
-                    info.completed and true or false,
-                    tonumber(info.quantity) or 0,
-                    tonumber(info.totalQuantity) or 0,
-                    info.flags,
-                    info.assetID,
-                    info.quantityString,
-                    info.criteriaID,
-                    tonumber(info.duration) or 0,
-                    tonumber(info.elapsed) or 0,
-                    info.failed and true or false,
-                    info.isWeightedProgress and true or false
-            end
+    if C_ScenarioInfo and C_ScenarioInfo.GetCriteriaInfo then
+        local info = C_ScenarioInfo.GetCriteriaInfo(criteriaIndex)
+        if info then
+            return info.description or "",
+                info.criteriaType,
+                info.completed and true or false,
+                tonumber(info.quantity) or 0,
+                tonumber(info.totalQuantity) or 0,
+                info.flags,
+                info.assetID,
+                info.quantityString,
+                info.criteriaID,
+                tonumber(info.duration) or 0,
+                tonumber(info.elapsed) or 0,
+                info.failed and true or false,
+                info.isWeightedProgress and true or false,
+                info.isFormatted and true or false
+        end
+    end
+
+    if C_Scenario and C_Scenario.GetCriteriaInfoByStep and stepIndex then
+        local criteriaString,
+            criteriaType,
+            criteriaCompleted,
+            quantity,
+            totalQuantity,
+            flags,
+            assetID,
+            quantityString,
+            criteriaID,
+            duration,
+            elapsed,
+            criteriaFailed,
+            isWeightedProgress = C_Scenario.GetCriteriaInfoByStep(stepIndex, criteriaIndex)
+
+        if criteriaString then
+            return criteriaString or "",
+                criteriaType,
+                criteriaCompleted and true or false,
+                tonumber(quantity) or 0,
+                tonumber(totalQuantity) or 0,
+                flags,
+                assetID,
+                quantityString,
+                criteriaID,
+                tonumber(duration) or 0,
+                tonumber(elapsed) or 0,
+                criteriaFailed and true or false,
+                isWeightedProgress and true or false,
+                false
         end
     end
 
@@ -210,41 +335,12 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
                 tonumber(duration) or 0,
                 tonumber(elapsed) or 0,
                 criteriaFailed and true or false,
-                isWeightedProgress and true or false
+                isWeightedProgress and true or false,
+                false
         end
     end
 
-    if C_Scenario and C_Scenario.GetCriteriaInfoByStep then
-        local criteriaString,
-            criteriaType,
-            criteriaCompleted,
-            quantity,
-            totalQuantity,
-            flags,
-            assetID,
-            quantityString,
-            criteriaID,
-            duration,
-            elapsed,
-            criteriaFailed,
-            isWeightedProgress = C_Scenario.GetCriteriaInfoByStep(stepIndex, criteriaIndex)
-
-        return criteriaString or "",
-            criteriaType,
-            criteriaCompleted and true or false,
-            tonumber(quantity) or 0,
-            tonumber(totalQuantity) or 0,
-            flags,
-            assetID,
-            quantityString,
-            criteriaID,
-            tonumber(duration) or 0,
-            tonumber(elapsed) or 0,
-            criteriaFailed and true or false,
-            isWeightedProgress and true or false
-    end
-
-    return nil, nil, false, 0, 0, nil, nil, nil, nil, 0, 0, false, false
+    return nil, nil, false, 0, 0, nil, nil, nil, nil, 0, 0, false, false, false
 end
 
 local function GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
@@ -253,7 +349,7 @@ local function GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
         return declaredNumCriteria
     end
 
-    for i = 1, 20 do
+    for i = 1, 32 do
         local description, _, _, _, _, _, _, _, criteriaID = GetScenarioCriteriaInfo(stepIndex, i)
         if not description and not criteriaID then
             return i - 1
@@ -274,7 +370,11 @@ local function ClampPercent(value)
     return value
 end
 
-local function GetCriteriaProgressText(quantity, totalQuantity, quantityString)
+local function GetCriteriaProgressText(quantity, totalQuantity, quantityString, isFormatted)
+    if isFormatted then
+        return nil
+    end
+
     if totalQuantity and totalQuantity > 0 then
         return format(": %d/%d", quantity or 0, totalQuantity)
     end
@@ -299,6 +399,190 @@ local function GetCriteriaProgressValue(quantity, totalQuantity, isWeightedProgr
     end
 
     return 0
+end
+
+local function GetScenarioResolvedStage(currentStage)
+    currentStage = tonumber(currentStage) or 0
+    if currentStage > 0 then
+        return currentStage
+    end
+
+    local stageName = SafeGetScenarioStepInfo(1)
+    if stageName then
+        return 1
+    end
+
+    return 0
+end
+
+local function HasScenarioTrackerData()
+    local scenarioName, currentStage, numStages = SafeGetScenarioInfo()
+    if not scenarioName or scenarioName == "" then
+        return false
+    end
+
+    currentStage = tonumber(currentStage) or 0
+    numStages = tonumber(numStages) or 0
+
+    if currentStage > 0 or numStages > 0 then
+        return true
+    end
+
+    if GetScenarioResolvedStage(currentStage) > 0 then
+        return true
+    end
+
+    if C_Scenario and C_Scenario.GetBonusSteps then
+        local bonusSteps = C_Scenario.GetBonusSteps()
+        if type(bonusSteps) == "table" and #bonusSteps > 0 then
+            return true
+        end
+    end
+
+    return false
+end
+
+function QuestKing:RefreshShouldShowScenarioCriteria()
+    if not IsScenarioTrackerEnabled() then
+        self.scenarioShouldShowCriteria = false
+        return false
+    end
+
+    if not ShouldRespectScenarioCriteriaVisibility() then
+        self.scenarioShouldShowCriteria = true
+        return true
+    end
+
+    local shouldShow = true
+
+    if C_Scenario and C_Scenario.ShouldShowCriteria then
+        shouldShow = C_Scenario.ShouldShowCriteria() and true or false
+    end
+
+    self.scenarioShouldShowCriteria = shouldShow
+    return shouldShow
+end
+
+function QuestKing:ShouldShowScenarioCriteria()
+    if not IsScenarioTrackerEnabled() then
+        return false
+    end
+
+    if not ShouldRespectScenarioCriteriaVisibility() then
+        return true
+    end
+
+    if type(self.scenarioShouldShowCriteria) == "boolean" then
+        return self.scenarioShouldShowCriteria
+    end
+
+    return self:RefreshShouldShowScenarioCriteria()
+end
+
+function QuestKing:ShouldShowScenarioTracker()
+    if not IsScenarioTrackerEnabled() then
+        return false
+    end
+
+    if not HasScenarioTrackerData() then
+        return false
+    end
+
+    local _, instanceType = GetScenarioInstanceInfo()
+    local isRaidInstance = instanceType == "raid"
+
+    if isRaidInstance and not ShouldShowScenarioObjectivesInRaids() then
+        return false
+    end
+
+    if C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario() then
+        return true
+    end
+
+    if not ShouldAllowInstanceScenarioFallback() then
+        return false
+    end
+
+    if instanceType == "party" or instanceType == "scenario" then
+        return true
+    end
+
+    if isRaidInstance and ShouldShowScenarioObjectivesInRaids() then
+        return true
+    end
+
+    return false
+end
+
+local function GetScenarioDisplayKind(flags, scenarioType)
+    local inChallengeMode, inProvingGrounds, dungeonDisplay, inWarfront = GetScenarioFlags(flags, scenarioType)
+    local _, instanceType = GetScenarioInstanceInfo()
+
+    if inProvingGrounds then
+        return "proving_grounds"
+    end
+
+    if inChallengeMode then
+        return "challenge_mode"
+    end
+
+    if inWarfront then
+        return "warfront"
+    end
+
+    if instanceType == "raid" and ShouldShowScenarioObjectivesInRaids() and ShouldPreferRaidScenarioLabel() then
+        return "raid"
+    end
+
+    if dungeonDisplay or instanceType == "party" then
+        return "dungeon"
+    end
+
+    return "scenario"
+end
+
+local function GetScenarioDisplayLabel(displayKind)
+    if displayKind == "proving_grounds" then
+        return TRACKER_HEADER_PROVINGGROUNDS or "Proving Grounds"
+    elseif displayKind == "challenge_mode" then
+        return CHALLENGE_MODE or "Challenge Mode"
+    elseif displayKind == "warfront" then
+        return WARFRONT_LABEL or "Warfront"
+    elseif displayKind == "raid" then
+        return RAID or "Raid"
+    elseif displayKind == "dungeon" then
+        return TRACKER_HEADER_DUNGEON or "Dungeon"
+    end
+
+    return TRACKER_HEADER_SCENARIO or "Scenario"
+end
+
+local function GetScenarioDisplayHeader(currentStage, numStages, displayKind, flags)
+    local displayText = GetScenarioDisplayLabel(displayKind)
+    currentStage = tonumber(currentStage) or 0
+    numStages = tonumber(numStages) or 0
+
+    if IsScenarioStageTextSuppressed(flags) then
+        return displayText
+    end
+
+    if numStages > 1 and currentStage > 0 then
+        if currentStage == numStages then
+            return format("%s: Final Stage", displayText)
+        end
+
+        return format("%s: Stage %d/%d", displayText, currentStage, numStages)
+    end
+
+    return displayText
+end
+
+local function GetScenarioCompleteHeader(displayKind)
+    if displayKind == "dungeon" and DUNGEON_COMPLETED then
+        return DUNGEON_COMPLETED
+    end
+
+    return format("%s Complete!", GetScenarioDisplayLabel(displayKind))
 end
 
 local function SafePlayScenarioBanner()
@@ -399,29 +683,6 @@ local function AddTooltipMoneyText(tooltip, money)
     end
 end
 
-local function GetScenarioDisplayHeader(currentStage, numStages, inChallengeMode, inProvingGrounds, dungeonDisplay)
-    if inProvingGrounds then
-        return "Proving Grounds"
-    end
-
-    local displayText = "Scenario"
-
-    if dungeonDisplay then
-        displayText = "Dungeon"
-    elseif inChallengeMode then
-        displayText = "Challenge Mode"
-    end
-
-    if numStages > 1 then
-        if currentStage == numStages then
-            return format("%s: Final Stage", displayText)
-        end
-        return format("%s: Stage %d/%d", displayText, currentStage, numStages)
-    end
-
-    return displayText
-end
-
 local function AddStageDescriptionFallback(button, stageDescription, stepFinished, stepFailed)
     if not stageDescription or stageDescription == "" then
         return false
@@ -459,7 +720,7 @@ local function AddStageDescriptionFallback(button, stageDescription, stepFinishe
 end
 
 -- ---------------------------------------------------------------------
--- Misc
+-- World entry queue
 -- ---------------------------------------------------------------------
 
 function QuestKing:QueuePlayerEnteringWorld(func)
@@ -479,63 +740,87 @@ function QuestKing:OnPlayerEnteringWorld()
 end
 
 -- ---------------------------------------------------------------------
--- Scenarios
+-- Scenario tracker population
 -- ---------------------------------------------------------------------
 
 function QuestKing:UpdateTrackerScenarios()
-    local scenarioName, currentStage, numStages, flags = SafeGetScenarioInfo()
-    local inChallengeMode, inProvingGrounds, dungeonDisplay = GetScenarioFlags(flags)
+    if not self:ShouldShowScenarioTracker() then
+        return
+    end
+
+    local scenarioName,
+        currentStage,
+        numStages,
+        flags,
+        hasBonusStep,
+        isBonusStepComplete,
+        completed,
+        xp,
+        money,
+        scenarioType = SafeGetScenarioInfo()
+
+    local displayKind = GetScenarioDisplayKind(flags, scenarioType)
+    local _, _, _, _, _, _, _, mapID = GetScenarioInstanceInfo()
+    local stepIndex = GetScenarioResolvedStage(currentStage)
+
+    self:RefreshShouldShowScenarioCriteria()
 
     if not scenarioName or scenarioName == "" then
         return
     end
 
-    local _, _, _, _, _, _, _, mapID = GetInstanceInfo()
     if mapID == 1148 then
-        inProvingGrounds = true
+        displayKind = "proving_grounds"
     end
 
-    if inProvingGrounds and C_Scenario and C_Scenario.GetProvingGroundsInfo then
+    if displayKind == "proving_grounds" and C_Scenario and C_Scenario.GetProvingGroundsInfo then
         local _, _, _, duration = C_Scenario.GetProvingGroundsInfo()
         if duration and duration ~= 0 then
             return
         end
     end
 
-    if currentStage <= 0 then
+    if stepIndex <= 0 then
         return
     end
 
     local header = WatchButton:GetKeyed("header", scenarioName)
-    header.title:SetText(GetScenarioDisplayHeader(currentStage, numStages, inChallengeMode, inProvingGrounds, dungeonDisplay))
+    header.title:SetText(GetScenarioDisplayHeader(stepIndex, numStages, displayKind, flags))
     header.title:SetTextColor(
         opt_colors.SectionHeader[1],
         opt_colors.SectionHeader[2],
         opt_colors.SectionHeader[3]
     )
 
-    if currentStage > numStages then
-        if inChallengeMode then
-            header.title:SetText("Challenge Mode Complete!")
-        elseif dungeonDisplay then
-            header.title:SetText("Dungeon Complete!")
-        else
-            header.title:SetText("Scenario Complete!")
-        end
+    if tonumber(numStages) and numStages > 0 and stepIndex > numStages then
+        header.title:SetText(GetScenarioCompleteHeader(displayKind))
         return
     end
 
     local button = WatchButton:GetKeyed("scenario", scenarioName)
-    QuestKing.SetButtonToScenario(button, currentStage)
+    button.scenarioDisplayKind = displayKind
+    QuestKing.SetButtonToScenario(button, stepIndex)
 end
 
 function QuestKing.SetButtonToScenario(button, stepIndex)
     button.mouseHandler = mouseHandlerScenario
 
-    local scenarioName, currentStage = SafeGetScenarioInfo()
+    local scenarioName,
+        currentStage,
+        numStages,
+        flags,
+        hasBonusStep,
+        isBonusStepComplete,
+        completed,
+        xp,
+        money,
+        scenarioType = SafeGetScenarioInfo()
+
+    local displayKind = GetScenarioDisplayKind(flags, scenarioType)
+    local shouldShowCriteria = QuestKing:ShouldShowScenarioCriteria()
 
     if not stepIndex then
-        stepIndex = currentStage
+        stepIndex = GetScenarioResolvedStage(currentStage)
     end
 
     if not stepIndex or stepIndex <= 0 then
@@ -543,6 +828,7 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
     end
 
     button.stepIndex = stepIndex
+    button.scenarioDisplayKind = displayKind
 
     local lastStepIndex = button._lastStepIndex
     local isNewStep = false
@@ -562,7 +848,7 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
         weightedProgress,
         rewardQuestID = SafeGetScenarioStepInfo(stepIndex)
 
-    stageName = stageName or scenarioName or "Scenario"
+    stageName = stageName or scenarioName or GetScenarioDisplayLabel(displayKind)
     stageDescription = stageDescription or ""
 
     local numCriteria = GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
@@ -611,7 +897,7 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
 
     local shownLines = 0
 
-    if hasWeightedProgress then
+    if shouldShowCriteria and hasWeightedProgress then
         local labelText = stageDescription ~= "" and stageDescription or stageName or "Objective"
         local progressValue = weightedPercent / 100
         local colorValue = stepFinished and 1 or progressValue
@@ -622,27 +908,27 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
 
         local progressBar = button:AddProgressBar()
         progressBar:SetPercent(weightedPercent)
-    elseif numCriteria > 0 then
+    elseif shouldShowCriteria and numCriteria > 0 then
         for i = 1, numCriteria do
             local criteriaString,
                 criteriaType,
                 criteriaCompleted,
                 quantity,
                 totalQuantity,
-                flags,
+                criteriaFlags,
                 assetID,
                 quantityString,
                 criteriaID,
                 duration,
                 elapsed,
                 criteriaFailed,
-                isWeightedProgress =
-                GetScenarioCriteriaInfo(stepIndex, i)
+                isWeightedProgress,
+                isFormatted = GetScenarioCriteriaInfo(stepIndex, i)
 
             criteriaString = (criteriaString and criteriaString ~= "") and criteriaString or "Objective"
 
             local line
-            local progressText = GetCriteriaProgressText(quantity, totalQuantity, quantityString)
+            local progressText = GetCriteriaProgressText(quantity, totalQuantity, quantityString, isFormatted)
             local progressValue = GetCriteriaProgressValue(quantity, totalQuantity, isWeightedProgress)
 
             if criteriaCompleted then
@@ -709,6 +995,16 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
         )
     end
 
+    if shownLines == 0 and not stepFinished and not shouldShowCriteria then
+        button:AddLine(
+            format("  %s", stageDescription ~= "" and stageDescription or stageName),
+            nil,
+            opt_colors.ScenarioStageTitle[1],
+            opt_colors.ScenarioStageTitle[2],
+            opt_colors.ScenarioStageTitle[3]
+        )
+    end
+
     if isNewStep or button.fresh then
         local lines = button.lines
         for i = 1, #lines do
@@ -734,8 +1030,10 @@ function QuestKing:OnScenarioCompleted(xp, money)
 end
 
 function QuestKing:OnScenarioUpdate(newStage)
-    local _, currentStage, numStages, flags = SafeGetScenarioInfo()
-    local inChallengeMode = GetScenarioFlags(flags)
+    local _, currentStage, numStages, flags, _, _, _, _, _, scenarioType = SafeGetScenarioInfo()
+    local inChallengeMode = GetScenarioFlags(flags, scenarioType)
+
+    self:RefreshShouldShowScenarioCriteria()
 
     if newStage then
         if not inChallengeMode then
@@ -751,6 +1049,10 @@ function QuestKing:OnScenarioUpdate(newStage)
 
     QuestKing:UpdateTracker()
 end
+
+-- ---------------------------------------------------------------------
+-- Mouse handlers
+-- ---------------------------------------------------------------------
 
 function mouseHandlerScenario:TitleButtonOnClick(mouse, down)
     local button = self.parent
@@ -790,7 +1092,8 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
         isBonusStepComplete,
         completed,
         xp,
-        money = SafeGetScenarioInfo()
+        money,
+        scenarioType = SafeGetScenarioInfo()
 
     local stageName,
         stageDescription,
@@ -804,15 +1107,17 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
         rewardQuestIDFromStep = SafeGetScenarioStepInfo(stepIndex)
 
     local numCriteria = GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
-
+    local displayKind = button.scenarioDisplayKind or GetScenarioDisplayKind(flags, scenarioType)
+    local displayLabel = GetScenarioDisplayLabel(displayKind)
     local tooltip = QuestKing.PrepareTooltip and QuestKing:PrepareTooltip(self, GetTooltipAnchor())
+
     if not scenarioName or not tooltip then
         return
     end
 
     tooltip:AddLine(scenarioName, NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b, 1)
     tooltip:AddLine(
-        stageName or "Scenario",
+        stageName or displayLabel,
         opt_colors.ScenarioStageTitle[1],
         opt_colors.ScenarioStageTitle[2],
         opt_colors.ScenarioStageTitle[3],
@@ -821,8 +1126,10 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
 
     if isBonusStep then
         tooltip:AddLine("Bonus Objective", 1, 0.914, 0.682, 1)
+    elseif tonumber(numStages) and numStages > 1 and tonumber(currentStage) and currentStage > 0 and not IsScenarioStageTextSuppressed(flags) then
+        tooltip:AddLine(format("%s - Stage %d/%d", displayLabel, currentStage, numStages), 1, 0.914, 0.682, 1)
     else
-        tooltip:AddLine(format(SCENARIO_STAGE_STATUS, currentStage, numStages), 1, 0.914, 0.682, 1)
+        tooltip:AddLine(displayLabel, 1, 0.914, 0.682, 1)
     end
 
     tooltip:AddLine(" ")
@@ -836,7 +1143,7 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
         tooltip:AddLine(format("Progress: %d%%", ClampPercent(weightedProgress)), 1, 1, 1, 1)
     end
 
-    if numCriteria > 0 then
+    if QuestKing:ShouldShowScenarioCriteria() and numCriteria > 0 then
         tooltip:AddLine(" ")
         tooltip:AddLine(QUEST_TOOLTIP_REQUIREMENTS, NORMAL_FONT_COLOR.r, NORMAL_FONT_COLOR.g, NORMAL_FONT_COLOR.b, 1)
 
@@ -852,8 +1159,7 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
                 criteriaID,
                 duration,
                 elapsed,
-                criteriaFailed =
-                GetScenarioCriteriaInfo(stepIndex, i)
+                criteriaFailed = GetScenarioCriteriaInfo(stepIndex, i)
 
             criteriaString = (criteriaString and criteriaString ~= "") and criteriaString or "Objective"
 
@@ -908,6 +1214,16 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
                         1, 1, 1
                     )
                 end
+            end
+        end
+    end
+
+    if ShouldShowScenarioSpellsInTooltip() and allSpellInfo and #allSpellInfo > 0 then
+        tooltip:AddLine(" ")
+        for i = 1, #allSpellInfo do
+            local spellInfo = allSpellInfo[i]
+            if spellInfo and spellInfo.spellName then
+                tooltip:AddLine(format("Spell: %s", spellInfo.spellName), 0.8, 0.9, 1)
             end
         end
     end

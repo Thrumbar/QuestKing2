@@ -326,15 +326,36 @@ local function UpdateModeButtonLabel(displayMode)
         QuestKing_TrackerModeButton.label:SetText("C")
     elseif displayMode == "achievements" then
         QuestKing_TrackerModeButton.label:SetText("A")
+    elseif displayMode == "raids" then
+        QuestKing_TrackerModeButton.label:SetText("R")
     else
         QuestKing_TrackerModeButton.label:SetText("Q")
     end
 end
 
-local function UpdateTrackerTitleText(displayMode, numAchievements, numWatches, totalQuests, maxQuests)
+local function GetScenarioTrackerState(self)
+    local shouldShowScenarioTracker = false
+
+    if self and self.ShouldShowScenarioTracker then
+        shouldShowScenarioTracker = SafeCall(self, "ShouldShowScenarioTracker") and true or false
+    elseif C_Scenario and C_Scenario.IsInScenario then
+        shouldShowScenarioTracker = C_Scenario.IsInScenario() and true or false
+    end
+
+    if not shouldShowScenarioTracker then
+        return false, false
+    end
+
+    local _, instanceType = GetInstanceInfo()
+    return true, instanceType == "raid"
+end
+
+local function UpdateTrackerTitleText(displayMode, numAchievements, numWatches, totalQuests, maxQuests, numRaidBlocks)
     if not (Tracker and Tracker.titlebarText) then
         return
     end
+
+    numRaidBlocks = tonumber(numRaidBlocks) or 0
 
     if displayMode == "combined" then
         if numAchievements > 0 then
@@ -343,7 +364,7 @@ local function UpdateTrackerTitleText(displayMode, numAchievements, numWatches, 
             Tracker.titlebarText:SetText(format("%d/%d", totalQuests, maxQuests))
         end
 
-        if numWatches == 0 and numAchievements == 0 then
+        if numWatches == 0 and numAchievements == 0 and numRaidBlocks == 0 then
             Tracker.titlebarText:SetTextColor(
                 opt_colors.TrackerTitlebarTextDimmed[1],
                 opt_colors.TrackerTitlebarTextDimmed[2],
@@ -360,6 +381,22 @@ local function UpdateTrackerTitleText(displayMode, numAchievements, numWatches, 
         Tracker.titlebarText:SetText(tostring(numAchievements))
 
         if numAchievements == 0 then
+            Tracker.titlebarText:SetTextColor(
+                opt_colors.TrackerTitlebarTextDimmed[1],
+                opt_colors.TrackerTitlebarTextDimmed[2],
+                opt_colors.TrackerTitlebarTextDimmed[3]
+            )
+        else
+            Tracker.titlebarText:SetTextColor(
+                opt_colors.TrackerTitlebarText[1],
+                opt_colors.TrackerTitlebarText[2],
+                opt_colors.TrackerTitlebarText[3]
+            )
+        end
+    elseif displayMode == "raids" then
+        Tracker.titlebarText:SetText(tostring(numRaidBlocks))
+
+        if numRaidBlocks == 0 then
             Tracker.titlebarText:SetTextColor(
                 opt_colors.TrackerTitlebarTextDimmed[1],
                 opt_colors.TrackerTitlebarTextDimmed[2],
@@ -460,15 +497,40 @@ function QuestKing:UpdateTracker(forceBuild, postCombat)
 
     UpdateMinimizeButtonLabel(trackerCollapsed)
 
+    local hasScenarioTracker, isRaidScenario = GetScenarioTrackerState(self)
+    local numRaidBlocks = isRaidScenario and 1 or 0
+
     if trackerCollapsed <= 1 then
         SafeCall(self, "UpdateTrackerPopups")
         SafeCall(self, "UpdateTrackerChallengeTimers")
 
-        if C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario() then
+        local showScenarioBlock = false
+        local showBonusObjectives = false
+
+        if displayMode == "combined" then
+            showScenarioBlock = hasScenarioTracker
+            showBonusObjectives = true
+        elseif displayMode == "quests" then
+            showScenarioBlock = hasScenarioTracker and (not isRaidScenario)
+            showBonusObjectives = true
+        elseif displayMode == "raids" then
+            showScenarioBlock = hasScenarioTracker and isRaidScenario
+            showBonusObjectives = false
+        elseif displayMode == "achievements" then
+            showScenarioBlock = false
+            showBonusObjectives = false
+        else
+            showScenarioBlock = hasScenarioTracker
+            showBonusObjectives = true
+        end
+
+        if showScenarioBlock then
             SafeCall(self, "UpdateTrackerScenarios")
         end
 
-        SafeCall(self, "UpdateTrackerBonusObjectives")
+        if showBonusObjectives then
+            SafeCall(self, "UpdateTrackerBonusObjectives")
+        end
     end
 
     if trackerCollapsed == 0 then
@@ -487,7 +549,7 @@ function QuestKing:UpdateTracker(forceBuild, postCombat)
     local maxQuests = SafeGetMaxQuests()
 
     UpdateModeButtonLabel(displayMode)
-    UpdateTrackerTitleText(displayMode, numAchievements, numWatches, totalQuests, maxQuests)
+    UpdateTrackerTitleText(displayMode, numAchievements, numWatches, totalQuests, maxQuests, numRaidBlocks)
 
     LayoutRequestedButtons(postCombat)
 
