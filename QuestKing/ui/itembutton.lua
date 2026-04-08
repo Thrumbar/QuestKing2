@@ -202,10 +202,45 @@ local function SafeGetItemIDFromLink(link)
     return nil
 end
 
+local function ApplyItemButtonZOrder(itemButton, baseButton)
+    if not itemButton or not baseButton or IsInCombatLockdownCompat() then
+        return
+    end
+
+    local frameStrata = "MEDIUM"
+    local frameLevel = 1
+
+    if baseButton.GetFrameStrata then
+        local strata = baseButton:GetFrameStrata()
+        if strata and strata ~= "" then
+            frameStrata = strata
+        end
+    elseif QuestKing.Tracker and QuestKing.Tracker.GetFrameStrata then
+        local strata = QuestKing.Tracker:GetFrameStrata()
+        if strata and strata ~= "" then
+            frameStrata = strata
+        end
+    end
+
+    if baseButton.GetFrameLevel then
+        frameLevel = baseButton:GetFrameLevel() or 1
+    elseif QuestKing.Tracker and QuestKing.Tracker.GetFrameLevel then
+        frameLevel = QuestKing.Tracker:GetFrameLevel() or 1
+    end
+
+    itemButton:SetFrameStrata(frameStrata)
+    itemButton:SetFrameLevel(frameLevel + 25)
+
+    if itemButton.SetToplevel then
+        itemButton:SetToplevel(true)
+    end
+end
+
 local function AcquireItemButton(baseButton)
     local itemButton = baseButton.itemButton
     if itemButton then
         itemButton.baseButton = baseButton
+        ApplyItemButtonZOrder(itemButton, baseButton)
         return itemButton
     end
 
@@ -226,6 +261,7 @@ local function AcquireItemButton(baseButton)
     baseButton.itemButton = itemButton
     itemButton.baseButton = baseButton
     itemButton:ClearAllPoints()
+    ApplyItemButtonZOrder(itemButton, baseButton)
     itemButton:Show()
 
     return itemButton
@@ -294,6 +330,8 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
         return nil
     end
 
+    ApplyItemButtonZOrder(itemButton, self)
+
     if IsInCombatLockdownCompat() then
         local currentQuestLogIndex = itemButton.questLogIndex
         local currentItemLink = itemButton:GetAttribute("item")
@@ -321,6 +359,7 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
     ResetRangeIndicator(itemButton)
     UpdateRangeIndicator(itemButton)
     ResizeItemButton(itemButton, displayedObj)
+    ApplyItemButtonZOrder(itemButton, self)
 
     return itemButton
 end

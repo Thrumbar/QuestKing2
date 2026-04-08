@@ -194,3 +194,51 @@ label with explicit action text.
 ### UI
 - Improved tooltip readability with clearer background styling.
 - Standardized objective formatting across quest, bonus objective, and achievement hover tooltips.
+
+# QuestKing Changelog
+
+## Unreleased
+
+### Fixed
+- Raised the quest special item button above its owning watch entry by explicitly applying a higher frame level.
+- Kept the item button on the same effective frame strata as the owning watch button instead of forcing a more aggressive strata like `TOOLTIP`.
+- Reapplied item button z-order whenever a pooled item button is acquired or reassigned, which helps prevent neighboring quest rows from drawing or clicking over the quest use item.
+- Preserved secure item-button behavior by avoiding unnecessary XML template changes.
+
+### Technical Notes
+- Added `ApplyItemButtonZOrder(itemButton, baseButton)` in `itembutton.lua`.
+- Applied frame ordering from the owning watch button:
+  - `SetFrameStrata(baseButton:GetFrameStrata())`
+  - `SetFrameLevel(baseButton:GetFrameLevel() + 25)`
+  - `SetToplevel(true)`
+- Called the z-order helper when:
+  - acquiring an item button from the pool
+  - reusing an existing item button
+  - assigning the button in `QuestKing.WatchButton:SetItemButton(...)`
+
+### Files
+- `itembutton.lua`
+- No change required in `itembutton.xml`
+
+## Suggested Git Commit Message
+
+```text
+fix(tracker): raise quest item button above watch rows
+```
+
+## Longer Git Commit Body
+
+```text
+Raise the QuestKing special item button above its owning watch entry.
+
+The item button was created under QuestKing.Tracker without an explicit
+frame level adjustment, which could allow neighboring watch rows or title
+buttons to visually or interactively overlap the quest use item.
+
+This change keeps the item button on the same effective strata as the
+base watch button, but raises its frame level and marks it top-level for
+safer draw and click priority. The z-order is reapplied during pooled
+button acquisition and item assignment.
+
+No XML template change was required.
+```
