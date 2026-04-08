@@ -340,21 +340,159 @@ local function addMoneyTooltipLine(tooltip, money)
     end
 end
 
-local function showBonusRewardTooltip(owner, questID)
-    if not owner or not questID then
+local function getQuestDifficultyColorSafe(level)
+    if GetQuestDifficultyColor then
+        local color = GetQuestDifficultyColor(level or 0)
+        if color then
+            return color.r or 1, color.g or 0.82, color.b or 0
+        end
+    end
+
+    return 1, 0.82, 0
+end
+
+local function addTooltipObjectiveLine(tooltip, leftText, rightText, progress, isDone)
+    if not tooltip or not leftText or leftText == "" then
         return
     end
 
-    local hasQuestData = hasQuestDataSafe(questID)
+    local r
+    local g
+    local b
+
+    if isDone and opt_colors.ObjectiveGradientComplete then
+        r = opt_colors.ObjectiveGradientComplete[1]
+        g = opt_colors.ObjectiveGradientComplete[2]
+        b = opt_colors.ObjectiveGradientComplete[3]
+    else
+        r, g, b = getObjectiveColor(progress or 0)
+    end
+
+    if rightText and rightText ~= "" and tooltip.AddDoubleLine then
+        tooltip:AddDoubleLine(leftText, rightText, r, g, b, r, g, b)
+    else
+        tooltip:AddLine(leftText, r, g, b, true)
+    end
+end
+
+local function addBonusObjectiveTooltipObjectives(tooltip, questID)
+    if not tooltip or not questID then
+        return 0
+    end
+
+    local _, _, numObjectives = getTaskInfoSafe(questID)
+    numObjectives = tonumber(numObjectives) or 0
+
+    if numObjectives <= 0 then
+        return 0
+    end
+
+    tooltip:AddLine(BONUS_OBJECTIVE_TOOLTIP_DESCRIPTION or TRACKER_HEADER_OBJECTIVE or "Objectives", 1, 1, 1, 1)
+
+    local added = 0
+
+    for i = 1, numObjectives do
+        local desc, objectiveType, isDone, _, objectiveInfo = getQuestObjectiveInfoCompat(questID, i, false)
+
+        if objectiveType == "progressbar" then
+            local percent = tonumber(getQuestProgressBarPercentCompat(questID)) or 0
+            if percent < 0 then
+                percent = 0
+            elseif percent > 100 then
+                percent = 100
+            end
+
+            if desc == nil or desc == "" then
+                desc = UNKNOWN
+            end
+
+            addTooltipObjectiveLine(
+                tooltip,
+                format(" - %s", desc),
+                format("%d%%", percent),
+                clamp01(percent / 100),
+                isDone
+            )
+            added = added + 1
+        else
+            local displayText, currentValue, maxValue, progress = getObjectiveDisplayState(desc, isDone, objectiveInfo)
+            local leftText, rightText = buildObjectiveDisplayText(displayText, currentValue, maxValue, objectiveInfo)
+
+            addTooltipObjectiveLine(
+                tooltip,
+                format(" - %s", leftText or UNKNOWN),
+                rightText,
+                progress,
+                isDone
+            )
+            added = added + 1
+        end
+    end
+
+    return added
+end
+
+local function addBonusRewardTooltipLines(tooltip, questID)
+    if not tooltip or not questID then
+        return 0
+    end
+
+    local added = 0
     local xp = getRewardXPCompat(questID)
     local numQuestCurrencies = getNumRewardCurrenciesCompat(questID)
     local numQuestRewards = getNumRewardsCompat(questID)
     local money = getRewardMoneyCompat(questID)
 
-    if hasQuestData and xp == 0 and numQuestCurrencies == 0 and numQuestRewards == 0 and money == 0 then
-        if QuestKing and QuestKing.HideTooltip then
-            QuestKing:HideTooltip()
+    if xp > 0 or numQuestCurrencies > 0 or numQuestRewards > 0 or money > 0 then
+        tooltip:AddLine(" ")
+        tooltip:AddLine(REWARDS, 1, 0.831, 0.380)
+    end
+
+    if xp > 0 then
+        tooltip:AddLine(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
+        added = added + 1
+    end
+
+    for i = 1, numQuestCurrencies do
+        local name, texture, numItems = getRewardCurrencyInfoCompat(i, questID)
+        if name and texture and numItems then
+            local text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
+            tooltip:AddLine(text, 1, 1, 1)
+            added = added + 1
         end
+    end
+
+    for i = 1, numQuestRewards do
+        local name, texture, numItems, quality = getRewardInfoCompat(i, questID)
+        local text
+
+        if numItems and numItems > 1 and texture and name then
+            text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
+        elseif texture and name then
+            text = format(BONUS_OBJECTIVE_REWARD_FORMAT, texture, name)
+        end
+
+        if text then
+            local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
+            if color then
+                tooltip:AddLine(text, color.r, color.g, color.b)
+            else
+                tooltip:AddLine(text, 1, 1, 1)
+            end
+            added = added + 1
+        end
+    end
+
+    if money > 0 then
+        addMoneyTooltipLine(tooltip, money)
+        added = added + 1
+    end
+
+    return added
+end
+
+local function showBonusRewardTooltip(owner, questID)
+    if not owner or not questID then
         return
     end
 
@@ -363,49 +501,32 @@ local function showBonusRewardTooltip(owner, questID)
         return
     end
 
-    tooltip:SetText(REWARDS, 1, 0.831, 0.380)
+    local taggedTitle, level = getQuestTitleAndLevelSafe(questID)
+    local r, g, b = getQuestDifficultyColorSafe(level)
+    local hasQuestData = hasQuestDataSafe(questID)
+
+    tooltip:SetText(taggedTitle or UNKNOWN, r, g, b)
+
+    if getSuperTrackedQuestIDSafe() == questID then
+        tooltip:AddLine(QUEST_SUPER_TRACKED or "Super Tracked", 0.55, 0.82, 1.00)
+    end
 
     if not hasQuestData then
         tooltip:AddLine(RETRIEVING_DATA, RED_FONT_COLOR.r, RED_FONT_COLOR.g, RED_FONT_COLOR.b)
-    else
-        tooltip:AddLine(BONUS_OBJECTIVE_TOOLTIP_DESCRIPTION, 1, 1, 1, 1)
-        tooltip:AddLine(" ")
+        tooltip:Show()
+        return
+    end
 
-        if xp > 0 then
-            tooltip:AddLine(format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, xp), 1, 1, 1)
-        end
+    local addedObjectives = addBonusObjectiveTooltipObjectives(tooltip, questID)
+    local addedRewards = addBonusRewardTooltipLines(tooltip, questID)
 
-        for i = 1, numQuestCurrencies do
-            local name, texture, numItems = getRewardCurrencyInfoCompat(i, questID)
-            if name and texture and numItems then
-                local text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
-                tooltip:AddLine(text, 1, 1, 1)
-            end
-        end
-
-        for i = 1, numQuestRewards do
-            local name, texture, numItems, quality = getRewardInfoCompat(i, questID)
-            local text
-
-            if numItems and numItems > 1 and texture and name then
-                text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
-            elseif texture and name then
-                text = format(BONUS_OBJECTIVE_REWARD_FORMAT, texture, name)
-            end
-
-            if text then
-                local color = ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
-                if color then
-                    tooltip:AddLine(text, color.r, color.g, color.b)
-                else
-                    tooltip:AddLine(text, 1, 1, 1)
-                end
-            end
-        end
-
-        if money > 0 then
-            addMoneyTooltipLine(tooltip, money)
-        end
+    if addedObjectives == 0 and addedRewards == 0 then
+        tooltip:AddLine(
+            COMPLETE or "Complete",
+            opt_colors.ObjectiveGradientComplete[1],
+            opt_colors.ObjectiveGradientComplete[2],
+            opt_colors.ObjectiveGradientComplete[3]
+        )
     end
 
     tooltip:Show()

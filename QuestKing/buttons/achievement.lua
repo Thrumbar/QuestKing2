@@ -1,9 +1,9 @@
 -- achievement.lua (QuestKing)
 -- Renders tracked achievements in the custom watch window.
--- Midnight-safe tooltip handling:
---   - never stores addon state on GameTooltip
---   - never rescales Blizzard's shared GameTooltip
---   - only uses SetOwner / AddLine / Show
+-- Tooltip handling:
+--   - uses QuestKing's private tooltip helper
+--   - does not store addon state on Blizzard's shared GameTooltip
+--   - tooltip formatting aligned more closely with quest tooltips
 
 local addonName, QuestKing = ...
 
@@ -11,6 +11,7 @@ local opt = QuestKing.options
 local opt_colors = opt.colors
 local WatchButton = QuestKing.WatchButton
 local GetObjectiveColor = QuestKing.GetObjectiveColor
+local GetTimeStringFromSecondsShort = QuestKing.GetTimeStringFromSecondsShort
 
 local format = string.format
 local sort = table.sort
@@ -23,6 +24,14 @@ local GetTime = GetTime
 
 local HAS_CONTENT_TRACKING = C_ContentTracking and Enum and Enum.ContentTrackingType
 local HAS_C_ACHIEVEMENTINFO = C_AchievementInfo and C_AchievementInfo.GetAchievementInfo
+
+local FINISHED_COLOR = {
+    r = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[1]) or 0.60,
+    g = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[2]) or 1.00,
+    b = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[3]) or 0.60,
+}
+
+local UNFINISHED_COLOR = { r = 1.00, g = 1.00, b = 1.00 }
 
 local function EnsureTrackedAchievementCache()
     QuestKing.trackedAchievements = QuestKing.trackedAchievements or {}
@@ -294,6 +303,133 @@ local function addHeader()
     return header
 end
 
+local function Clamp01(value)
+    value = tonumber(value) or 0
+    if value < 0 then
+        return 0
+    end
+    if value > 1 then
+        return 1
+    end
+    return value
+end
+
+local function ShouldShowCompletedAchievementObjective()
+    local value = opt.showCompletedObjectives
+    return value == true or value == "always"
+end
+
+local function AddTooltipLine(tooltip, text, r, g, b)
+    if tooltip and text and text ~= "" then
+        tooltip:AddLine(text, r or 1, g or 1, b or 1, true)
+    end
+end
+
+local function BuildCriteriaDisplay(desc, qty, req, qtyString)
+    if (not desc or desc == "") and qtyString then
+        desc = qtyString
+    elseif not desc or desc == "" then
+        desc = "Objective"
+    end
+
+    if req and req > 0 then
+        return desc, qty or 0, req
+    end
+
+    return desc, nil, nil
+end
+
+local function AddAchievementTooltipObjectives(tooltip, achievementID)
+    if not tooltip or not achievementID then
+        return 0
+    end
+
+    local numCriteria = Safe_GetAchievementNumCriteria(achievementID) or 0
+    if numCriteria <= 0 then
+        return 0
+    end
+
+    AddTooltipLine(
+        tooltip,
+        QUEST_TOOLTIP_REQUIREMENTS or "Objectives",
+        NORMAL_FONT_COLOR and NORMAL_FONT_COLOR.r or 1,
+        NORMAL_FONT_COLOR and NORMAL_FONT_COLOR.g or 0.82,
+        NORMAL_FONT_COLOR and NORMAL_FONT_COLOR.b or 0
+    )
+
+    local added = 0
+
+    for i = 1, numCriteria do
+        local desc, _, cDone, qty, req, _, _, qtyString, _, _, duration, elapsed =
+            Safe_GetAchievementCriteriaInfo(achievementID, i)
+
+        local text, curValue, maxValue = BuildCriteriaDisplay(desc, qty, req, qtyString)
+
+        if cDone then
+            if ShouldShowCompletedAchievementObjective() then
+                if curValue and maxValue then
+                    AddTooltipLine(
+                        tooltip,
+                        format("- %s: %s/%s", text, tostring(curValue), tostring(maxValue)),
+                        FINISHED_COLOR.r,
+                        FINISHED_COLOR.g,
+                        FINISHED_COLOR.b
+                    )
+                else
+                    AddTooltipLine(
+                        tooltip,
+                        "- " .. text,
+                        FINISHED_COLOR.r,
+                        FINISHED_COLOR.g,
+                        FINISHED_COLOR.b
+                    )
+                end
+                added = added + 1
+            end
+        else
+            if curValue and maxValue then
+                local progress = Clamp01(curValue / maxValue)
+                local r, g, b = GetObjectiveColor(progress)
+                AddTooltipLine(
+                    tooltip,
+                    format("- %s: %s/%s", text, tostring(curValue), tostring(maxValue)),
+                    r,
+                    g,
+                    b
+                )
+            else
+                AddTooltipLine(
+                    tooltip,
+                    "- " .. text,
+                    UNFINISHED_COLOR.r,
+                    UNFINISHED_COLOR.g,
+                    UNFINISHED_COLOR.b
+                )
+            end
+            added = added + 1
+
+            if duration and elapsed and elapsed < duration then
+                local remaining = duration - elapsed
+                if remaining < 0 then
+                    remaining = 0
+                end
+
+                if GetTimeStringFromSecondsShort then
+                    AddTooltipLine(
+                        tooltip,
+                        "  Time Left: " .. GetTimeStringFromSecondsShort(remaining),
+                        opt_colors.ScenarioTimer[1],
+                        opt_colors.ScenarioTimer[2],
+                        opt_colors.ScenarioTimer[3]
+                    )
+                end
+            end
+        end
+    end
+
+    return added
+end
+
 local mouseHandlerAchievement = {}
 
 function mouseHandlerAchievement:TitleButtonOnClick(mouse)
@@ -338,7 +474,7 @@ function mouseHandlerAchievement:TitleButtonOnEnter()
         return
     end
 
-    tooltip:SetText(name or "Achievement", 1, 0.914, 0.682, 1)
+    tooltip:SetText(name or "Achievement", 1, 0.82, 0)
 
     if points and points > 0 then
         local pointsText
@@ -347,30 +483,34 @@ function mouseHandlerAchievement:TitleButtonOnEnter()
         else
             pointsText = ("%d points"):format(points)
         end
-        tooltip:AddLine(pointsText, 1, 1, 1, 1)
+        AddTooltipLine(tooltip, pointsText, 1, 1, 1)
     end
 
-    tooltip:AddLine(" ")
-
     if desc and desc ~= "" then
-        tooltip:AddLine(desc, 1, 1, 1, 1)
+        AddTooltipLine(tooltip, " ")
+        AddTooltipLine(tooltip, desc, 1, 1, 1)
+    end
+
+    local addedObjectives = 0
+    local numCriteria = Safe_GetAchievementNumCriteria(achievementID) or 0
+    if numCriteria > 0 then
+        AddTooltipLine(tooltip, " ")
+        addedObjectives = AddAchievementTooltipObjectives(tooltip, achievementID)
     end
 
     if completed then
-        tooltip:AddLine(" ")
-        tooltip:AddLine(ACHIEVEMENT_COMPLETED or "Completed", 0.2, 0.9, 0.2, 1)
+        AddTooltipLine(tooltip, " ")
+        AddTooltipLine(tooltip, ACHIEVEMENT_COMPLETED or "Completed", 0.2, 0.9, 0.2)
 
         if month and day and year and type(GUILD_NEWS_FORMAT_TIME) == "string" then
-            tooltip:AddLine(format(GUILD_NEWS_FORMAT_TIME, month, day, year), 0.8, 0.8, 0.8, 1)
+            AddTooltipLine(tooltip, format(GUILD_NEWS_FORMAT_TIME, month, day, year), 0.8, 0.8, 0.8)
         end
+    elseif numCriteria > 0 and addedObjectives == 0 then
+        AddTooltipLine(tooltip, " ")
+        AddTooltipLine(tooltip, COMPLETE or "Complete", FINISHED_COLOR.r, FINISHED_COLOR.g, FINISHED_COLOR.b)
     end
 
     tooltip:Show()
-end
-
-local function ShouldShowCompletedAchievementObjective()
-    local value = opt.showCompletedObjectives
-    return value == true or value == "always"
 end
 
 local function setButtonToAchievement(button, achievementID)
@@ -399,7 +539,7 @@ local function setButtonToAchievement(button, achievementID)
     local numCriteria = Safe_GetAchievementNumCriteria(achievementID) or 0
     if numCriteria > 0 then
         for i = 1, numCriteria do
-            local desc, cType, cDone, qty, req, flags, assetID, qtyString, criteriaID, eligible, duration, elapsed =
+            local desc, _, cDone, qty, req, _, _, qtyString, _, _, duration, elapsed =
                 Safe_GetAchievementCriteriaInfo(achievementID, i)
 
             if (not desc or desc == "") and qtyString then
