@@ -455,8 +455,8 @@ function mouseHandlerPopup:ButtonOnClick(mouse)
         RemoveAutoQuestPopUpCompat(questID)
         QuestKing:UpdateTracker()
     elseif popupType == "COMPLETE" then
-        if questID and ShowQuestComplete then
-            ShowQuestComplete(questID)
+        if self.questIndex and ShowQuestComplete then
+            ShowQuestComplete(self.questIndex)
         end
         RemoveAutoQuestPopUpCompat(questID)
         QuestKing:UpdateTracker()
