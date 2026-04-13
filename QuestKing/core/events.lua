@@ -148,6 +148,26 @@ local function GetQuestIDFromQuestLogIndexCompat(questLogIndex)
     return nil
 end
 
+local function IsAutoCompleteQuestCompat(questID, questLogIndex)
+    if not questID and not questLogIndex then
+        return false
+    end
+
+    if questID and C_QuestLog and C_QuestLog.IsAutoComplete then
+        return C_QuestLog.IsAutoComplete(questID) and true or false
+    end
+
+    if not questLogIndex and questID then
+        questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    end
+
+    if questLogIndex and _G.GetQuestLogIsAutoComplete then
+        return _G.GetQuestLogIsAutoComplete(questLogIndex) and true or false
+    end
+
+    return false
+end
+
 local function NormalizeQuestAcceptedPayload(...)
     local a, b = ...
 
@@ -500,9 +520,13 @@ end
 -- -----------------------------------------------------------------------------
 
 Events.QUEST_AUTOCOMPLETE = function(self, event, questID)
-    if AddAutoQuestPopUp and AddAutoQuestPopUp(questID, "COMPLETE") then
-        if SOUNDKIT and SOUNDKIT.UI_AUTO_QUEST_COMPLETE then
-            PlaySoundSafe(SOUNDKIT.UI_AUTO_QUEST_COMPLETE)
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+
+    if IsAutoCompleteQuestCompat(questID, questLogIndex) then
+        if AddAutoQuestPopUp and AddAutoQuestPopUp(questID, "COMPLETE") then
+            if SOUNDKIT and SOUNDKIT.UI_AUTO_QUEST_COMPLETE then
+                PlaySoundSafe(SOUNDKIT.UI_AUTO_QUEST_COMPLETE)
+            end
         end
     end
 

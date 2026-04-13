@@ -169,6 +169,26 @@ local function QK_IsComplete(questID)
     return false
 end
 
+local function QK_IsAutoComplete(questID, questLogIndex)
+    if not questID and not questLogIndex then
+        return false
+    end
+
+    if questID and CQL and CQL.IsAutoComplete then
+        return CQL.IsAutoComplete(questID) and true or false
+    end
+
+    if not questLogIndex and questID then
+        questLogIndex = QK_GetQuestLogIndexByID(questID)
+    end
+
+    if questLogIndex and GetQuestLogIsAutoComplete then
+        return GetQuestLogIsAutoComplete(questLogIndex) and true or false
+    end
+
+    return false
+end
+
 local function QK_ShowQuestAPICompat(func, questID, questLogIndex)
     if type(func) ~= "function" then
         return false
@@ -643,18 +663,25 @@ local function ShouldShowQuestObjective(row, isQuestComplete)
     return opt_showCompletedObjectives and true or false
 end
 
-local function GetQuestCompletionLineText(questID)
-    if questID and QK_IsTaskQuest(questID) then
-        return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE_TASK
-            or QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
+local function GetQuestCompletionLineText(questID, isAutoComplete)
+    if isAutoComplete then
+        if questID and QK_IsTaskQuest(questID) then
+            return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE_TASK
+                or QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
+                or QUEST_WATCH_QUEST_READY
+                or QUEST_WATCH_QUEST_COMPLETE
+                or COMPLETE
+                or "Complete"
+        end
+
+        return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
             or QUEST_WATCH_QUEST_READY
             or QUEST_WATCH_QUEST_COMPLETE
             or COMPLETE
             or "Complete"
     end
 
-    return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
-        or QUEST_WATCH_QUEST_READY
+    return QUEST_WATCH_QUEST_READY
         or QUEST_WATCH_QUEST_COMPLETE
         or COMPLETE
         or "Complete"
@@ -822,7 +849,8 @@ function mouseHandlerQuest:TitleButtonOnClick(mouse)
         return
     end
 
-    if QK_IsComplete(questID) and QK_ShowQuestComplete(questID, questLogIndex) then
+    local isAutoCompleteQuest = QK_IsAutoComplete(questID, questLogIndex)
+    if isAutoCompleteQuest and QK_IsComplete(questID) and QK_ShowQuestComplete(questID, questLogIndex) then
         return
     end
 
@@ -926,6 +954,8 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         return
     end
 
+    local isAutoCompleteQuest = QK_IsAutoComplete(data.questID, questLogIndex)
+
     local itemLink, itemTexture, itemCharges = QK_GetQuestLogSpecialItemInfo(questLogIndex)
     local itemAnchorSide = (opt.itemAnchorSide == "left") and "left" or "right"
     local itemScale = tonumber(QuestKing.itemButtonScale) or tonumber(opt.itemButtonScale) or 1
@@ -968,12 +998,16 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     end
 
     if button.title then
-        if data.isComplete and button.title.SetFormattedTextIcon then
+        if data.isComplete and isAutoCompleteQuest and button.title.SetFormattedTextIcon then
             button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t %s", displayTitle)
             button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
         else
             button.title:SetText(displayTitle)
-            button.title:SetTextColor(TITLE_COLOR.r, TITLE_COLOR.g, TITLE_COLOR.b)
+            if data.isComplete then
+                button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
+            else
+                button.title:SetTextColor(TITLE_COLOR.r, TITLE_COLOR.g, TITLE_COLOR.b)
+            end
         end
 
         button.title:ClearAllPoints()
@@ -1029,7 +1063,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
 
     if data.isComplete then
         local line = button:AddLine(
-            ("  %s"):format(GetQuestCompletionLineText(data.questID)),
+            ("  %s"):format(GetQuestCompletionLineText(data.questID, isAutoCompleteQuest)),
             nil,
             FINISHED_COLOR.r,
             FINISHED_COLOR.g,
