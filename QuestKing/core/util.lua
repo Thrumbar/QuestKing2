@@ -20,6 +20,63 @@ local select = select
 local tostring = tostring
 local type = type
 
+local issecretvalue = _G.issecretvalue
+
+local function IsSecretValue(value)
+    if type(issecretvalue) == "function" then
+        return issecretvalue(value) and true or false
+    end
+
+    return false
+end
+
+local function SafeNumber(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    if type(value) == "number" then
+        return value
+    end
+
+    local ok, numberValue = pcall(tonumber, value)
+    if ok and type(numberValue) == "number" and not IsSecretValue(numberValue) then
+        return numberValue
+    end
+
+    return fallback
+end
+
+local function SafeBoolean(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    return value and true or false
+end
+
+local function SafeString(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    if type(value) == "string" then
+        return value
+    end
+
+    return fallback
+end
+
+local function IsSafeNumber(value)
+    return type(value) == "number" and not IsSecretValue(value)
+end
+
+QuestKing.IsSecretValue = IsSecretValue
+QuestKing.IsSafeNumber = IsSafeNumber
+QuestKing.SafeNumber = SafeNumber
+QuestKing.SafeBoolean = SafeBoolean
+QuestKing.SafeString = SafeString
+
 local CQL = C_QuestLog
 
 local QUEST_FREQUENCY_DAILY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Daily) or LE_QUEST_FREQUENCY_DAILY
@@ -437,33 +494,80 @@ local function ClearTooltipTextRegions(tooltip)
     end
 end
 
+local function ClearTooltipBlizzardState(tooltip)
+    if not tooltip then
+        return
+    end
+
+    if SharedTooltip_ClearInsertedFrames then
+        pcall(SharedTooltip_ClearInsertedFrames, tooltip)
+    end
+
+    if GameTooltip_ClearMoney then
+        pcall(GameTooltip_ClearMoney, tooltip)
+    end
+
+    if GameTooltip_ClearStatusBars then
+        pcall(GameTooltip_ClearStatusBars, tooltip)
+    end
+
+    if GameTooltip_ClearStatusBarWatch then
+        pcall(GameTooltip_ClearStatusBarWatch, tooltip)
+    end
+
+    if GameTooltip_ClearProgressBars then
+        pcall(GameTooltip_ClearProgressBars, tooltip)
+    end
+
+    if GameTooltip_ClearWidgetSet then
+        pcall(GameTooltip_ClearWidgetSet, tooltip)
+    end
+
+    if TooltipComparisonManager and TooltipComparisonManager.Clear then
+        pcall(TooltipComparisonManager.Clear, TooltipComparisonManager, tooltip)
+    end
+
+    if tooltip.ItemTooltip then
+        if EmbeddedItemTooltip_Hide then
+            pcall(EmbeddedItemTooltip_Hide, tooltip.ItemTooltip)
+        elseif tooltip.ItemTooltip.Hide then
+            tooltip.ItemTooltip:Hide()
+        end
+    end
+
+    if tooltip.ClearHandlerInfo then
+        pcall(tooltip.ClearHandlerInfo, tooltip)
+    end
+
+    if tooltip.ClearPadding then
+        pcall(tooltip.ClearPadding, tooltip)
+    end
+end
+
 local function ResetPrivateTooltipState(tooltip)
     if not tooltip then
         return
     end
 
-    if tooltip.StatusBar and tooltip.StatusBar.Hide then
-        tooltip.StatusBar:Hide()
+    if tooltip.Hide then
+        tooltip:Hide()
     end
 
-    if tooltip.model and tooltip.model.Hide then
-        tooltip.model:Hide()
-    end
+    ClearTooltipBlizzardState(tooltip)
 
     if tooltip.ClearLines then
         tooltip:ClearLines()
+    end
+
+    if tooltip.SetOwner then
+        pcall(tooltip.SetOwner, tooltip, UIParent, "ANCHOR_NONE")
     end
 
     if tooltip.SetScale then
         tooltip:SetScale(1)
     end
 
-    ClearTooltipTextRegions(tooltip)
     ApplyTooltipVisualStyle(tooltip)
-
-    if tooltip.Hide then
-        tooltip:Hide()
-    end
 end
 
 function QuestKing:GetTooltip()
@@ -491,11 +595,7 @@ function QuestKing:PrepareTooltip(owner, anchor)
 
     ResetPrivateTooltipState(tooltip)
 
-    if GameTooltip_SetDefaultAnchor then
-        GameTooltip_SetDefaultAnchor(tooltip, owner)
-    else
-        tooltip:SetOwner(owner, anchor or (self.options and self.options.tooltipAnchor) or "ANCHOR_RIGHT")
-    end
+    tooltip:SetOwner(owner, anchor or (self.options and self.options.tooltipAnchor) or "ANCHOR_RIGHT")
 
     if tooltip.ClearLines then
         tooltip:ClearLines()

@@ -1,8 +1,8 @@
 ## Interface: 120001, 40400, 11503
 ## Title: QuestKing
 ## Author: Orriginal: Barjack (up to WotLK) Current: Thrumbar
-## Version: 3.0.1
-## Notes: Objective Tracker Replacement (Retail, Cataclysm Classic, Classic Era compatible code paths)
+## Version: 3.0.4
+## Notes: Objective Tracker Replacement (Retail, Cataclysm Classic, Classic Era, Midnight-era taint-hardened code paths)
 ## SavedVariables: QuestKingDB
 ## SavedVariablesPerCharacter: QuestKingDBPerChar
 ## OptionalDeps: PetTracker

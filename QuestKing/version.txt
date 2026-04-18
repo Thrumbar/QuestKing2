@@ -1,3 +1,10 @@
+3.0.4
+- Hardened QuestKing against post-delve world-map hover failures where Blizzard widget, tooltip, and layout code received secret number values tainted by QuestKing.
+- Reduced arithmetic and comparison failures while hovering special assignments, delve entrances, world quests, and suppressed quest-offer pins.
+- Reworked QuestKing's private tooltip reset path so embedded item-tooltip state, inserted frames, progress bars, status bars, widget sets, and comparison state are cleared more safely before reuse.
+- Added secret-safe sanitization for scenario, delve, world quest, and bonus objective values before QuestKing stores, formats, compares, or reuses them.
+- Updated core/util.lua, buttons/scenario.lua, buttons/quest.lua, and buttons/bonusobjective.lua for the follow-up taint-hardening pass.
+
 3.0.3
 - Hardened QuestKing's private tooltip and reward-tooltip handling to reflect the QuestKing tooltip issue follow-up and reduce embedded-item tooltip reuse problems.
 - Restored Blizzard Objective Tracker suppression stability when opt.disableBlizzard = true after the tooltip-related fix path.
@@ -42,7 +49,6 @@
 - Raised the quest special item button above its owning watch entry and reapplied z-order during pooled reuse.
 - Restored completed-quest click handling for true auto-complete quests while preventing false complete popups for normal turn-in quests.
 - Improved bonus objective and achievement hover tooltips so they include objective/progress information more consistently.
-
 
 2.3.0
 - Refactored QuestKing for modern Blizzard API usage with Retail, Cataclysm Classic, and Classic Era compatible code paths.

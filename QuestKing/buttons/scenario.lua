@@ -8,7 +8,7 @@ local WatchButton = QuestKing.WatchButton
 local getObjectiveColor = QuestKing.GetObjectiveColor
 
 local format = string.format
-local tonumber = tonumber
+local raw_tonumber = tonumber
 local type = type
 local min = math.min
 local tinsert = table.insert
@@ -26,6 +26,55 @@ local C_QuestLog = C_QuestLog
 
 local enteringWorldQueue = {}
 local mouseHandlerScenario = {}
+
+local IsSecretValue = QuestKing.IsSecretValue or function()
+    return false
+end
+
+local IsSafeNumber = QuestKing.IsSafeNumber or function(value)
+    return type(value) == "number" and not IsSecretValue(value)
+end
+
+local SafeNumber = QuestKing.SafeNumber or function(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    if type(value) == "number" then
+        return value
+    end
+
+    local ok, numberValue = pcall(raw_tonumber, value)
+    if ok and type(numberValue) == "number" and not IsSecretValue(numberValue) then
+        return numberValue
+    end
+
+    return fallback
+end
+
+local SafeBoolean = QuestKing.SafeBoolean or function(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    return value and true or false
+end
+
+local SafeString = QuestKing.SafeString or function(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    if type(value) == "string" then
+        return value
+    end
+
+    return fallback
+end
+
+local function tonumber(value)
+    return SafeNumber(value, nil)
+end
 
 -- ---------------------------------------------------------------------
 -- Option helpers
@@ -63,19 +112,19 @@ local function SafeGetScenarioInfo()
     if C_ScenarioInfo and C_ScenarioInfo.GetScenarioInfo then
         local info = C_ScenarioInfo.GetScenarioInfo()
         if info then
-            return info.name,
-                info.currentStage or 0,
-                info.numStages or 0,
-                info.flags or 0,
-                info.hasBonusStep and true or false,
-                info.isBonusStepComplete and true or false,
-                info.isComplete and true or false,
-                info.xp or 0,
-                info.money or 0,
-                info.scenarioType,
-                info.areaID,
-                info.textureKit,
-                info.scenarioID
+            return SafeString(info.name, nil),
+                SafeNumber(info.currentStage, 0),
+                SafeNumber(info.numStages, 0),
+                SafeNumber(info.flags, 0),
+                SafeBoolean(info.hasBonusStep, false),
+                SafeBoolean(info.isBonusStepComplete, false),
+                SafeBoolean(info.isComplete, false),
+                SafeNumber(info.xp, 0),
+                SafeNumber(info.money, 0),
+                SafeNumber(info.scenarioType, nil),
+                SafeNumber(info.areaID, nil),
+                SafeString(info.textureKit, nil),
+                SafeNumber(info.scenarioID, nil)
         end
     end
 
@@ -94,19 +143,19 @@ local function SafeGetScenarioInfo()
             textureKit,
             scenarioID = C_Scenario.GetInfo()
 
-        return scenarioName,
-            currentStage or 0,
-            numStages or 0,
-            flags or 0,
-            hasBonusStep and true or false,
-            isBonusStepComplete and true or false,
-            completed and true or false,
-            xp or 0,
-            money or 0,
-            scenarioType,
-            areaID,
-            textureKit,
-            scenarioID
+        return SafeString(scenarioName, nil),
+            SafeNumber(currentStage, 0),
+            SafeNumber(numStages, 0),
+            SafeNumber(flags, 0),
+            SafeBoolean(hasBonusStep, false),
+            SafeBoolean(isBonusStepComplete, false),
+            SafeBoolean(completed, false),
+            SafeNumber(xp, 0),
+            SafeNumber(money, 0),
+            SafeNumber(scenarioType, nil),
+            SafeNumber(areaID, nil),
+            SafeString(textureKit, nil),
+            SafeNumber(scenarioID, nil)
     end
 
     return nil, 0, 0, 0, false, false, false, 0, 0, nil, nil, nil, nil
@@ -120,17 +169,17 @@ local function SafeGetScenarioStepInfo(stepIndex)
     if C_ScenarioInfo and C_ScenarioInfo.GetScenarioStepInfo then
         local info = C_ScenarioInfo.GetScenarioStepInfo(stepIndex)
         if info then
-            return info.title or nil,
-                info.description or nil,
-                tonumber(info.numCriteria) or 0,
-                info.stepFailed and true or false,
-                info.isBonusStep and true or false,
-                info.isForCurrentStepOnly and true or false,
+            return SafeString(info.title, nil),
+                SafeString(info.description, nil),
+                SafeNumber(info.numCriteria, 0),
+                SafeBoolean(info.stepFailed, false),
+                SafeBoolean(info.isBonusStep, false),
+                SafeBoolean(info.isForCurrentStepOnly, false),
                 (info.spells and #info.spells) or 0,
                 info.spells,
-                info.weightedProgress,
-                info.rewardQuestID,
-                info.widgetSetID
+                SafeNumber(info.weightedProgress, nil),
+                SafeNumber(info.rewardQuestID, nil),
+                SafeNumber(info.widgetSetID, nil)
         end
     end
 
@@ -148,17 +197,17 @@ local function SafeGetScenarioStepInfo(stepIndex)
             rewardQuestID,
             widgetSetID = C_Scenario.GetStepInfo(stepIndex)
 
-        return stageName,
-            stageDescription,
-            numCriteria or 0,
-            stepFailed and true or false,
-            isBonusStep and true or false,
-            isForCurrentStepOnly and true or false,
-            numSpells or 0,
+        return SafeString(stageName, nil),
+            SafeString(stageDescription, nil),
+            SafeNumber(numCriteria, 0),
+            SafeBoolean(stepFailed, false),
+            SafeBoolean(isBonusStep, false),
+            SafeBoolean(isForCurrentStepOnly, false),
+            SafeNumber(numSpells, 0),
             allSpellInfo,
-            weightedProgress,
-            rewardQuestID,
-            widgetSetID
+            SafeNumber(weightedProgress, nil),
+            SafeNumber(rewardQuestID, nil),
+            SafeNumber(widgetSetID, nil)
     end
 
     return nil, nil, 0, false, false, false, 0, nil, nil, nil, nil
@@ -192,7 +241,7 @@ local function GetScenarioFlags(flags, scenarioType)
     local dungeonDisplay = false
     local inWarfront = false
 
-    if type(scenarioType) == "number" then
+    if IsSafeNumber(scenarioType) then
         if LE_SCENARIO_TYPE_CHALLENGE_MODE and scenarioType == LE_SCENARIO_TYPE_CHALLENGE_MODE then
             inChallengeMode = true
         end
@@ -237,40 +286,40 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
     if C_ScenarioInfo and C_ScenarioInfo.GetCriteriaInfoByStep and stepIndex then
         local info = C_ScenarioInfo.GetCriteriaInfoByStep(stepIndex, criteriaIndex)
         if info then
-            return info.description or "",
+            return SafeString(info.description, ""),
                 info.criteriaType,
-                info.completed and true or false,
-                tonumber(info.quantity) or 0,
-                tonumber(info.totalQuantity) or 0,
-                info.flags,
-                info.assetID,
-                info.quantityString,
-                info.criteriaID,
-                tonumber(info.duration) or 0,
-                tonumber(info.elapsed) or 0,
-                info.failed and true or false,
-                info.isWeightedProgress and true or false,
-                info.isFormatted and true or false
+                SafeBoolean(info.completed, false),
+                SafeNumber(info.quantity, 0),
+                SafeNumber(info.totalQuantity, 0),
+                SafeNumber(info.flags, nil),
+                SafeNumber(info.assetID, nil),
+                SafeString(info.quantityString, nil),
+                SafeNumber(info.criteriaID, nil),
+                SafeNumber(info.duration, 0),
+                SafeNumber(info.elapsed, 0),
+                SafeBoolean(info.failed, false),
+                SafeBoolean(info.isWeightedProgress, false),
+                SafeBoolean(info.isFormatted, false)
         end
     end
 
     if C_ScenarioInfo and C_ScenarioInfo.GetCriteriaInfo then
         local info = C_ScenarioInfo.GetCriteriaInfo(criteriaIndex)
         if info then
-            return info.description or "",
+            return SafeString(info.description, ""),
                 info.criteriaType,
-                info.completed and true or false,
-                tonumber(info.quantity) or 0,
-                tonumber(info.totalQuantity) or 0,
-                info.flags,
-                info.assetID,
-                info.quantityString,
-                info.criteriaID,
-                tonumber(info.duration) or 0,
-                tonumber(info.elapsed) or 0,
-                info.failed and true or false,
-                info.isWeightedProgress and true or false,
-                info.isFormatted and true or false
+                SafeBoolean(info.completed, false),
+                SafeNumber(info.quantity, 0),
+                SafeNumber(info.totalQuantity, 0),
+                SafeNumber(info.flags, nil),
+                SafeNumber(info.assetID, nil),
+                SafeString(info.quantityString, nil),
+                SafeNumber(info.criteriaID, nil),
+                SafeNumber(info.duration, 0),
+                SafeNumber(info.elapsed, 0),
+                SafeBoolean(info.failed, false),
+                SafeBoolean(info.isWeightedProgress, false),
+                SafeBoolean(info.isFormatted, false)
         end
     end
 
@@ -290,19 +339,19 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
             isWeightedProgress = C_Scenario.GetCriteriaInfoByStep(stepIndex, criteriaIndex)
 
         if criteriaString then
-            return criteriaString or "",
+            return SafeString(criteriaString, ""),
                 criteriaType,
-                criteriaCompleted and true or false,
-                tonumber(quantity) or 0,
-                tonumber(totalQuantity) or 0,
-                flags,
-                assetID,
-                quantityString,
-                criteriaID,
-                tonumber(duration) or 0,
-                tonumber(elapsed) or 0,
-                criteriaFailed and true or false,
-                isWeightedProgress and true or false,
+                SafeBoolean(criteriaCompleted, false),
+                SafeNumber(quantity, 0),
+                SafeNumber(totalQuantity, 0),
+                SafeNumber(flags, nil),
+                SafeNumber(assetID, nil),
+                SafeString(quantityString, nil),
+                SafeNumber(criteriaID, nil),
+                SafeNumber(duration, 0),
+                SafeNumber(elapsed, 0),
+                SafeBoolean(criteriaFailed, false),
+                SafeBoolean(isWeightedProgress, false),
                 false
         end
     end
@@ -323,19 +372,19 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
             isWeightedProgress = C_Scenario.GetCriteriaInfo(criteriaIndex)
 
         if criteriaString then
-            return criteriaString or "",
+            return SafeString(criteriaString, ""),
                 criteriaType,
-                criteriaCompleted and true or false,
-                tonumber(quantity) or 0,
-                tonumber(totalQuantity) or 0,
-                flags,
-                assetID,
-                quantityString,
-                criteriaID,
-                tonumber(duration) or 0,
-                tonumber(elapsed) or 0,
-                criteriaFailed and true or false,
-                isWeightedProgress and true or false,
+                SafeBoolean(criteriaCompleted, false),
+                SafeNumber(quantity, 0),
+                SafeNumber(totalQuantity, 0),
+                SafeNumber(flags, nil),
+                SafeNumber(assetID, nil),
+                SafeString(quantityString, nil),
+                SafeNumber(criteriaID, nil),
+                SafeNumber(duration, 0),
+                SafeNumber(elapsed, 0),
+                SafeBoolean(criteriaFailed, false),
+                SafeBoolean(isWeightedProgress, false),
                 false
         end
     end
@@ -651,12 +700,13 @@ local function GetQuestLogIndexByIDCompat(questID)
 end
 
 local function GetScenarioRewardQuestID(stepIndex, rewardQuestIDFromStep)
+    rewardQuestIDFromStep = SafeNumber(rewardQuestIDFromStep, nil)
     if rewardQuestIDFromStep and rewardQuestIDFromStep ~= 0 then
         return rewardQuestIDFromStep
     end
 
     if C_Scenario and C_Scenario.GetBonusStepRewardQuestID and stepIndex then
-        local questID = C_Scenario.GetBonusStepRewardQuestID(stepIndex)
+        local questID = SafeNumber(C_Scenario.GetBonusStepRewardQuestID(stepIndex), nil)
         if questID and questID ~= 0 then
             return questID
         end
@@ -672,7 +722,8 @@ local function AddTooltipRewardText(tooltip, text, r, g, b)
 end
 
 local function AddTooltipMoneyText(tooltip, money)
-    if not tooltip or not money or money <= 0 then
+    money = SafeNumber(money, 0)
+    if not tooltip or money <= 0 then
         return
     end
 
@@ -852,7 +903,7 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
     stageDescription = stageDescription or ""
 
     local numCriteria = GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
-    local hasWeightedProgress = type(weightedProgress) == "number"
+    local hasWeightedProgress = IsSafeNumber(weightedProgress)
     local weightedPercent = hasWeightedProgress and ClampPercent(weightedProgress) or nil
 
     local stepFinished = false
@@ -961,14 +1012,14 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
             if line then
                 shownLines = shownLines + 1
 
-                local lastQuant = tonumber(line._lastQuant)
-                if lastQuant and quantity > lastQuant and not isNewStep then
+                local lastQuant = SafeNumber(line._lastQuant, nil)
+                if lastQuant and IsSafeNumber(quantity) and quantity > lastQuant and not isNewStep then
                     line:Flash()
                 end
-                line._lastQuant = quantity
+                line._lastQuant = IsSafeNumber(quantity) and quantity or nil
             end
 
-            if duration and elapsed and duration > 0 and elapsed < duration then
+            if IsSafeNumber(duration) and IsSafeNumber(elapsed) and duration > 0 and elapsed < duration then
                 local timerBar = button:AddTimerBar(duration, GetTime() - elapsed)
                 timerBar:SetStatusBarColor(
                     opt_colors.ScenarioTimer[1],
@@ -1138,7 +1189,7 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
         tooltip:AddLine(stageDescription, 1, 1, 1, 1)
     end
 
-    if type(weightedProgress) == "number" then
+    if IsSafeNumber(weightedProgress) then
         tooltip:AddLine(" ")
         tooltip:AddLine(format("Progress: %d%%", ClampPercent(weightedProgress)), 1, 1, 1, 1)
     end

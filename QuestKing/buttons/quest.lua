@@ -29,7 +29,7 @@ local format = string.format
 local match = string.match
 local sort = table.sort
 local floor = math.floor
-local tonumber = tonumber
+local raw_tonumber = tonumber
 local tostring = tostring
 local type = type
 local wipe = wipe
@@ -46,6 +46,47 @@ local QUEST_KIND = {
 }
 
 QuestKing.QUEST_KIND = QUEST_KIND
+
+local IsSecretValue = QuestKing.IsSecretValue or function()
+    return false
+end
+
+local IsSafeNumber = QuestKing.IsSafeNumber or function(value)
+    return type(value) == "number" and not IsSecretValue(value)
+end
+
+local SafeNumber = QuestKing.SafeNumber or function(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    if type(value) == "number" then
+        return value
+    end
+
+    local ok, numberValue = pcall(raw_tonumber, value)
+    if ok and type(numberValue) == "number" and not IsSecretValue(numberValue) then
+        return numberValue
+    end
+
+    return fallback
+end
+
+local SafeString = QuestKing.SafeString or function(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    if type(value) == "string" then
+        return value
+    end
+
+    return fallback
+end
+
+local function tonumber(value)
+    return SafeNumber(value, nil)
+end
 
 local QUEST_TAG_CAPSTONE_WORLD_QUEST = 286
 
@@ -222,12 +263,12 @@ local function QK_GetDifficultyLevel(info)
 
     if CQL and CQL.GetQuestDifficultyLevel and info.questID then
         local level = CQL.GetQuestDifficultyLevel(info.questID)
-        if type(level) == "number" then
+        if IsSafeNumber(level) then
             return level
         end
     end
 
-    if type(info.level) == "number" then
+    if IsSafeNumber(info.level) then
         return info.level
     end
 
@@ -296,8 +337,8 @@ local function QK_GetQuestObjectives(questID)
                         text = objective.text or "",
                         type = objective.type or objective.objectiveType,
                         finished = (objective.finished or objective.completed) and true or false,
-                        numFulfilled = objective.numFulfilled,
-                        numRequired = objective.numRequired,
+                        numFulfilled = SafeNumber(objective.numFulfilled, nil),
+                        numRequired = SafeNumber(objective.numRequired, nil),
                     }
                 end
             end
@@ -338,7 +379,7 @@ end
 
 local function QK_GetRequiredMoney(questID)
     if CQL and CQL.GetRequiredMoney and questID then
-        return CQL.GetRequiredMoney(questID) or 0
+        return SafeNumber(CQL.GetRequiredMoney(questID), 0) or 0
     end
 
     return 0
@@ -347,14 +388,14 @@ end
 local function QK_GetQuestPercent(questID)
     if CQL and CQL.GetQuestProgressBarPercent and questID then
         local percent = CQL.GetQuestProgressBarPercent(questID)
-        if type(percent) == "number" and percent >= 0 and percent <= 100 then
+        if IsSafeNumber(percent) and percent >= 0 and percent <= 100 then
             return percent
         end
     end
 
     if GetQuestProgressBarPercent and questID then
         local percent = GetQuestProgressBarPercent(questID)
-        if type(percent) == "number" and percent >= 0 and percent <= 100 then
+        if IsSafeNumber(percent) and percent >= 0 and percent <= 100 then
             return percent
         end
     end
@@ -606,12 +647,12 @@ function QuestKing:GetQuestObjectivesText(questID)
         if objective then
             local text = objective.text or ""
             local objectiveType = objective.type or objective.objectiveType
-            local numFulfilled = objective.numFulfilled
-            local numRequired = objective.numRequired
+            local numFulfilled = SafeNumber(objective.numFulfilled, nil)
+            local numRequired = SafeNumber(objective.numRequired, nil)
 
             if objectiveType == "progressbar" then
                 hasProgressBarObjective = true
-            elseif type(numRequired) == "number"
+            elseif IsSafeNumber(numRequired)
                 and numRequired > 0
                 and text ~= ""
                 and not QK_ObjectiveTextAlreadyHasProgress(text) then
@@ -631,7 +672,7 @@ function QuestKing:GetQuestObjectivesText(questID)
 
     local reqMoney = QK_GetRequiredMoney(questID)
     if reqMoney and reqMoney > 0 then
-        local have = GetMoney and GetMoney() or 0
+        local have = SafeNumber(GetMoney and GetMoney() or 0, 0)
         local done = have >= reqMoney
         local moneyText = GetMoneyString and GetMoneyString(reqMoney) or tostring(reqMoney)
 
@@ -747,19 +788,19 @@ local function AddQuestObjectiveLine(button, row, isQuestComplete, isNewQuest)
         line.right:SetAlpha(row.finished and COMPLETED_ALPHA or 1)
     end
 
-    if not row.finished and not isNewQuest and type(row.numFulfilled) == "number" then
-        local lastQuant = tonumber(line._lastQuant)
+    if not row.finished and not isNewQuest and IsSafeNumber(row.numFulfilled) then
+        local lastQuant = SafeNumber(line._lastQuant, nil)
         if lastQuant and row.numFulfilled > lastQuant and line.Flash then
             line:Flash()
         end
     end
 
-    line._lastQuant = row.numFulfilled
+    line._lastQuant = IsSafeNumber(row.numFulfilled) and row.numFulfilled or nil
     return line
 end
 
 local function AddQuestProgressBar(button, percent)
-    if not button or type(percent) ~= "number" then
+    if not button or not IsSafeNumber(percent) then
         return nil
     end
 
@@ -965,7 +1006,7 @@ function QuestKing:GetQuestDisplayData(questLogIndex)
     return {
         questID = questID,
         kind = kind,
-        title = info.title or UNKNOWN,
+        title = SafeString(info.title, UNKNOWN) or UNKNOWN,
         level = QK_GetDifficultyLevel(info),
         isComplete = QK_IsComplete(questID),
         tagBracket = self:GetQuestTagBracket(questID),
@@ -989,7 +1030,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
 
     local itemLink, itemTexture, itemCharges = QK_GetQuestLogSpecialItemInfo(questLogIndex)
     local itemAnchorSide = (opt.itemAnchorSide == "left") and "left" or "right"
-    local itemScale = tonumber(QuestKing.itemButtonScale) or tonumber(opt.itemButtonScale) or 1
+    local itemScale = SafeNumber(QuestKing.itemButtonScale, nil) or SafeNumber(opt.itemButtonScale, nil) or 1
     if itemScale <= 0 then
         itemScale = 1
     end
@@ -1006,7 +1047,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     button.questKind = data.kind
 
     local kindPrefix = GetKindPrefix(data.kind)
-    local title = data.title
+    local title = SafeString(data.title, UNKNOWN) or UNKNOWN
     local displayTitle = title
 
     if kindPrefix then
@@ -1049,7 +1090,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
 
     if button.level then
         local col = QK_GetDifficultyColor(data.level)
-        local lvlText = (data.level and data.level > 0) and ("[" .. tostring(data.level) .. "]") or ""
+        local lvlText = (IsSafeNumber(data.level) and data.level > 0) and ("[" .. tostring(data.level) .. "]") or ""
         local levelLeftInset = 4
 
         if itemInset > 0 and itemAnchorSide == "left" then
@@ -1086,7 +1127,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     end
 
     if data.hasProgressBarObjective
-        and type(data.percent) == "number"
+        and IsSafeNumber(data.percent)
         and (not data.isComplete or opt_showCompletedObjectives or opt_showCompletedObjectives == "always") then
         AddQuestProgressBar(button, data.percent)
         visibleObjectives = visibleObjectives + 1
@@ -1178,7 +1219,7 @@ function QuestKing:BuildQuestSortTable()
                     questID = questID,
                     questLogIndex = questLogIndex,
                     kind = self:GetQuestKind(questID, info),
-                    sortText = info.title or "",
+                    sortText = SafeString(info.title, "") or "",
                 }
             end
         end

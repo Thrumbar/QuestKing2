@@ -9,7 +9,7 @@ local getObjectiveColor = QuestKing.GetObjectiveColor
 
 local format = string.format
 local match = string.match
-local tonumber = tonumber
+local raw_tonumber = tonumber
 local type = type
 local pairs = pairs
 local UNKNOWN = UNKNOWN or "Unknown"
@@ -30,6 +30,43 @@ local dummyTaskQuestIndex
 local supersededObjectives
 
 local mouseHandlerBonusTask = {}
+
+
+local IsSecretValue = QuestKing.IsSecretValue or function()
+    return false
+end
+
+local IsSafeNumber = QuestKing.IsSafeNumber or function(value)
+    return type(value) == "number" and not IsSecretValue(value)
+end
+
+local SafeNumber = QuestKing.SafeNumber or function(value, default)
+    if IsSafeNumber(value) then
+        return value
+    end
+
+    if value == nil or IsSecretValue(value) then
+        return default
+    end
+
+    local coerced = raw_tonumber(value)
+    if type(coerced) == "number" and not IsSecretValue(coerced) then
+        return coerced
+    end
+
+    return default
+end
+
+local SafeString = QuestKing.SafeString or function(value, default)
+    if type(value) == "string" and not IsSecretValue(value) and value ~= "" then
+        return value
+    end
+    return default
+end
+
+local function tonumber(value)
+    return SafeNumber(value, nil)
+end
 
 -- -----------------------------------------------------------------------------
 -- Compatibility helpers
@@ -106,19 +143,19 @@ local function getQuestTitleAndLevelSafe(questID)
     local questIndex = getQuestLogIndexByIDSafe(questID)
     if questIndex then
         local taggedTitle, level = getQuestTaggedTitle(questIndex, true)
-        return taggedTitle or UNKNOWN, level or 0, questIndex
+        return SafeString(taggedTitle, UNKNOWN), SafeNumber(level, 0) or 0, questIndex
     end
 
     local fallbackTitle
     if C_QuestLog and C_QuestLog.GetTitleForQuestID then
-        fallbackTitle = C_QuestLog.GetTitleForQuestID(questID)
+        fallbackTitle = SafeString(C_QuestLog.GetTitleForQuestID(questID), nil)
     end
 
     if not fallbackTitle or fallbackTitle == "" then
         fallbackTitle = UNKNOWN
     end
 
-    return fallbackTitle, (UnitLevel and UnitLevel("player")) or 0, nil
+    return SafeString(fallbackTitle, UNKNOWN), SafeNumber((UnitLevel and UnitLevel("player")) or 0, 0) or 0, nil
 end
 
 local function getSuperTrackedQuestIDSafe()
@@ -140,30 +177,30 @@ end
 
 local function getRewardXPCompat(questID)
     if C_QuestLog and C_QuestLog.GetQuestRewardXP then
-        return C_QuestLog.GetQuestRewardXP(questID) or 0
+        return SafeNumber(C_QuestLog.GetQuestRewardXP(questID), 0) or 0
     end
     if GetQuestLogRewardXP then
-        return GetQuestLogRewardXP(questID) or 0
+        return SafeNumber(GetQuestLogRewardXP(questID), 0) or 0
     end
     return 0
 end
 
 local function getRewardMoneyCompat(questID)
     if C_QuestLog and C_QuestLog.GetQuestLogRewardMoney then
-        return C_QuestLog.GetQuestLogRewardMoney(questID) or 0
+        return SafeNumber(C_QuestLog.GetQuestLogRewardMoney(questID), 0) or 0
     end
     if GetQuestLogRewardMoney then
-        return GetQuestLogRewardMoney(questID) or 0
+        return SafeNumber(GetQuestLogRewardMoney(questID), 0) or 0
     end
     return 0
 end
 
 local function getNumRewardCurrenciesCompat(questID)
     if C_QuestLog and C_QuestLog.GetNumQuestLogRewardCurrencies then
-        return C_QuestLog.GetNumQuestLogRewardCurrencies(questID) or 0
+        return SafeNumber(C_QuestLog.GetNumQuestLogRewardCurrencies(questID), 0) or 0
     end
     if GetNumQuestLogRewardCurrencies then
-        return GetNumQuestLogRewardCurrencies(questID) or 0
+        return SafeNumber(GetNumQuestLogRewardCurrencies(questID), 0) or 0
     end
     return 0
 end
@@ -172,7 +209,7 @@ local function getRewardCurrencyInfoCompat(index, questID)
     if C_QuestLog and C_QuestLog.GetQuestLogRewardCurrencyInfo then
         local info = C_QuestLog.GetQuestLogRewardCurrencyInfo(index, questID)
         if info then
-            return info.name, info.texture, info.numItems
+            return SafeString(info.name, nil), SafeNumber(info.texture, nil), SafeNumber(info.numItems, nil)
         end
     end
     if GetQuestLogRewardCurrencyInfo then
@@ -183,10 +220,10 @@ end
 
 local function getNumRewardsCompat(questID)
     if C_QuestLog and C_QuestLog.GetNumQuestLogRewards then
-        return C_QuestLog.GetNumQuestLogRewards(questID) or 0
+        return SafeNumber(C_QuestLog.GetNumQuestLogRewards(questID), 0) or 0
     end
     if GetNumQuestLogRewards then
-        return GetNumQuestLogRewards(questID) or 0
+        return SafeNumber(GetNumQuestLogRewards(questID), 0) or 0
     end
     return 0
 end
@@ -195,7 +232,7 @@ local function getRewardInfoCompat(index, questID)
     if C_QuestLog and C_QuestLog.GetQuestLogRewardInfo then
         local info = C_QuestLog.GetQuestLogRewardInfo(index, questID)
         if info then
-            return info.name, info.texture, info.numItems, info.quality, info.isUsable
+            return SafeString(info.name, nil), SafeNumber(info.texture, nil), SafeNumber(info.numItems, nil), SafeNumber(info.quality, nil), info.isUsable and true or false
         end
     end
     if GetQuestLogRewardInfo then
@@ -209,10 +246,13 @@ local function getQuestObjectiveInfoCompat(questID, objectiveIndex, displayCompl
         local objectives = C_QuestLog.GetQuestObjectives(questID)
         if objectives and objectives[objectiveIndex] then
             local objective = objectives[objectiveIndex]
-            local text = objective.text or UNKNOWN
-            local objectiveType = objective.type or objective.objectiveType
+            local text = SafeString(objective.text, UNKNOWN)
+            local objectiveType = SafeString(objective.type or objective.objectiveType, nil)
             local isDone = (objective.finished or objective.completed) and true or false
             local displayAsObjective = objective.useFullPositionTooltip and true or false
+
+            objective.numFulfilled = SafeNumber(objective.numFulfilled, nil)
+            objective.numRequired = SafeNumber(objective.numRequired, nil)
 
             return text, objectiveType, isDone, displayAsObjective, objective
         end
@@ -227,10 +267,10 @@ end
 
 local function getQuestProgressBarPercentCompat(questID)
     if C_QuestLog and C_QuestLog.GetQuestProgressBarPercent then
-        return C_QuestLog.GetQuestProgressBarPercent(questID) or 0
+        return SafeNumber(C_QuestLog.GetQuestProgressBarPercent(questID), 0) or 0
     end
     if GetQuestProgressBarPercent then
-        return GetQuestProgressBarPercent(questID) or 0
+        return SafeNumber(GetQuestProgressBarPercent(questID), 0) or 0
     end
     return 0
 end
@@ -299,7 +339,7 @@ local function buildObjectiveDisplayText(desc, currentValue, maxValue, objective
         return desc, format(": %d/%d", currentValue, maxValue)
     end
 
-    if objectiveInfo and objectiveInfo.numRequired and objectiveInfo.numRequired > 0 and objectiveInfo.numFulfilled ~= nil then
+    if objectiveInfo and IsSafeNumber(objectiveInfo.numRequired) and objectiveInfo.numRequired > 0 and objectiveInfo.numFulfilled ~= nil then
         local fulfilled, required = normalizeObjectiveNumbers(objectiveInfo.numFulfilled, objectiveInfo.numRequired)
         if fulfilled and required then
             return desc, format(": %d/%d", fulfilled, required)
@@ -318,7 +358,7 @@ local function getObjectiveDisplayState(desc, isDone, objectiveInfo)
         end
     end
 
-    if objectiveInfo and objectiveInfo.numRequired and objectiveInfo.numRequired > 0 and objectiveInfo.numFulfilled ~= nil then
+    if objectiveInfo and IsSafeNumber(objectiveInfo.numRequired) and objectiveInfo.numRequired > 0 and objectiveInfo.numFulfilled ~= nil then
         local fulfilled, required = normalizeObjectiveNumbers(objectiveInfo.numFulfilled, objectiveInfo.numRequired)
         if fulfilled and required then
             return desc, fulfilled, required, clamp01(fulfilled / required), true
@@ -329,7 +369,9 @@ local function getObjectiveDisplayState(desc, isDone, objectiveInfo)
 end
 
 local function addMoneyTooltipLine(tooltip, money)
-    if not tooltip or not money or money <= 0 then
+    money = SafeNumber(money, 0) or 0
+
+    if not tooltip or money <= 0 then
         return
     end
 
@@ -342,9 +384,9 @@ end
 
 local function getQuestDifficultyColorSafe(level)
     if GetQuestDifficultyColor then
-        local color = GetQuestDifficultyColor(level or 0)
+        local color = GetQuestDifficultyColor(SafeNumber(level, 0) or 0)
         if color then
-            return color.r or 1, color.g or 0.82, color.b or 0
+            return SafeNumber(color.r, 1) or 1, SafeNumber(color.g, 0.82) or 0.82, SafeNumber(color.b, 0) or 0
         end
     end
 
@@ -381,7 +423,7 @@ local function addBonusObjectiveTooltipObjectives(tooltip, questID)
     end
 
     local _, _, numObjectives = getTaskInfoSafe(questID)
-    numObjectives = tonumber(numObjectives) or 0
+    numObjectives = SafeNumber(numObjectives, 0) or 0
 
     if numObjectives <= 0 then
         return 0
@@ -395,7 +437,7 @@ local function addBonusObjectiveTooltipObjectives(tooltip, questID)
         local desc, objectiveType, isDone, _, objectiveInfo = getQuestObjectiveInfoCompat(questID, i, false)
 
         if objectiveType == "progressbar" then
-            local percent = tonumber(getQuestProgressBarPercentCompat(questID)) or 0
+            local percent = SafeNumber(getQuestProgressBarPercentCompat(questID), 0) or 0
             if percent < 0 then
                 percent = 0
             elseif percent > 100 then
@@ -438,10 +480,10 @@ local function addBonusRewardTooltipLines(tooltip, questID)
     end
 
     local added = 0
-    local xp = getRewardXPCompat(questID)
-    local numQuestCurrencies = getNumRewardCurrenciesCompat(questID)
-    local numQuestRewards = getNumRewardsCompat(questID)
-    local money = getRewardMoneyCompat(questID)
+    local xp = SafeNumber(getRewardXPCompat(questID), 0) or 0
+    local numQuestCurrencies = SafeNumber(getNumRewardCurrenciesCompat(questID), 0) or 0
+    local numQuestRewards = SafeNumber(getNumRewardsCompat(questID), 0) or 0
+    local money = SafeNumber(getRewardMoneyCompat(questID), 0) or 0
 
     if xp > 0 or numQuestCurrencies > 0 or numQuestRewards > 0 or money > 0 then
         tooltip:AddLine(" ")
@@ -505,7 +547,7 @@ local function showBonusRewardTooltip(owner, questID)
     local r, g, b = getQuestDifficultyColorSafe(level)
     local hasQuestData = hasQuestDataSafe(questID)
 
-    tooltip:SetText(taggedTitle or UNKNOWN, r, g, b)
+    tooltip:SetText(SafeString(taggedTitle, UNKNOWN), r, g, b)
 
     if getSuperTrackedQuestIDSafe() == questID then
         tooltip:AddLine(QUEST_SUPER_TRACKED or "Super Tracked", 0.55, 0.82, 1.00)
@@ -603,7 +645,7 @@ function QuestKing:UpdateTrackerBonusObjectives()
             local supersededIndex = getSupersedingStep(bonusStepIndex)
             if supersededIndex then
                 local _, _, numCriteria, stepFailed = C_Scenario.GetStepInfo(bonusStepIndex)
-                numCriteria = tonumber(numCriteria) or 0
+                numCriteria = SafeNumber(numCriteria, 0) or 0
 
                 local completed = true
 
@@ -693,7 +735,7 @@ function setButtonToBonusTask(button, questID)
         end
 
         if objectiveType == "progressbar" then
-            local percent = tonumber(getQuestProgressBarPercentCompat(questID)) or 0
+            local percent = SafeNumber(getQuestProgressBarPercentCompat(questID), 0) or 0
             if percent < 0 then
                 percent = 0
             elseif percent > 100 then
@@ -713,12 +755,14 @@ function setButtonToBonusTask(button, questID)
             local r, g, b = getObjectiveColor(progress)
             local line = button:AddLine(format("  %s", leftText), rightText, r, g, b)
 
-            if line and currentValue then
-                local lastQuant = tonumber(line._lastQuant)
+            if line and IsSafeNumber(currentValue) then
+                local lastQuant = SafeNumber(line._lastQuant, nil)
                 if lastQuant and currentValue > lastQuant then
                     line:Flash()
                 end
                 line._lastQuant = currentValue
+            elseif line then
+                line._lastQuant = nil
             end
 
             visibleObjectives = visibleObjectives + 1
@@ -808,7 +852,7 @@ end
 
 function QuestKing:OnTaskTurnedIn(questID, xp, money)
     local button = WatchButton:GetKeyedRaw("bonus_task", questID)
-    QuestKing:AddReward(button, questID, xp or 0, money or 0)
+    QuestKing:AddReward(button, questID, SafeNumber(xp, 0) or 0, SafeNumber(money, 0) or 0)
     QuestKing:SetDummyTask(questID)
 end
 
@@ -831,7 +875,7 @@ function QuestKing:OnCriteriaComplete(id)
         local button = WatchButton:GetKeyedRaw("bonus_step", bonusStepIndex)
 
         local _, _, numCriteria = C_Scenario.GetStepInfo(bonusStepIndex)
-        numCriteria = tonumber(numCriteria) or 0
+        numCriteria = SafeNumber(numCriteria, 0) or 0
 
         local matchedCriteria = false
         local allCriteriaComplete = numCriteria > 0

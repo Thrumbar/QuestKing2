@@ -52,6 +52,7 @@ opt.enableItemPopups = true
 opt.showCompletedObjectives = false
 opt.hideSupersedingObjectives = true
 opt.allowDrag = true
+-- Uses QuestKing's safer root-only Blizzard tracker suppression.
 opt.disableBlizzard = true
 opt.enablePetTrackerCompatibility = false
 
