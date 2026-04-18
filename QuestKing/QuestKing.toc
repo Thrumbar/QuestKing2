@@ -1,7 +1,7 @@
 ## Interface: 120001, 40400, 11503
 ## Title: QuestKing
-## Author: Barjack, OpenAI refactor pass
-## Version: 2.3.0
+## Author: Orriginal: Barjack (up to WotLK) Current: Thrumbar
+## Version: 3.0.1
 ## Notes: Objective Tracker Replacement (Retail, Cataclysm Classic, Classic Era compatible code paths)
 ## SavedVariables: QuestKingDB
 ## SavedVariablesPerCharacter: QuestKingDBPerChar

@@ -18,6 +18,7 @@ local match = string.match
 local modf = math.modf
 local select = select
 local tostring = tostring
+local type = type
 
 local CQL = C_QuestLog
 
@@ -191,51 +192,80 @@ function QuestKing.MatchObjectiveRep(objectiveDesc)
 end
 
 local blizzardTrackerVisualHooksInstalled = false
+local blizzardTrackerRefreshQueued = false
 
-local function ApplyBlizzardTrackerVisualState()
-    if not ObjectiveTrackerFrame then
-        return
-    end
-
-    if opt.disableBlizzard then
-        if ObjectiveTrackerFrame.SetAlpha then
-            ObjectiveTrackerFrame:SetAlpha(0)
-        end
-        if ObjectiveTrackerFrame.EnableMouse then
-            ObjectiveTrackerFrame:EnableMouse(false)
-        end
-        if ObjectiveTrackerFrame.BlocksFrame and ObjectiveTrackerFrame.BlocksFrame.SetAlpha then
-            ObjectiveTrackerFrame.BlocksFrame:SetAlpha(0)
-        end
-        if ScenarioBlocksFrame and ScenarioBlocksFrame.SetAlpha then
-            ScenarioBlocksFrame:SetAlpha(0)
-        end
-        if ObjectiveTrackerBlocksFrame and ObjectiveTrackerBlocksFrame.SetAlpha then
-            ObjectiveTrackerBlocksFrame:SetAlpha(0)
-        end
-    else
-        if ObjectiveTrackerFrame.SetAlpha then
-            ObjectiveTrackerFrame:SetAlpha(1)
-        end
-        if ObjectiveTrackerFrame.EnableMouse then
-            ObjectiveTrackerFrame:EnableMouse(true)
-        end
-        if ObjectiveTrackerFrame.BlocksFrame and ObjectiveTrackerFrame.BlocksFrame.SetAlpha then
-            ObjectiveTrackerFrame.BlocksFrame:SetAlpha(1)
-        end
-        if ScenarioBlocksFrame and ScenarioBlocksFrame.SetAlpha then
-            ScenarioBlocksFrame:SetAlpha(1)
-        end
-        if ObjectiveTrackerBlocksFrame and ObjectiveTrackerBlocksFrame.SetAlpha then
-            ObjectiveTrackerBlocksFrame:SetAlpha(1)
-        end
+local function SafeEnableMouse(frame, enabled)
+    if frame and frame.EnableMouse then
+        frame:EnableMouse(enabled and true or false)
     end
 end
 
-function QuestKing:DisableBlizzard()
-    -- Taint-safe visual suppression only.
-    -- Do not unregister, reparent, or hard-hide Blizzard tracker frames.
+local function SafeSetAlpha(frame, alpha)
+    if frame and frame.SetAlpha then
+        frame:SetAlpha(alpha)
+    end
+end
+
+local function SafeSetIgnoreParentAlpha(frame, enabled)
+    if frame and frame.SetIgnoreParentAlpha then
+        pcall(frame.SetIgnoreParentAlpha, frame, enabled and true or false)
+    end
+end
+
+local function ShouldHideBlizzardTracker()
+    return opt.disableBlizzard and true or false
+end
+
+local function GetBlizzardTrackerRootFrames()
+    return {
+        ObjectiveTrackerFrame,
+        ObjectiveTrackerFrame and ObjectiveTrackerFrame.BlocksFrame or nil,
+        ObjectiveTrackerBlocksFrame,
+        ScenarioBlocksFrame,
+        WatchFrame,
+    }
+end
+
+local function ApplySuppressionToTrackerRoot(frame, hide)
+    if not frame then
+        return
+    end
+
+    SafeSetIgnoreParentAlpha(frame, false)
+    SafeSetAlpha(frame, hide and 0 or 1)
+    SafeEnableMouse(frame, not hide)
+end
+
+local function ApplyBlizzardTrackerVisualState()
+    local hide = ShouldHideBlizzardTracker()
+    local trackerFrames = GetBlizzardTrackerRootFrames()
+
+    for i = 1, #trackerFrames do
+        ApplySuppressionToTrackerRoot(trackerFrames[i], hide)
+    end
+end
+
+local function RunQueuedBlizzardTrackerVisualRefresh()
+    blizzardTrackerRefreshQueued = false
     ApplyBlizzardTrackerVisualState()
+end
+
+local function ScheduleBlizzardTrackerVisualRefresh()
+    if blizzardTrackerRefreshQueued then
+        return
+    end
+
+    if not (C_Timer and C_Timer.After) then
+        ApplyBlizzardTrackerVisualState()
+        return
+    end
+
+    blizzardTrackerRefreshQueued = true
+    C_Timer.After(0, RunQueuedBlizzardTrackerVisualRefresh)
+end
+
+function QuestKing:DisableBlizzard()
+    ScheduleBlizzardTrackerVisualRefresh()
 
     if blizzardTrackerVisualHooksInstalled or not hooksecurefunc then
         return
@@ -244,23 +274,31 @@ function QuestKing:DisableBlizzard()
     blizzardTrackerVisualHooksInstalled = true
 
     if ObjectiveTrackerFrame then
-        hooksecurefunc(ObjectiveTrackerFrame, "Show", ApplyBlizzardTrackerVisualState)
+        hooksecurefunc(ObjectiveTrackerFrame, "Show", ScheduleBlizzardTrackerVisualRefresh)
+    end
+
+    if WatchFrame and WatchFrame ~= ObjectiveTrackerFrame then
+        hooksecurefunc(WatchFrame, "Show", ScheduleBlizzardTrackerVisualRefresh)
     end
 
     if ObjectiveTracker_Update then
-        hooksecurefunc("ObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
+        hooksecurefunc("ObjectiveTracker_Update", ScheduleBlizzardTrackerVisualRefresh)
     end
 
     if BonusObjectiveTracker_Update then
-        hooksecurefunc("BonusObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
+        hooksecurefunc("BonusObjectiveTracker_Update", ScheduleBlizzardTrackerVisualRefresh)
     end
 
     if ScenarioObjectiveTracker_Update then
-        hooksecurefunc("ScenarioObjectiveTracker_Update", ApplyBlizzardTrackerVisualState)
+        hooksecurefunc("ScenarioObjectiveTracker_Update", ScheduleBlizzardTrackerVisualRefresh)
     end
 
     if WatchFrame_Update then
-        hooksecurefunc("WatchFrame_Update", ApplyBlizzardTrackerVisualState)
+        hooksecurefunc("WatchFrame_Update", ScheduleBlizzardTrackerVisualRefresh)
+    end
+
+    if ObjectiveTrackerManager and ObjectiveTrackerManager.Update then
+        hooksecurefunc(ObjectiveTrackerManager, "Update", ScheduleBlizzardTrackerVisualRefresh)
     end
 end
 
@@ -377,22 +415,9 @@ local function ApplyTooltipVisualStyle(tooltip)
     end
 end
 
-local function ResetPrivateTooltipState(tooltip)
+local function ClearTooltipTextRegions(tooltip)
     if not tooltip then
         return
-    end
-
-    tooltip:Hide()
-    tooltip:ClearLines()
-
-    if tooltip.SetScale then
-        tooltip:SetScale(1)
-    end
-
-    ApplyTooltipVisualStyle(tooltip)
-
-    if tooltip.StatusBar and tooltip.StatusBar.Hide then
-        tooltip.StatusBar:Hide()
     end
 
     local name = tooltip:GetName()
@@ -409,6 +434,35 @@ local function ResetPrivateTooltipState(tooltip)
                 right:SetText("")
             end
         end
+    end
+end
+
+local function ResetPrivateTooltipState(tooltip)
+    if not tooltip then
+        return
+    end
+
+    if tooltip.StatusBar and tooltip.StatusBar.Hide then
+        tooltip.StatusBar:Hide()
+    end
+
+    if tooltip.model and tooltip.model.Hide then
+        tooltip.model:Hide()
+    end
+
+    if tooltip.ClearLines then
+        tooltip:ClearLines()
+    end
+
+    if tooltip.SetScale then
+        tooltip:SetScale(1)
+    end
+
+    ClearTooltipTextRegions(tooltip)
+    ApplyTooltipVisualStyle(tooltip)
+
+    if tooltip.Hide then
+        tooltip:Hide()
     end
 end
 
@@ -443,7 +497,9 @@ function QuestKing:PrepareTooltip(owner, anchor)
         tooltip:SetOwner(owner, anchor or (self.options and self.options.tooltipAnchor) or "ANCHOR_RIGHT")
     end
 
-    tooltip:ClearLines()
+    if tooltip.ClearLines then
+        tooltip:ClearLines()
+    end
 
     local scale = self.options and self.options.tooltipScale
     if type(scale) == "number" and scale > 0 and tooltip.SetScale then

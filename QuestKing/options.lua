@@ -42,10 +42,11 @@ opt.dbAllowTrackerAlpha = true          -- allow persisting alpha in SVs
 -- Behavior toggles
 ----------------------------------------------------------------------
 
--- If true, QuestKing will attempt to suppress Blizzard's Objective Tracker.
--- Warning: aggressive suppression of Blizzard tracker/map UI can taint protected
--- code paths on modern Retail clients. Keep this false unless you are doing
--- targeted testing and know the risk.
+-- If true, QuestKing will suppress Blizzard's tracker roots with a conservative,
+-- root-only visual pass. This intentionally avoids recursive child-region
+-- suppression and leaves world map tooltip / widget internals alone.
+--
+-- This setting is for the Blizzard tracker itself, not World Map quest/POI pins.
 opt.disableBlizzard = false
 
 -- If true, QuestKing will enable PetTracker integration helpers.

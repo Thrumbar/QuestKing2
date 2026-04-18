@@ -1,3 +1,62 @@
+3.0.3
+- Hardened QuestKing's private tooltip and reward-tooltip handling to reflect the QuestKing tooltip issue follow-up and reduce embedded-item tooltip reuse problems.
+- Restored Blizzard Objective Tracker suppression stability when opt.disableBlizzard = true after the tooltip-related fix path.
+- Fixed the core/util.lua regression where Blizzard tracker suppression attempted to call missing helper functions such as SafeSetAlpha, causing a nil-function runtime error.
+- Restored the missing local safe-helper wrappers used by the visual-only tracker suppression flow before first use.
+- Kept the safer visual-only Blizzard tracker suppression direction instead of returning to destructive tracker manipulation.
+
+3.0.2
+- Merged the standalone QuestKingSounds addon into the main QuestKing package.
+- Added core/sounds_options.lua to hold integrated quest sound defaults under the main QuestKing options table.
+- Added core/sounds.lua to provide integrated quest sound handling inside the main addon.
+- Updated the sound logic to prefer C_QuestLog APIs with legacy fallbacks.
+- Reworked quest sound refresh behavior to use queued state comparison instead of relying only on the older narrow watch-update model.
+- Preserved objective progress, objective complete, and quest complete sounds.
+- Preserved the optional quest-complete UI message.
+- The separate QuestKingSounds addon should now be removed or disabled to avoid duplicate sound playback.
+
+3.0.1
+- Fixed QuestKing's private tooltip reset so embedded item-tooltip state, shopping/comparison tooltips, and stored item metadata are cleared before reuse.
+- Reduced world-map quest reward tooltip taint risk by resetting QuestKing-owned tooltip item state more aggressively.
+- Restored Blizzard Objective Tracker hiding when opt.disableBlizzard = true by reapplying safe visual suppression after Blizzard tracker refreshes.
+- Prevented visually hidden Blizzard tracker children from reappearing after map, quest, or tracker updates.
+- Kept the safer visual-only suppression path instead of returning to destructive Objective Tracker manipulation.
+- Kept options.lua defaulted to opt.disableBlizzard = false while allowing options_override.lua to opt into the suppression behavior.
+
+3.0.0
+- Massive modernization pass for QuestKing for Retail, Classic, Cataclysm Classic, and Midnight-era clients.
+- Reworked the options system with safer override guidance, updated defaults, improved layout controls, alpha/scale support, drag presets, tooltip settings, and a documented color palette.
+- Rebuilt quest/event compatibility handling with safer C_QuestLog-based wrappers and legacy fallbacks.
+- Fixed auto-watch handling for QUEST_ACCEPTED across client variants, including task quests and delayed quest-data retries.
+- Refactored the tracker core, saved variables, drag handling, layout flow, background handling, and mode/collapse controls.
+- Expanded slash commands with help, lock, origin, alpha, scale, reset, and resetall.
+- Improved quest classification for normal quests, campaign quests, world quests, special assignments, prey quests, and task content.
+- Updated tracked achievement handling for Content Tracking and modern achievement APIs, with safer tooltip behavior.
+- Improved reward popups/animations and pooled reward frame handling for XP, money, currencies, and item rewards.
+- Improved scenario, dungeon, raid, and challenge-content tracker handling, including scenario criteria visibility refreshes and better world-entry / completion syncing.
+- Added improved supertracking and quest watch handling, including closer compatibility with current C_SuperTrack and C_QuestLog flows.
+- Added customizable tracker presentation options, including advanced background support, drag / preset positioning, tooltip anchor options, and toggle button border control.
+- Added quest popup and quest-start item tracking improvements with container compatibility updates, including C_Container support and reagent bag awareness.
+- Added taint-safer compatibility behavior by keeping Blizzard tracker suppression visual-only and replacing the old PetTracker reparent hack with a conservative opt-in compatibility stub.
+- Improved pooled UI components for watch buttons, item buttons, timer bars, progress bars, reward displays, and popup rendering.
+- Raised the quest special item button above its owning watch entry and reapplied z-order during pooled reuse.
+- Restored completed-quest click handling for true auto-complete quests while preventing false complete popups for normal turn-in quests.
+- Improved bonus objective and achievement hover tooltips so they include objective/progress information more consistently.
+
+
+2.3.0
+- Refactored QuestKing for modern Blizzard API usage with Retail, Cataclysm Classic, and Classic Era compatible code paths.
+- Updated TOC metadata and addon structure for the new modular layout (core, ui, and buttons files) with SavedVariables and per-character settings.
+- Reworked quest tracking to support normal quests, campaign quests, watched world quests, special assignments, prey quests, and task / bonus objective quests with modern API fallbacks.
+- Added validated scenario, dungeon, raid, and challenge-content tracker handling, including scenario criteria visibility refreshes and better world-entry / completion syncing.
+- Added tracked achievement support using modern content-tracking and achievement APIs, with legacy fallbacks where available.
+- Added improved supertracking and quest watch handling, including closer compatibility with current C_SuperTrack and C_QuestLog flows.
+- Added slash command controls for mode switching, tracker alpha, tracker scale, drag locking, drag origin reset, and saved-variable resets.
+- Added customizable tracker presentation options, including advanced background support, drag / preset positioning, tooltip anchor options, and toggle button border control.
+- Added quest popup and quest-start item tracking improvements with container compatibility updates, including C_Container support and reagent bag awareness.
+- Added taint-safer compatibility behavior by keeping Blizzard tracker suppression visual-only and replacing the old PetTracker reparent hack with a conservative opt-in compatibility stub.
+- Improved pooled UI components for watch buttons, item buttons, timer bars, progress bars, reward displays, and popup rendering.
+
 2.2.4
 - Fixed a bug with PetTracker integration where the pet zone tracker would frequently reappear even when disabled.
 - Added an option to hide the border of the mode toggle buttons (opt.hideToggleButtonBorder, false by default).

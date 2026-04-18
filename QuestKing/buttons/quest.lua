@@ -382,9 +382,40 @@ local function QK_GetActivePreyQuest()
     return nil
 end
 
-local function QK_IsCampaignQuest(questID)
+local function QK_IsCampaignQuest(questID, info)
     if not questID then
         return false
+    end
+
+    local function IsCampaignFromInfo(questInfo)
+        if type(questInfo) ~= "table" then
+            return nil
+        end
+
+        if questInfo.isCampaign ~= nil then
+            return questInfo.isCampaign and true or false
+        end
+
+        local campaignID = tonumber(questInfo.campaignID)
+        if campaignID and campaignID > 0 then
+            return true
+        end
+
+        return false
+    end
+
+    local isCampaign = IsCampaignFromInfo(info)
+    if isCampaign ~= nil then
+        return isCampaign
+    end
+
+    local questLogIndex = QK_GetQuestLogIndexByID(questID)
+    if questLogIndex then
+        local liveInfo = QK_GetInfo(questLogIndex)
+        isCampaign = IsCampaignFromInfo(liveInfo)
+        if isCampaign ~= nil then
+            return isCampaign
+        end
     end
 
     if C_CampaignInfo and C_CampaignInfo.IsCampaignQuest then
@@ -485,7 +516,7 @@ function QuestKing:GetQuestKind(questID, info)
         return QUEST_KIND.WORLD_QUEST
     end
 
-    if QK_IsCampaignQuest(questID) then
+    if QK_IsCampaignQuest(questID, info) then
         return QUEST_KIND.CAMPAIGN
     end
 
