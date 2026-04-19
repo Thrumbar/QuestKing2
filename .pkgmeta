@@ -1,0 +1,9 @@
+package-as: QuestKing
+manual-changelog: CHANGELOG.md
+license-output: LICENSE.txt
+enable-nolib-creation: no
+ignore:
+  - .github
+  - docs
+  - tools
+  - tests
