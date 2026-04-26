@@ -1,7 +1,14 @@
 package-as: QuestKing
-manual-changelog: CHANGELOG.md
-license-output: LICENSE.txt
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
 enable-nolib-creation: no
+
+move-folders:
+  QuestKing: QuestKing
+
 ignore:
   - .github
   - docs
