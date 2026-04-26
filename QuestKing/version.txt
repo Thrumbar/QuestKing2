@@ -1,3 +1,8 @@
+3.0.5
+- Added a Retail/Midnight guard for Blizzard TextWithState UIWidget setup so secret GetStringHeight/GetStringWidth values cannot crash map POI tooltips while execution is tainted by QuestKing.
+- Catches Blizzard_UIWidgetTemplateTextWithState setup failures and falls back to sanitized width, height, padding, scale, and text setup values.
+- Targets the reported Story Variant tooltip crash path from AreaPoiUtil -> GameTooltip_AddWidgetSet -> UIWidgetTemplateTextWithStateMixin:Setup.
+
 3.0.4
 - Hardened QuestKing against post-delve world-map hover failures where Blizzard widget, tooltip, and layout code received secret number values tainted by QuestKing.
 - Reduced arithmetic and comparison failures while hovering special assignments, delve entrances, world quests, and suppressed quest-offer pins.
@@ -98,3 +103,12 @@
 
 2.0.0
 - Massive re-write for WoD.
+
+## 3.0.6 - Current Warcraft TOC metadata update
+
+- Updated `QuestKing.toc` interface metadata for current Warcraft clients.
+- Retail / Midnight: added 120005 for WoW 12.0.5.
+- Preserved 120001 for earlier Midnight 12.0.1 compatibility.
+- Updated Classic-era compatibility metadata to include 11508.
+- Updated Classic progression metadata to include MoP Classic 50503, Cataclysm Classic 40402, and TBC Anniversary 20505.
+- No Lua runtime logic was changed in this update.

@@ -96,6 +96,22 @@ After this merge, the old standalone `QuestKingSounds` addon should be removed o
 
 ## Changelog
 
+## 3.0.5
+
+### Fixed
+- Added a targeted Retail/Midnight guard around Blizzard's `UIWidgetTemplateTextWithStateMixin:Setup` path.
+- Prevented the reported map POI tooltip crash where Blizzard attempted arithmetic on a secret `textHeight` number while execution was tainted by QuestKing.
+- Preserved Blizzard's original setup path first, then falls back only when the original widget setup errors.
+
+### Changed
+- Added sanitized fallback handling for TextWithState widget width, height, bottom padding, scale, tooltip location, order index, layout direction, and text setup.
+- Kept the guard Mainline-only so Classic Era and Cataclysm Classic remain unaffected.
+
+### Files changed
+- `core/util.lua`
+- `version.txt`
+- `REFRACTOR_NOTES.md`
+
 ## 3.0.4
 
 ### Fixed
@@ -203,3 +219,17 @@ After this merge, the old standalone `QuestKingSounds` addon should be removed o
 ## Practical note
 
 This package remains a strong merged baseline for Retail, Cataclysm Classic, Classic Era, and Midnight-era testing. Midnight-specific secure and taint restrictions are still partly dependent on runtime Blizzard behavior, so in-game validation is still recommended after each protected-UI or tooltip-related change.
+
+## 3.0.6 - Current Warcraft TOC metadata update
+
+### Changed
+
+- Updated `QuestKing.toc` from:
+  - `## Interface: 120001, 40400, 11503`
+- Updated `QuestKing.toc` to:
+  - `## Interface: 120005, 120001, 50503, 40402, 20505, 11508`
+
+### Notes
+
+- This is a metadata-only update.
+- No Lua execution behavior, frame code, secure hooks, tooltip guards, or ObjectiveTracker suppression logic was changed.

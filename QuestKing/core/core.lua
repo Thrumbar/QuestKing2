@@ -1,54 +1,176 @@
 local addonName, QuestKing = ...
 
-local opt = QuestKing.options or {}
-local opt_colors = (opt and opt.colors) or {
+local Tracker = QuestKing.Tracker or CreateFrame("Frame")
+local WatchButton = QuestKing.WatchButton or {}
+
+local _G = _G
+local C_QuestLog = C_QuestLog
+local C_ContentTracking = C_ContentTracking
+local C_Scenario = C_Scenario
+local C_Timer = C_Timer
+local Enum = Enum
+
+local format = string.format
+local tonumber = tonumber
+local tostring = tostring
+local type = type
+local pairs = pairs
+
+local options = QuestKing.options or {}
+local colors = (options and options.colors) or {
     TrackerTitlebarText = { 1, 1, 1 },
     TrackerTitlebarTextDimmed = { 0.7, 0.7, 0.7 },
 }
 
-local WatchButton = QuestKing.WatchButton or {}
-local Tracker = QuestKing.Tracker or CreateFrame("Frame")
+local updateStateFrame = CreateFrame("Frame")
 
-local format = string.format
-local pairs = pairs
-local type = type
-local tostring = tostring
-local tonumber = tonumber
-local unpack = table.unpack or unpack
-
-local UpdateCheckFrame = CreateFrame("Frame", "QuestKing_UpdateCheckFrame")
-
-local checkCombat = false
-local checkPendingPlayerLevel = false
 local initialized = false
 local trackingHooksInstalled = false
+local combatUpdateQueued = false
+local pendingPlayerLevel = nil
+
+local trackerUpdatePending = false
+local trackerUpdatePendingForceBuild = false
+local trackerUpdatePendingPostCombat = false
+local trackerUpdateFlushQueued = false
 
 local function IsInCombatLockdownSafe()
-    return InCombatLockdown and InCombatLockdown()
+    return type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() or false
 end
 
-local function SafeCall(obj, method, ...)
-    local fn = obj and obj[method]
+local function SafeCallMethod(target, method, ...)
+    if type(target) ~= "table" then
+        return false, nil
+    end
+
+    local fn = target[method]
     if type(fn) ~= "function" then
+        return false, nil
+    end
+
+    local ok, result = pcall(fn, target, ...)
+    if ok then
+        return true, result
+    end
+
+    if _G.geterrorhandler then
+        _G.geterrorhandler()(result)
+    end
+
+    return true, nil
+end
+
+local function SafeHookTableMethod(target, methodName, callback)
+    if not hooksecurefunc or type(target) ~= "table" or type(methodName) ~= "string" or type(callback) ~= "function" then
+        return false
+    end
+
+    local method = target[methodName]
+    if type(method) ~= "function" then
+        return false
+    end
+
+    local ok = pcall(hooksecurefunc, target, methodName, callback)
+    return ok and true or false
+end
+
+local function SafeHookGlobal(functionName, callback)
+    if not hooksecurefunc or type(functionName) ~= "string" or functionName == "" or type(callback) ~= "function" then
+        return false
+    end
+
+    if type(_G[functionName]) ~= "function" then
+        return false
+    end
+
+    local ok = pcall(hooksecurefunc, functionName, callback)
+    return ok and true or false
+end
+
+local function GetTrackerModeButton()
+    if Tracker and Tracker.modeButton and Tracker.modeButton.label then
+        return Tracker.modeButton
+    end
+
+    return _G.QuestKing_TrackerModeButton
+end
+
+local function GetTrackerMinimizeButton()
+    if Tracker and Tracker.minimizeButton and Tracker.minimizeButton.label then
+        return Tracker.minimizeButton
+    end
+
+    return _G.QuestKing_TrackerMinimizeButton
+end
+
+local function SetModeButtonCombatColor(inCombat)
+    local modeButton = GetTrackerModeButton()
+    if not (modeButton and modeButton.label and modeButton.label.SetTextColor) then
+        return
+    end
+
+    if inCombat then
+        modeButton.label:SetTextColor(1, 0, 0)
+        return
+    end
+
+    local normalColor = colors.TrackerTitlebarText or { 1, 1, 1 }
+    modeButton.label:SetTextColor(normalColor[1] or 1, normalColor[2] or 1, normalColor[3] or 1)
+end
+
+local function MarkQuestFresh(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return
+    end
+
+    QuestKing.newlyAddedQuests = QuestKing.newlyAddedQuests or {}
+    QuestKing.newlyAddedQuests[questID] = true
+end
+
+local function ResolveQuestIDFromIndexOrID(value)
+    if type(value) ~= "number" or value <= 0 then
         return nil
     end
 
-    local ok, result = pcall(fn, obj, ...)
-    if ok then
-        return result
+    if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+        local ok, questLogIndex = pcall(C_QuestLog.GetLogIndexForQuestID, value)
+        if ok and type(questLogIndex) == "number" and questLogIndex > 0 then
+            return value
+        end
+    end
+
+    if C_QuestLog and C_QuestLog.GetQuestIDForLogIndex then
+        local ok, questID = pcall(C_QuestLog.GetQuestIDForLogIndex, value)
+        if ok and type(questID) == "number" and questID > 0 then
+            return questID
+        end
+    end
+
+    if C_QuestLog and C_QuestLog.GetInfo then
+        local ok, info = pcall(C_QuestLog.GetInfo, value)
+        if ok and type(info) == "table" and type(info.questID) == "number" and info.questID > 0 then
+            return info.questID
+        end
+    end
+
+    if type(_G.GetQuestLogTitle) == "function" then
+        local ok, _, _, _, _, _, _, _, questID = pcall(_G.GetQuestLogTitle, value)
+        if ok and type(questID) == "number" and questID > 0 then
+            return questID
+        end
     end
 
     return nil
 end
 
-local function SafeGetTrackedAchievementCount()
+local function GetTrackedAchievementCount()
     if QuestKing.SyncTrackedAchievementCacheFromAPIs then
-        local cache = QuestKing:SyncTrackedAchievementCacheFromAPIs()
+        local _, cache = SafeCallMethod(QuestKing, "SyncTrackedAchievementCacheFromAPIs")
         local count = 0
 
         if type(cache) == "table" then
-            for id, tracked in pairs(cache) do
-                if tracked and type(id) == "number" then
+            for achievementID, tracked in pairs(cache) do
+                if tracked and type(achievementID) == "number" then
                     count = count + 1
                 end
             end
@@ -59,8 +181,8 @@ local function SafeGetTrackedAchievementCount()
 
     if type(QuestKing.trackedAchievements) == "table" then
         local count = 0
-        for id, tracked in pairs(QuestKing.trackedAchievements) do
-            if tracked and type(id) == "number" then
+        for achievementID, tracked in pairs(QuestKing.trackedAchievements) do
+            if tracked and type(achievementID) == "number" then
                 count = count + 1
             end
         end
@@ -70,291 +192,141 @@ local function SafeGetTrackedAchievementCount()
     return 0
 end
 
-local function SafeGetMaxQuests()
+local function GetMaxQuests()
     if C_QuestLog and C_QuestLog.GetMaxNumQuests then
-        local count = C_QuestLog.GetMaxNumQuests()
-        if type(count) == "number" and count > 0 then
+        local ok, count = pcall(C_QuestLog.GetMaxNumQuests)
+        if ok and type(count) == "number" and count > 0 then
             return count
         end
     end
 
-    return MAX_QUESTS or 25
+    return _G.MAX_QUESTS or 25
 end
 
-local function SafeGetNumQuestWatches()
+local function GetNumQuestWatches()
     if C_QuestLog and C_QuestLog.GetNumQuestWatches then
-        return C_QuestLog.GetNumQuestWatches() or 0
+        local ok, count = pcall(C_QuestLog.GetNumQuestWatches)
+        if ok and type(count) == "number" then
+            return count
+        end
     end
 
-    if GetNumQuestWatches then
-        return GetNumQuestWatches() or 0
+    if type(_G.GetNumQuestWatches) == "function" then
+        local ok, count = pcall(_G.GetNumQuestWatches)
+        if ok and type(count) == "number" then
+            return count
+        end
     end
 
     return 0
 end
 
-local function SafeGetQuestLogCounts()
+local function GetQuestLogCounts()
     if C_QuestLog and C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetInfo then
-        local totalEntries = C_QuestLog.GetNumQuestLogEntries() or 0
-        local totalQuests = 0
+        local ok, totalEntries = pcall(C_QuestLog.GetNumQuestLogEntries)
+        if ok and type(totalEntries) == "number" and totalEntries >= 0 then
+            local totalQuests = 0
 
-        for questLogIndex = 1, totalEntries do
-            local info = C_QuestLog.GetInfo(questLogIndex)
-            if info and not info.isHeader and not info.isHidden then
-                totalQuests = totalQuests + 1
+            for questLogIndex = 1, totalEntries do
+                local okInfo, info = pcall(C_QuestLog.GetInfo, questLogIndex)
+                if okInfo and type(info) == "table" and not info.isHeader and not info.isHidden then
+                    totalQuests = totalQuests + 1
+                end
             end
-        end
 
-        return totalEntries, totalQuests
+            return totalEntries, totalQuests
+        end
     end
 
-    if GetNumQuestLogEntries then
-        local lines, quests = GetNumQuestLogEntries()
-        return lines or 0, quests or 0
+    if type(_G.GetNumQuestLogEntries) == "function" then
+        local ok, lines, quests = pcall(_G.GetNumQuestLogEntries)
+        if ok then
+            return tonumber(lines) or 0, tonumber(quests) or 0
+        end
     end
 
     return 0, 0
 end
 
-local function ResolveQuestIDFromIndexOrID(value)
-    if type(value) ~= "number" then
-        return nil
-    end
-
-    if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
-        local index = C_QuestLog.GetLogIndexForQuestID(value)
-        if index and index > 0 then
-            return value
-        end
-    end
-
-    if C_QuestLog and C_QuestLog.GetInfo then
-        local info = C_QuestLog.GetInfo(value)
-        if info and info.questID then
-            return info.questID
-        end
-    end
-
-    if GetQuestLogTitle then
-        local _, _, _, _, _, _, _, questID = GetQuestLogTitle(value)
-        return questID
-    end
-
-    return nil
-end
-
-local function SetModeButtonCombatColor(inCombat)
-    if not (QuestKing_TrackerModeButton and QuestKing_TrackerModeButton.label) then
-        return
-    end
-
-    if inCombat then
-        QuestKing_TrackerModeButton.label:SetTextColor(1, 0, 0)
-    else
-        QuestKing_TrackerModeButton.label:SetTextColor(
-            opt_colors.TrackerTitlebarText[1],
-            opt_colors.TrackerTitlebarText[2],
-            opt_colors.TrackerTitlebarText[3]
-        )
-    end
-end
-
-local function QueueUpdateChecker()
-    UpdateCheckFrame:SetScript("OnUpdate", function()
-        if checkCombat then
-            if not InCombatLockdown() then
-                checkCombat = false
-                SetModeButtonCombatColor(false)
-                QuestKing:UpdateTracker(false, true)
-
-                if checkPendingPlayerLevel and UnitLevel("player") >= checkPendingPlayerLevel then
-                    checkPendingPlayerLevel = false
-                end
-            end
-        end
-
-        if checkPendingPlayerLevel and UnitLevel("player") >= checkPendingPlayerLevel then
-            checkPendingPlayerLevel = false
-            QuestKing:UpdateTracker()
-        end
-
-        if (not checkCombat) and (not checkPendingPlayerLevel) then
-            UpdateCheckFrame:SetScript("OnUpdate", nil)
-        end
-    end)
-end
-
-function QuestKing:StartCombatTimer()
-    if checkCombat then
-        return
-    end
-
-    checkCombat = true
-    SetModeButtonCombatColor(true)
-    QueueUpdateChecker()
-end
-
-function QuestKing:OnPlayerLevelUp(newLevel)
-    checkPendingPlayerLevel = tonumber(newLevel)
-    QueueUpdateChecker()
-end
-
-local function MarkQuestFresh(questID)
-    if type(questID) ~= "number" then
-        return
-    end
-
-    QuestKing.newlyAddedQuests = QuestKing.newlyAddedQuests or {}
-    QuestKing.newlyAddedQuests[questID] = true
-end
-
-local function hookAddQuestWatch_Legacy(questLogIndex)
-    local questID = ResolveQuestIDFromIndexOrID(questLogIndex)
-    if questID then
-        MarkQuestFresh(questID)
-    end
-
-    QuestKing:UpdateTracker(true)
-end
-
-local function hookAddQuestWatch_Retail(questID)
-    if questID then
-        MarkQuestFresh(questID)
-    end
-
-    QuestKing:UpdateTracker(true)
-end
-
-local function hookRemoveQuestWatch_Legacy()
-    QuestKing:UpdateTracker(true)
-end
-
-local function hookRemoveQuestWatch_Retail()
-    QuestKing:UpdateTracker(true)
-end
-
 local function RefreshTrackedAchievementCacheOrUpdate()
     if QuestKing.QueueAchievementTrackerRefresh then
-        QuestKing:QueueAchievementTrackerRefresh()
-    else
-        QuestKing:UpdateTracker(true)
-    end
-end
-
-local function hookAddTrackedAchievement_Legacy(achievementID)
-    if type(achievementID) == "number" then
-        QuestKing.trackedAchievements = QuestKing.trackedAchievements or {}
-        QuestKing.trackedAchievements[achievementID] = true
-    elseif QuestKing.SyncTrackedAchievementCacheFromAPIs then
-        QuestKing:SyncTrackedAchievementCacheFromAPIs()
-    end
-
-    RefreshTrackedAchievementCacheOrUpdate()
-end
-
-local function hookRemoveTrackedAchievement_Legacy(achievementID)
-    if type(achievementID) == "number" and QuestKing.trackedAchievements then
-        QuestKing.trackedAchievements[achievementID] = nil
-    elseif QuestKing.SyncTrackedAchievementCacheFromAPIs then
-        QuestKing:SyncTrackedAchievementCacheFromAPIs()
-    end
-
-    RefreshTrackedAchievementCacheOrUpdate()
-end
-
-local function hookStartTracking_ContentTracking(contentType, id)
-    if not (Enum and Enum.ContentTrackingType) then
+        SafeCallMethod(QuestKing, "QueueAchievementTrackerRefresh")
         return
     end
 
-    if contentType ~= Enum.ContentTrackingType.Achievement then
-        return
-    end
-
-    if type(id) == "number" then
-        QuestKing.trackedAchievements = QuestKing.trackedAchievements or {}
-        QuestKing.trackedAchievements[id] = true
-    elseif QuestKing.SyncTrackedAchievementCacheFromAPIs then
-        QuestKing:SyncTrackedAchievementCacheFromAPIs()
-    end
-
-    RefreshTrackedAchievementCacheOrUpdate()
-end
-
-local function hookStopTracking_ContentTracking(contentType, id)
-    if not (Enum and Enum.ContentTrackingType) then
-        return
-    end
-
-    if contentType ~= Enum.ContentTrackingType.Achievement then
-        return
-    end
-
-    if type(id) == "number" and QuestKing.trackedAchievements then
-        QuestKing.trackedAchievements[id] = nil
-    elseif QuestKing.SyncTrackedAchievementCacheFromAPIs then
-        QuestKing:SyncTrackedAchievementCacheFromAPIs()
-    end
-
-    RefreshTrackedAchievementCacheOrUpdate()
-end
-
-local function hookAddAutoQuestPopUp()
-    QuestKing:UpdateTracker()
+    SafeCallMethod(QuestKing, "QueueTrackerUpdate", true)
 end
 
 local function UpdateMinimizeButtonLabel(trackerCollapsed)
-    if not (QuestKing_TrackerMinimizeButton and QuestKing_TrackerMinimizeButton.label) then
+    local button = GetTrackerMinimizeButton()
+    if not (button and button.label and button.label.SetText) then
         return
     end
 
     if trackerCollapsed == 2 then
-        QuestKing_TrackerMinimizeButton.label:SetText("x")
+        button.label:SetText("x")
     elseif trackerCollapsed == 1 then
-        QuestKing_TrackerMinimizeButton.label:SetText("+")
+        button.label:SetText("+")
     else
-        QuestKing_TrackerMinimizeButton.label:SetText("-")
+        button.label:SetText("-")
     end
 end
 
 local function UpdateModeButtonLabel(displayMode)
-    if not (QuestKing_TrackerModeButton and QuestKing_TrackerModeButton.label) then
+    local button = GetTrackerModeButton()
+    if not (button and button.label and button.label.SetText) then
         return
     end
 
     if displayMode == "combined" then
-        QuestKing_TrackerModeButton.label:SetText("C")
+        button.label:SetText("C")
     elseif displayMode == "achievements" then
-        QuestKing_TrackerModeButton.label:SetText("A")
+        button.label:SetText("A")
     elseif displayMode == "raids" then
-        QuestKing_TrackerModeButton.label:SetText("R")
+        button.label:SetText("R")
     else
-        QuestKing_TrackerModeButton.label:SetText("Q")
+        button.label:SetText("Q")
     end
 end
 
-local function GetScenarioTrackerState(self)
+local function GetScenarioTrackerState()
     local shouldShowScenarioTracker = false
 
-    if self and self.ShouldShowScenarioTracker then
-        shouldShowScenarioTracker = SafeCall(self, "ShouldShowScenarioTracker") and true or false
+    if QuestKing.ShouldShowScenarioTracker then
+        local _, value = SafeCallMethod(QuestKing, "ShouldShowScenarioTracker")
+        shouldShowScenarioTracker = value and true or false
     elseif C_Scenario and C_Scenario.IsInScenario then
-        shouldShowScenarioTracker = C_Scenario.IsInScenario() and true or false
+        local ok, isInScenario = pcall(C_Scenario.IsInScenario)
+        shouldShowScenarioTracker = ok and isInScenario and true or false
     end
 
     if not shouldShowScenarioTracker then
         return false, false
     end
 
-    local _, instanceType = GetInstanceInfo()
-    return true, instanceType == "raid"
+    if type(_G.GetInstanceInfo) == "function" then
+        local ok, _, instanceType = pcall(_G.GetInstanceInfo)
+        if ok then
+            return true, instanceType == "raid"
+        end
+    end
+
+    return true, false
 end
 
 local function UpdateTrackerTitleText(displayMode, numAchievements, numWatches, totalQuests, maxQuests, numRaidBlocks)
-    if not (Tracker and Tracker.titlebarText) then
+    if not (Tracker and Tracker.titlebarText and Tracker.titlebarText.SetText and Tracker.titlebarText.SetTextColor) then
         return
     end
 
+    local normalColor = colors.TrackerTitlebarText or { 1, 1, 1 }
+    local dimmedColor = colors.TrackerTitlebarTextDimmed or { 0.7, 0.7, 0.7 }
+    local isDimmed = false
+
+    numAchievements = tonumber(numAchievements) or 0
+    numWatches = tonumber(numWatches) or 0
+    totalQuests = tonumber(totalQuests) or 0
+    maxQuests = tonumber(maxQuests) or 0
     numRaidBlocks = tonumber(numRaidBlocks) or 0
 
     if displayMode == "combined" then
@@ -364,68 +336,20 @@ local function UpdateTrackerTitleText(displayMode, numAchievements, numWatches, 
             Tracker.titlebarText:SetText(format("%d/%d", totalQuests, maxQuests))
         end
 
-        if numWatches == 0 and numAchievements == 0 and numRaidBlocks == 0 then
-            Tracker.titlebarText:SetTextColor(
-                opt_colors.TrackerTitlebarTextDimmed[1],
-                opt_colors.TrackerTitlebarTextDimmed[2],
-                opt_colors.TrackerTitlebarTextDimmed[3]
-            )
-        else
-            Tracker.titlebarText:SetTextColor(
-                opt_colors.TrackerTitlebarText[1],
-                opt_colors.TrackerTitlebarText[2],
-                opt_colors.TrackerTitlebarText[3]
-            )
-        end
+        isDimmed = (numWatches == 0 and numAchievements == 0 and numRaidBlocks == 0)
     elseif displayMode == "achievements" then
         Tracker.titlebarText:SetText(tostring(numAchievements))
-
-        if numAchievements == 0 then
-            Tracker.titlebarText:SetTextColor(
-                opt_colors.TrackerTitlebarTextDimmed[1],
-                opt_colors.TrackerTitlebarTextDimmed[2],
-                opt_colors.TrackerTitlebarTextDimmed[3]
-            )
-        else
-            Tracker.titlebarText:SetTextColor(
-                opt_colors.TrackerTitlebarText[1],
-                opt_colors.TrackerTitlebarText[2],
-                opt_colors.TrackerTitlebarText[3]
-            )
-        end
+        isDimmed = numAchievements == 0
     elseif displayMode == "raids" then
         Tracker.titlebarText:SetText(tostring(numRaidBlocks))
-
-        if numRaidBlocks == 0 then
-            Tracker.titlebarText:SetTextColor(
-                opt_colors.TrackerTitlebarTextDimmed[1],
-                opt_colors.TrackerTitlebarTextDimmed[2],
-                opt_colors.TrackerTitlebarTextDimmed[3]
-            )
-        else
-            Tracker.titlebarText:SetTextColor(
-                opt_colors.TrackerTitlebarText[1],
-                opt_colors.TrackerTitlebarText[2],
-                opt_colors.TrackerTitlebarText[3]
-            )
-        end
+        isDimmed = numRaidBlocks == 0
     else
         Tracker.titlebarText:SetText(format("%d/%d", totalQuests, maxQuests))
-
-        if numWatches == 0 then
-            Tracker.titlebarText:SetTextColor(
-                opt_colors.TrackerTitlebarTextDimmed[1],
-                opt_colors.TrackerTitlebarTextDimmed[2],
-                opt_colors.TrackerTitlebarTextDimmed[3]
-            )
-        else
-            Tracker.titlebarText:SetTextColor(
-                opt_colors.TrackerTitlebarText[1],
-                opt_colors.TrackerTitlebarText[2],
-                opt_colors.TrackerTitlebarText[3]
-            )
-        end
+        isDimmed = numWatches == 0
     end
+
+    local color = isDimmed and dimmedColor or normalColor
+    Tracker.titlebarText:SetTextColor(color[1] or 1, color[2] or 1, color[3] or 1)
 end
 
 local function LayoutRequestedButtons(postCombat)
@@ -442,14 +366,12 @@ local function LayoutRequestedButtons(postCombat)
                 if Tracker and Tracker.titlebar then
                     button:SetPoint("TOPLEFT", Tracker.titlebar, "BOTTOMLEFT", 0, -1)
                 end
+            elseif button.type == "header" or button.type == "collapser" then
+                button:SetPoint("TOPLEFT", lastShown, "BOTTOMLEFT", 0, -4)
+            elseif lastShown.type == "header" or lastShown.type == "collapser" then
+                button:SetPoint("TOPLEFT", lastShown, "BOTTOMLEFT", 0, -3)
             else
-                if button.type == "header" or button.type == "collapser" then
-                    button:SetPoint("TOPLEFT", lastShown, "BOTTOMLEFT", 0, -4)
-                elseif lastShown.type == "header" or lastShown.type == "collapser" then
-                    button:SetPoint("TOPLEFT", lastShown, "BOTTOMLEFT", 0, -3)
-                else
-                    button:SetPoint("TOPLEFT", lastShown, "BOTTOMLEFT", 0, -2)
-                end
+                button:SetPoint("TOPLEFT", lastShown, "BOTTOMLEFT", 0, -2)
             end
 
             button:Render()
@@ -458,8 +380,8 @@ local function LayoutRequestedButtons(postCombat)
     end
 
     if postCombat and WatchButton.freePool then
-        for i = 1, #WatchButton.freePool do
-            local button = WatchButton.freePool[i]
+        for index = 1, #WatchButton.freePool do
+            local button = WatchButton.freePool[index]
             if button and button.itemButton and button.RemoveItemButton then
                 button:RemoveItemButton()
             end
@@ -475,34 +397,33 @@ local function LayoutRequestedButtons(postCombat)
     end
 end
 
-function QuestKing:UpdateTracker(forceBuild, postCombat)
+local function RunTrackerUpdate(forceBuild, postCombat)
     if not postCombat and IsInCombatLockdownSafe() then
-        if self.StartCombatTimer then
-            self:StartCombatTimer()
-        end
+        QuestKing:StartCombatTimer()
         return
     end
 
-    SafeCall(self, "CheckQuestSortTable", forceBuild)
-    self.watchMoney = false
+    SafeCallMethod(QuestKing, "CheckQuestSortTable", forceBuild)
+    QuestKing.watchMoney = false
 
-    SafeCall(self, "PreCheckQuestTracking")
+    SafeCallMethod(QuestKing, "PreCheckQuestTracking")
 
     if WatchButton.StartOrder then
         WatchButton:StartOrder()
     end
 
-    local trackerCollapsed = (QuestKingDBPerChar and QuestKingDBPerChar.trackerCollapsed) or 0
-    local displayMode = (QuestKingDBPerChar and QuestKingDBPerChar.displayMode) or "combined"
+    local trackerDB = _G.QuestKingDBPerChar or {}
+    local trackerCollapsed = trackerDB.trackerCollapsed or 0
+    local displayMode = trackerDB.displayMode or "combined"
 
     UpdateMinimizeButtonLabel(trackerCollapsed)
 
-    local hasScenarioTracker, isRaidScenario = GetScenarioTrackerState(self)
+    local hasScenarioTracker, isRaidScenario = GetScenarioTrackerState()
     local numRaidBlocks = isRaidScenario and 1 or 0
 
     if trackerCollapsed <= 1 then
-        SafeCall(self, "UpdateTrackerPopups")
-        SafeCall(self, "UpdateTrackerChallengeTimers")
+        SafeCallMethod(QuestKing, "UpdateTrackerPopups")
+        SafeCallMethod(QuestKing, "UpdateTrackerChallengeTimers")
 
         local showScenarioBlock = false
         local showBonusObjectives = false
@@ -525,70 +446,222 @@ function QuestKing:UpdateTracker(forceBuild, postCombat)
         end
 
         if showScenarioBlock then
-            SafeCall(self, "UpdateTrackerScenarios")
+            SafeCallMethod(QuestKing, "UpdateTrackerScenarios")
         end
 
         if showBonusObjectives then
-            SafeCall(self, "UpdateTrackerBonusObjectives")
+            SafeCallMethod(QuestKing, "UpdateTrackerBonusObjectives")
         end
     end
 
     if trackerCollapsed == 0 then
         if displayMode == "combined" or displayMode == "achievements" then
-            SafeCall(self, "UpdateTrackerAchievements")
+            SafeCallMethod(QuestKing, "UpdateTrackerAchievements")
         end
 
         if displayMode == "combined" or displayMode == "quests" then
-            SafeCall(self, "UpdateTrackerQuests")
+            SafeCallMethod(QuestKing, "UpdateTrackerQuests")
         end
     end
 
-    local numAchievements = SafeGetTrackedAchievementCount()
-    local numWatches = SafeGetNumQuestWatches()
-    local _, totalQuests = SafeGetQuestLogCounts()
-    local maxQuests = SafeGetMaxQuests()
+    local numAchievements = GetTrackedAchievementCount()
+    local numWatches = GetNumQuestWatches()
+    local _, totalQuests = GetQuestLogCounts()
+    local maxQuests = GetMaxQuests()
 
     UpdateModeButtonLabel(displayMode)
     UpdateTrackerTitleText(displayMode, numAchievements, numWatches, totalQuests, maxQuests, numRaidBlocks)
 
     LayoutRequestedButtons(postCombat)
 
-    SafeCall(self, "PostCheckQuestTracking")
+    SafeCallMethod(QuestKing, "PostCheckQuestTracking")
 
-    local hooks = self.updateHooks or {}
-    for i = 1, #hooks do
-        local fn = hooks[i]
+    local hooks = QuestKing.updateHooks or {}
+    for index = 1, #hooks do
+        local fn = hooks[index]
         if type(fn) == "function" then
             pcall(fn)
         end
     end
+
+    if QuestKing.RequestBlizzardTrackerVisualRefresh then
+        SafeCallMethod(QuestKing, "RequestBlizzardTrackerVisualRefresh")
+    end
+end
+
+local function FlushQueuedTrackerUpdate()
+    trackerUpdateFlushQueued = false
+
+    if not trackerUpdatePending then
+        return
+    end
+
+    local forceBuild = trackerUpdatePendingForceBuild
+    local postCombat = trackerUpdatePendingPostCombat
+
+    trackerUpdatePending = false
+    trackerUpdatePendingForceBuild = false
+    trackerUpdatePendingPostCombat = false
+
+    RunTrackerUpdate(forceBuild, postCombat)
+end
+
+function QuestKing:QueueTrackerUpdate(forceBuild, postCombat)
+    if forceBuild then
+        trackerUpdatePendingForceBuild = true
+    end
+
+    if postCombat then
+        trackerUpdatePendingPostCombat = true
+    end
+
+    trackerUpdatePending = true
+
+    if trackerUpdateFlushQueued then
+        return
+    end
+
+    if C_Timer and C_Timer.After then
+        trackerUpdateFlushQueued = true
+        C_Timer.After(0, FlushQueuedTrackerUpdate)
+    else
+        FlushQueuedTrackerUpdate()
+    end
+end
+
+function QuestKing:UpdateTracker(forceBuild, postCombat)
+    self:QueueTrackerUpdate(forceBuild, postCombat)
 end
 
 local function EnsureSavedVariables()
-    QuestKingDB = QuestKingDB or {}
-    QuestKingDBPerChar = QuestKingDBPerChar or {}
+    _G.QuestKingDB = _G.QuestKingDB or {}
+    _G.QuestKingDBPerChar = _G.QuestKingDBPerChar or {}
 
-    QuestKingDBPerChar.version = QuestKingDBPerChar.version or 2
-    QuestKingDBPerChar.collapsedHeaders = QuestKingDBPerChar.collapsedHeaders or {}
-    QuestKingDBPerChar.collapsedQuests = QuestKingDBPerChar.collapsedQuests or {}
-    QuestKingDBPerChar.collapsedAchievements = QuestKingDBPerChar.collapsedAchievements or {}
-    QuestKingDBPerChar.trackerCollapsed = QuestKingDBPerChar.trackerCollapsed or 0
-    QuestKingDBPerChar.displayMode = QuestKingDBPerChar.displayMode or "combined"
-    QuestKingDBPerChar.trackerPositionPreset = QuestKingDBPerChar.trackerPositionPreset or 1
+    local db = _G.QuestKingDB
+    local perChar = _G.QuestKingDBPerChar
 
-    if QuestKingDB.dbTrackerAlpha == nil then
-        QuestKingDB.dbTrackerAlpha = nil
+    perChar.version = tonumber(perChar.version) or 2
+    perChar.collapsedHeaders = type(perChar.collapsedHeaders) == "table" and perChar.collapsedHeaders or {}
+    perChar.collapsedQuests = type(perChar.collapsedQuests) == "table" and perChar.collapsedQuests or {}
+    perChar.collapsedAchievements = type(perChar.collapsedAchievements) == "table" and perChar.collapsedAchievements or {}
+    perChar.trackerCollapsed = tonumber(perChar.trackerCollapsed) or 0
+    perChar.displayMode = type(perChar.displayMode) == "string" and perChar.displayMode or "combined"
+    perChar.trackerPositionPreset = tonumber(perChar.trackerPositionPreset) or 1
+
+    db.dragLocked = db.dragLocked == true
+    db.dragOrigin = type(db.dragOrigin) == "string" and db.dragOrigin or "TOPRIGHT"
+    db.dragRelativePoint = type(db.dragRelativePoint) == "string" and db.dragRelativePoint or db.dragOrigin
+    db.dragX = tonumber(db.dragX)
+    db.dragY = tonumber(db.dragY)
+
+    if db.dbTrackerAlpha ~= nil then
+        db.dbTrackerAlpha = tonumber(db.dbTrackerAlpha)
     end
 
-    if QuestKingDB.dbTrackerScale == nil then
-        QuestKingDB.dbTrackerScale = nil
+    if db.dbTrackerScale ~= nil then
+        db.dbTrackerScale = tonumber(db.dbTrackerScale)
+    end
+end
+
+local function QueueUpdateChecker()
+    updateStateFrame:SetScript("OnUpdate", function()
+        if combatUpdateQueued and not IsInCombatLockdownSafe() then
+            combatUpdateQueued = false
+            SetModeButtonCombatColor(false)
+            QuestKing:QueueTrackerUpdate(false, true)
+
+            if pendingPlayerLevel and type(_G.UnitLevel) == "function" and _G.UnitLevel("player") >= pendingPlayerLevel then
+                pendingPlayerLevel = nil
+            end
+        end
+
+        if pendingPlayerLevel and type(_G.UnitLevel) == "function" and _G.UnitLevel("player") >= pendingPlayerLevel then
+            pendingPlayerLevel = nil
+            QuestKing:QueueTrackerUpdate(true)
+        end
+
+        if not combatUpdateQueued and not pendingPlayerLevel then
+            updateStateFrame:SetScript("OnUpdate", nil)
+        end
+    end)
+end
+
+function QuestKing:StartCombatTimer()
+    if combatUpdateQueued then
+        return
     end
 
-    QuestKingDB.dragLocked = QuestKingDB.dragLocked == true
-    QuestKingDB.dragOrigin = QuestKingDB.dragOrigin or "TOPRIGHT"
-    QuestKingDB.dragRelativePoint = QuestKingDB.dragRelativePoint or QuestKingDB.dragOrigin
-    QuestKingDB.dragX = tonumber(QuestKingDB.dragX)
-    QuestKingDB.dragY = tonumber(QuestKingDB.dragY)
+    combatUpdateQueued = true
+    SetModeButtonCombatColor(true)
+    QueueUpdateChecker()
+end
+
+function QuestKing:OnPlayerLevelUp(newLevel)
+    pendingPlayerLevel = tonumber(newLevel)
+    QueueUpdateChecker()
+end
+
+local function OnQuestWatchAdded(questIndexOrID)
+    local questID = ResolveQuestIDFromIndexOrID(questIndexOrID)
+    if questID then
+        MarkQuestFresh(questID)
+    end
+
+    QuestKing:QueueTrackerUpdate(true)
+end
+
+local function OnQuestWatchRemoved()
+    QuestKing:QueueTrackerUpdate(true)
+end
+
+local function OnContentTrackingStarted(contentType, contentID)
+    if not (Enum and Enum.ContentTrackingType and contentType == Enum.ContentTrackingType.Achievement) then
+        return
+    end
+
+    if type(contentID) == "number" then
+        QuestKing.trackedAchievements = QuestKing.trackedAchievements or {}
+        QuestKing.trackedAchievements[contentID] = true
+    else
+        SafeCallMethod(QuestKing, "SyncTrackedAchievementCacheFromAPIs")
+    end
+
+    RefreshTrackedAchievementCacheOrUpdate()
+end
+
+local function OnContentTrackingStopped(contentType, contentID)
+    if not (Enum and Enum.ContentTrackingType and contentType == Enum.ContentTrackingType.Achievement) then
+        return
+    end
+
+    if type(contentID) == "number" and QuestKing.trackedAchievements then
+        QuestKing.trackedAchievements[contentID] = nil
+    else
+        SafeCallMethod(QuestKing, "SyncTrackedAchievementCacheFromAPIs")
+    end
+
+    RefreshTrackedAchievementCacheOrUpdate()
+end
+
+local function OnTrackedAchievementAdded(achievementID)
+    if type(achievementID) == "number" then
+        QuestKing.trackedAchievements = QuestKing.trackedAchievements or {}
+        QuestKing.trackedAchievements[achievementID] = true
+    else
+        SafeCallMethod(QuestKing, "SyncTrackedAchievementCacheFromAPIs")
+    end
+
+    RefreshTrackedAchievementCacheOrUpdate()
+end
+
+local function OnTrackedAchievementRemoved(achievementID)
+    if type(achievementID) == "number" and QuestKing.trackedAchievements then
+        QuestKing.trackedAchievements[achievementID] = nil
+    else
+        SafeCallMethod(QuestKing, "SyncTrackedAchievementCacheFromAPIs")
+    end
+
+    RefreshTrackedAchievementCacheOrUpdate()
 end
 
 local function HookTrackingFunctions()
@@ -598,63 +671,39 @@ local function HookTrackingFunctions()
 
     trackingHooksInstalled = true
 
-    if not hooksecurefunc then
-        return
-    end
+    SafeHookTableMethod(C_QuestLog, "AddQuestWatch", OnQuestWatchAdded)
+    SafeHookTableMethod(C_QuestLog, "RemoveQuestWatch", OnQuestWatchRemoved)
 
-    if C_QuestLog and C_QuestLog.AddQuestWatch then
-        hooksecurefunc(C_QuestLog, "AddQuestWatch", hookAddQuestWatch_Retail)
-    end
+    SafeHookGlobal("AddQuestWatch", OnQuestWatchAdded)
+    SafeHookGlobal("RemoveQuestWatch", OnQuestWatchRemoved)
 
-    if C_QuestLog and C_QuestLog.RemoveQuestWatch then
-        hooksecurefunc(C_QuestLog, "RemoveQuestWatch", hookRemoveQuestWatch_Retail)
-    end
+    SafeHookGlobal("AddAutoQuestPopUp", function()
+        QuestKing:QueueTrackerUpdate(true)
+    end)
 
-    if AddQuestWatch then
-        hooksecurefunc("AddQuestWatch", hookAddQuestWatch_Legacy)
-    end
+    SafeHookGlobal("AddTrackedAchievement", OnTrackedAchievementAdded)
+    SafeHookGlobal("RemoveTrackedAchievement", OnTrackedAchievementRemoved)
 
-    if RemoveQuestWatch then
-        hooksecurefunc("RemoveQuestWatch", hookRemoveQuestWatch_Legacy)
-    end
-
-    if AddAutoQuestPopUp then
-        hooksecurefunc("AddAutoQuestPopUp", hookAddAutoQuestPopUp)
-    end
-
-    if AddTrackedAchievement then
-        hooksecurefunc("AddTrackedAchievement", hookAddTrackedAchievement_Legacy)
-    end
-
-    if RemoveTrackedAchievement then
-        hooksecurefunc("RemoveTrackedAchievement", hookRemoveTrackedAchievement_Legacy)
-    end
-
-    if C_ContentTracking and C_ContentTracking.StartTracking then
-        hooksecurefunc(C_ContentTracking, "StartTracking", hookStartTracking_ContentTracking)
-    end
-
-    if C_ContentTracking and C_ContentTracking.StopTracking then
-        hooksecurefunc(C_ContentTracking, "StopTracking", hookStopTracking_ContentTracking)
-    end
+    SafeHookTableMethod(C_ContentTracking, "StartTracking", OnContentTrackingStarted)
+    SafeHookTableMethod(C_ContentTracking, "StopTracking", OnContentTrackingStopped)
 end
 
 function QuestKing:Init()
     if initialized then
-        self:UpdateTracker()
+        self:QueueTrackerUpdate(true)
         return
     end
 
     EnsureSavedVariables()
 
-    self.updateHooks = self.updateHooks or {}
-    self.newlyAddedQuests = self.newlyAddedQuests or {}
-    self.trackedAchievements = self.trackedAchievements or {}
+    self.updateHooks = type(self.updateHooks) == "table" and self.updateHooks or {}
+    self.newlyAddedQuests = type(self.newlyAddedQuests) == "table" and self.newlyAddedQuests or {}
+    self.trackedAchievements = type(self.trackedAchievements) == "table" and self.trackedAchievements or {}
 
-    SafeCall(self, "InitLoot")
+    SafeCallMethod(self, "InitLoot")
 
-    if opt.disableBlizzard then
-        SafeCall(self, "DisableBlizzard")
+    if options.disableBlizzard then
+        SafeCallMethod(self, "DisableBlizzard")
     end
 
     HookTrackingFunctions()
@@ -663,10 +712,8 @@ function QuestKing:Init()
         Tracker:Init()
     end
 
-    if self.SyncTrackedAchievementCacheFromAPIs then
-        self:SyncTrackedAchievementCacheFromAPIs()
-    end
+    SafeCallMethod(self, "SyncTrackedAchievementCacheFromAPIs")
 
     initialized = true
-    self:UpdateTracker()
+    self:QueueTrackerUpdate(true)
 end

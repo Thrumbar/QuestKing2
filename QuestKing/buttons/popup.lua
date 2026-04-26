@@ -1,49 +1,159 @@
 local addonName, QuestKing = ...
 
-local opt = QuestKing.options
-local opt_colors = opt.colors
+local opt = QuestKing.options or {}
+local opt_colors = (opt and opt.colors) or {}
 local WatchButton = QuestKing.WatchButton
 
+local C_Container = C_Container
+local C_Item = C_Item
+local C_QuestLog = C_QuestLog
+local Enum = Enum
+
+local find = string.find
+local format = string.format
+local gsub = string.gsub
+local match = string.match
 local pairs = pairs
 local tonumber = tonumber
 local type = type
-local find = string.find
-local gsub = string.gsub
 
 local NUM_BAG_SLOTS_COMPAT = NUM_BAG_SLOTS or 4
 local REAGENT_BAG_ID = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag or nil
+local LOOT_SELF_REGEX = LOOT_ITEM_SELF and gsub(LOOT_ITEM_SELF, "%%s", "(.+)") or nil
 
-local LOOT_SELF_REGEX = gsub(LOOT_ITEM_SELF, "%%s", "(.+)")
+local DEFAULT_COLORS = {
+    PopupOfferTitle = { 1.00, 0.96, 0.41 },
+    PopupOfferDescription = { 1.00, 1.00, 1.00 },
+    PopupOfferBackground = { 0.12, 0.24, 0.38, 0.70 },
+    PopupCompleteTitle = { 0.30, 1.00, 0.60 },
+    PopupCompleteDescription = { 1.00, 1.00, 1.00 },
+    PopupCompleteBackground = { 0.09, 0.36, 0.29, 0.70 },
+    PopupItemTitle = { 0.80, 0.90, 1.00 },
+    PopupItemDescription = { 0.90, 0.90, 0.90 },
+    PopupItemBackground = { 0.15, 0.15, 0.15, 0.60 },
+}
 
-local itemPopups = {}
+local QUEST_START_ITEMS_CSV = [[
+1307,1357,1972,2839,3082,3317,4056,4433,4613,4854,4881,4926,5099,5102,5103,5138,5179,5352,5791,5877,6172,6196
+6497,6766,6775,6776,6916,8244,8524,8623,8704,8705,9326,9572,10454,10589,10590,10593,10621,11116,11668,12558
+12564,12771,12842,13140,14646,14647,14648,14649,14650,14651,16303,16304,16305,16408,16782,17008,17115,17116
+17409,18356,18357,18358,18359,18360,18361,18362,18363,18364,18422,18423,18565,18589,18628,18703,18706,18769
+18770,18771,18969,18987,19002,19003,19016,19018,19228,19257,19267,19277,19423,19443,19452,19802,20310,20460
+20461,20483,20644,20741,20742,20765,20798,20806,20807,20938,20939,20940,20941,20942,20943,20944,20945,20946
+20947,20948,21165,21166,21167,21220,21221,21230,21245,21246,21247,21248,21249,21250,21251,21252,21253,21255
+21256,21257,21258,21259,21260,21261,21262,21263,21264,21265,21378,21379,21380,21381,21382,21384,21385,21514
+21749,21750,21751,21776,22597,22600,22601,22602,22603,22604,22605,22606,22607,22608,22609,22610,22611,22612
+22613,22614,22615,22616,22617,22618,22620,22621,22622,22623,22624,22719,22723,22727,22888,22970,22972,22973
+22974,22975,22977,23179,23180,23181,23182,23183,23184,23216,23228,23249,23338,23580,23678,23759,23777,23797
+23837,23850,23870,23890,23892,23900,23904,23910,24132,24228,24330,24367,24407,24414,24483,24484,24504,24558
+24559,25459,25705,25706,25752,25753,28113,28114,28552,28598,29233,29234,29235,29236,29476,29588,29590,29738
+30431,30579,30756,31120,31239,31241,31345,31363,31384,31489,31707,31890,31891,31907,31914,32385,32386,32405
+32523,32621,32726,33102,33121,33289,33314,33345,33347,33961,33962,33978,34028,34090,34091,34469,34777,34815
+34984,35120,35567,35568,35569,35648,35723,35787,35855,36742,36744,36746,36756,36780,36855,36856,36940,36958
+37163,37164,37432,37571,37599,37736,37737,37830,37833,38280,38281,38321,38567,38660,38673,39713,40666,41267
+41556,42203,42772,43242,43297,43512,44148,44158,44259,44276,44294,44326,44569,44577,44725,44927,44979,45039
+45506,45857,46004,46052,46053,46128,46318,46697,46875,46876,46877,46878,46879,46880,46881,46882,46883,46884
+46955,47039,47246,48679,49010,49200,49203,49205,49219,49220,49641,49643,49644,49667,49676,49776,49932,50320
+50379,50380,51315,52079,52197,52831,53053,53106,54345,54614,54639,55166,55167,55181,55186,55243,56474,56571
+56812,57102,57118,57935,58117,58491,58898,59143,60816,60886,60956,61310,61322,61378,61505,62021,62044,62045
+62046,62056,62138,62281,62282,62483,62768,62933,63090,63250,63276,63686,63700,64353,64450,65894,65895,65896
+65897,69854,70928,70932,71635,71636,71637,71638,71715,71716,71951,71952,71953,73058,74034,77957,78912,79238
+79323,79324,79325,79326,79341,79343,79812,80240,80241,80597,80827,82808,82870,83076,83767,83769,83770,83771
+83772,83773,83774,83777,83779,83780,85477,85557,85558,85783,86404,86433,86434,86435,86436,86542,86544,86545
+87871,87878,88538,88563,88715,89169,89170,89171,89172,89173,89174,89175,89176,89178,89179,89180,89181,89182
+89183,89184,89185,89209,89317,89812,89813,89814,91819,91821,91822,91854,91855,91856,92441,94197,94198,94199
+94721,95383,95384,95385,95386,95387,95388,95389,95390,97978,97979,97980,97981,97982,97983,97984,97985,97986
+97987,97988,97990,102225,105891,108824,108951,109012,109095,109121,110225,111478,112378,112566,112692,113080
+113103,113107,113109,113260,113444,113445,113446,113447,113448,113449,113453,113454,113456,113457,113458
+113459,113460,113461,113586,113590,114018,114019,114020,114021,114022,114023,114024,114025,114026,114027
+114029,114030,114031,114032,114033,114034,114035,114036,114037,114038,114142,114144,114146,114148,114150
+114152,114154,114156,114158,114160,114162,114164,114166,114168,114170,114172,114174,114176,114178,114182
+114184,114186,114188,114208,114209,114210,114211,114212,114213,114215,114216,114217,114218,114219,114220
+114221,114222,114223,114224,114877,114965,114972,114973,114984,115008,115278,115281,115287,115343,115467
+115507,115593,116068,116159,116160,116173,116438,119208,119310,119316,119317,119323,120206,120207,120208
+120209,120210,120211,120277,120278,120279,120280,120281,120282,120283,120284,120285,122190,122399,122400
+122401,122402,122403,122404,122405,122406,122407,122408,122409,122410,122411,122412,122413,122414,122415
+122416,122417,122418,122419,122420,122421,122422,122423,122424,122572,122573
+]]
+
+local itemPopups = QuestKing.itemPopups or {}
 local questStartItemSet = nil
-
 local mouseHandlerPopup = {}
+
+QuestKing.itemPopups = itemPopups
+
+local function GetColor(name)
+    return opt_colors[name] or DEFAULT_COLORS[name] or { 1, 1, 1, 1 }
+end
+
+local function SafeCall(func, ...)
+    if type(func) ~= "function" then
+        return false, nil, nil, nil, nil, nil
+    end
+
+    local ok, a, b, c, d, e = pcall(func, ...)
+    if ok then
+        return true, a, b, c, d, e
+    end
+
+    return false, nil, nil, nil, nil, nil
+end
+
+local function SafeString(value, fallback)
+    if type(value) == "string" and value ~= "" then
+        return value
+    end
+    return fallback
+end
+
+local function SafeNumber(value, fallback)
+    if type(value) == "number" then
+        return value
+    end
+    local numberValue = tonumber(value)
+    if type(numberValue) == "number" then
+        return numberValue
+    end
+    return fallback
+end
+
+local function QueueTrackerRefresh(forceBuild)
+    if type(QuestKing.QueueTrackerUpdate) == "function" then
+        QuestKing:QueueTrackerUpdate(forceBuild, false)
+    elseif type(QuestKing.UpdateTracker) == "function" then
+        QuestKing:UpdateTracker(forceBuild, false)
+    end
+end
 
 local function ResetPopupButtonState(button)
     if not button then
         return
     end
 
+    button.mouseHandler = mouseHandlerPopup
     button._popupType = nil
     button._itemID = nil
+    button._itemName = nil
+    button._itemLink = nil
+    button._itemTexture = nil
+    button._popupKey = nil
     button.questIndex = nil
     button.questLogIndex = nil
     button.questID = nil
 end
 
 local function PlaySoundCompat(soundKitID, legacyID)
-    if not PlaySound then
+    if type(PlaySound) ~= "function" then
         return
     end
 
     if SOUNDKIT and soundKitID then
-        PlaySound(soundKitID)
+        pcall(PlaySound, soundKitID)
         return
     end
 
     if legacyID then
-        PlaySound(legacyID)
+        pcall(PlaySound, legacyID)
     end
 end
 
@@ -57,11 +167,17 @@ end
 
 local function GetContainerNumSlotsCompat(bagID)
     if C_Container and C_Container.GetContainerNumSlots then
-        return C_Container.GetContainerNumSlots(bagID) or 0
+        local ok, numSlots = SafeCall(C_Container.GetContainerNumSlots, bagID)
+        if ok then
+            return SafeNumber(numSlots, 0) or 0
+        end
     end
 
-    if GetContainerNumSlots then
-        return GetContainerNumSlots(bagID) or 0
+    if type(GetContainerNumSlots) == "function" then
+        local ok, numSlots = SafeCall(GetContainerNumSlots, bagID)
+        if ok then
+            return SafeNumber(numSlots, 0) or 0
+        end
     end
 
     return 0
@@ -69,11 +185,17 @@ end
 
 local function GetContainerItemIDCompat(bagID, slotID)
     if C_Container and C_Container.GetContainerItemID then
-        return C_Container.GetContainerItemID(bagID, slotID)
+        local ok, itemID = SafeCall(C_Container.GetContainerItemID, bagID, slotID)
+        if ok then
+            return SafeNumber(itemID, nil)
+        end
     end
 
-    if GetContainerItemID then
-        return GetContainerItemID(bagID, slotID)
+    if type(GetContainerItemID) == "function" then
+        local ok, itemID = SafeCall(GetContainerItemID, bagID, slotID)
+        if ok then
+            return SafeNumber(itemID, nil)
+        end
     end
 
     return nil
@@ -81,12 +203,16 @@ end
 
 local function UseContainerItemCompat(bagID, slotID)
     if C_Container and C_Container.UseContainerItem then
-        return C_Container.UseContainerItem(bagID, slotID)
+        local ok = SafeCall(C_Container.UseContainerItem, bagID, slotID)
+        return ok and true or false
     end
 
-    if UseContainerItem then
-        return UseContainerItem(bagID, slotID)
+    if type(UseContainerItem) == "function" then
+        local ok = SafeCall(UseContainerItem, bagID, slotID)
+        return ok and true or false
     end
+
+    return false
 end
 
 local function IteratePlayerBags(callback)
@@ -103,15 +229,15 @@ local function IteratePlayerBags(callback)
     end
 end
 
-local function UseContainerItemByID(searchID)
-    if not searchID then
-        return false
+local function FindContainerPositionByID(searchID)
+    if type(searchID) ~= "number" or searchID <= 0 then
+        return nil, nil
     end
 
-    local used = false
+    local foundBagID, foundSlotID = nil, nil
 
     IteratePlayerBags(function(bagID)
-        if used then
+        if foundBagID then
             return
         end
 
@@ -119,56 +245,45 @@ local function UseContainerItemByID(searchID)
         for slotID = 1, numSlots do
             local itemID = GetContainerItemIDCompat(bagID, slotID)
             if itemID == searchID then
-                UseContainerItemCompat(bagID, slotID)
-                used = true
+                foundBagID = bagID
+                foundSlotID = slotID
                 return
             end
         end
     end)
 
-    return used
+    return foundBagID, foundSlotID
 end
 
 local function FindContainerItemByID(searchID)
-    if not searchID then
+    local bagID = FindContainerPositionByID(searchID)
+    return bagID ~= nil
+end
+
+local function UseContainerItemByID(searchID)
+    local bagID, slotID = FindContainerPositionByID(searchID)
+    if not bagID or not slotID then
         return false
     end
 
-    local found = false
-
-    IteratePlayerBags(function(bagID)
-        if found then
-            return
-        end
-
-        local numSlots = GetContainerNumSlotsCompat(bagID)
-        for slotID = 1, numSlots do
-            local itemID = GetContainerItemIDCompat(bagID, slotID)
-            if itemID == searchID then
-                found = true
-                return
-            end
-        end
-    end)
-
-    return found
+    return UseContainerItemCompat(bagID, slotID)
 end
 
 local function GetQuestLogIndexByIDCompat(questID)
-    if not questID then
+    if type(questID) ~= "number" or questID <= 0 then
         return nil
     end
 
     if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
-        local questLogIndex = C_QuestLog.GetLogIndexForQuestID(questID)
-        if questLogIndex and questLogIndex > 0 then
+        local ok, questLogIndex = SafeCall(C_QuestLog.GetLogIndexForQuestID, questID)
+        if ok and type(questLogIndex) == "number" and questLogIndex > 0 then
             return questLogIndex
         end
     end
 
-    if GetQuestLogIndexByID then
-        local questLogIndex = GetQuestLogIndexByID(questID)
-        if questLogIndex and questLogIndex > 0 then
+    if type(GetQuestLogIndexByID) == "function" then
+        local ok, questLogIndex = SafeCall(GetQuestLogIndexByID, questID)
+        if ok and type(questLogIndex) == "number" and questLogIndex > 0 then
             return questLogIndex
         end
     end
@@ -177,26 +292,35 @@ local function GetQuestLogIndexByIDCompat(questID)
 end
 
 local function RemoveAutoQuestPopUpCompat(questID)
-    if RemoveAutoQuestPopUp and questID then
-        RemoveAutoQuestPopUp(questID)
+    if type(RemoveAutoQuestPopUp) == "function" and type(questID) == "number" and questID > 0 then
+        SafeCall(RemoveAutoQuestPopUp, questID)
     end
 end
 
 local function IsTaskQuestCompat(questID)
-    if not questID then
+    if type(questID) ~= "number" or questID <= 0 then
         return false
     end
 
     if C_QuestLog and C_QuestLog.IsQuestTask then
-        return C_QuestLog.IsQuestTask(questID) and true or false
+        local ok, isTask = SafeCall(C_QuestLog.IsQuestTask, questID)
+        if ok then
+            return isTask and true or false
+        end
     end
 
     if C_TaskQuest and C_TaskQuest.IsActive then
-        return C_TaskQuest.IsActive(questID) and true or false
+        local ok, isTask = SafeCall(C_TaskQuest.IsActive, questID)
+        if ok then
+            return isTask and true or false
+        end
     end
 
-    if IsQuestTask then
-        return IsQuestTask(questID) and true or false
+    if type(IsQuestTask) == "function" then
+        local ok, isTask = SafeCall(IsQuestTask, questID)
+        if ok then
+            return isTask and true or false
+        end
     end
 
     return false
@@ -207,15 +331,15 @@ local function CallQuestPopupAPICompat(func, questID, questLogIndex)
         return false
     end
 
-    if questID then
-        local ok = pcall(func, questID)
+    if type(questID) == "number" and questID > 0 then
+        local ok = SafeCall(func, questID)
         if ok then
             return true
         end
     end
 
-    if questLogIndex then
-        local ok = pcall(func, questLogIndex)
+    if type(questLogIndex) == "number" and questLogIndex > 0 then
+        local ok = SafeCall(func, questLogIndex)
         if ok then
             return true
         end
@@ -249,217 +373,248 @@ local function BuildQuestStartItemSet()
         return questStartItemSet
     end
 
-    questStartItemSet = {
-        [1307] = true, [1357] = true, [1972] = true, [2839] = true, [3082] = true, [3317] = true,
-        [4056] = true, [4433] = true, [4613] = true, [4854] = true, [4881] = true, [4926] = true,
-        [5099] = true, [5102] = true, [5103] = true, [5138] = true, [5179] = true, [5352] = true,
-        [5791] = true, [5877] = true, [6172] = true, [6196] = true, [6497] = true, [6766] = true,
-        [6775] = true, [6776] = true, [6916] = true, [8244] = true, [8524] = true, [8623] = true,
-        [8704] = true, [8705] = true, [9326] = true, [9572] = true, [10454] = true, [10589] = true,
-        [10590] = true, [10593] = true, [10621] = true, [11116] = true, [11668] = true, [12558] = true,
-        [12564] = true, [12771] = true, [12842] = true, [13140] = true, [14646] = true, [14647] = true,
-        [14648] = true, [14649] = true, [14650] = true, [14651] = true, [16303] = true, [16304] = true,
-        [16305] = true, [16408] = true, [16782] = true, [17008] = true, [17115] = true, [17116] = true,
-        [17409] = true, [18356] = true, [18357] = true, [18358] = true, [18359] = true, [18360] = true,
-        [18361] = true, [18362] = true, [18363] = true, [18364] = true, [18422] = true, [18423] = true,
-        [18565] = true, [18589] = true, [18628] = true, [18703] = true, [18706] = true, [18769] = true,
-        [18770] = true, [18771] = true, [18969] = true, [18987] = true, [19002] = true, [19003] = true,
-        [19016] = true, [19018] = true, [19228] = true, [19257] = true, [19267] = true, [19277] = true,
-        [19423] = true, [19443] = true, [19452] = true, [19802] = true, [20310] = true, [20460] = true,
-        [20461] = true, [20483] = true, [20644] = true, [20741] = true, [20742] = true, [20765] = true,
-        [20798] = true, [20806] = true, [20807] = true, [20938] = true, [20939] = true, [20940] = true,
-        [20941] = true, [20942] = true, [20943] = true, [20944] = true, [20945] = true, [20946] = true,
-        [20947] = true, [20948] = true, [21165] = true, [21166] = true, [21167] = true, [21220] = true,
-        [21221] = true, [21230] = true, [21245] = true, [21246] = true, [21247] = true, [21248] = true,
-        [21249] = true, [21250] = true, [21251] = true, [21252] = true, [21253] = true, [21255] = true,
-        [21256] = true, [21257] = true, [21258] = true, [21259] = true, [21260] = true, [21261] = true,
-        [21262] = true, [21263] = true, [21264] = true, [21265] = true, [21378] = true, [21379] = true,
-        [21380] = true, [21381] = true, [21382] = true, [21384] = true, [21385] = true, [21514] = true,
-        [21749] = true, [21750] = true, [21751] = true, [21776] = true, [22597] = true, [22600] = true,
-        [22601] = true, [22602] = true, [22603] = true, [22604] = true, [22605] = true, [22606] = true,
-        [22607] = true, [22608] = true, [22609] = true, [22610] = true, [22611] = true, [22612] = true,
-        [22613] = true, [22614] = true, [22615] = true, [22616] = true, [22617] = true, [22618] = true,
-        [22620] = true, [22621] = true, [22622] = true, [22623] = true, [22624] = true, [22719] = true,
-        [22723] = true, [22727] = true, [22888] = true, [22970] = true, [22972] = true, [22973] = true,
-        [22974] = true, [22975] = true, [22977] = true, [23179] = true, [23180] = true, [23181] = true,
-        [23182] = true, [23183] = true, [23184] = true, [23216] = true, [23228] = true, [23249] = true,
-        [23338] = true, [23580] = true, [23678] = true, [23759] = true, [23777] = true, [23797] = true,
-        [23837] = true, [23850] = true, [23870] = true, [23890] = true, [23892] = true, [23900] = true,
-        [23904] = true, [23910] = true, [24132] = true, [24228] = true, [24330] = true, [24367] = true,
-        [24407] = true, [24414] = true, [24483] = true, [24484] = true, [24504] = true, [24558] = true,
-        [24559] = true, [25459] = true, [25705] = true, [25706] = true, [25752] = true, [25753] = true,
-        [28113] = true, [28114] = true, [28552] = true, [28598] = true, [29233] = true, [29234] = true,
-        [29235] = true, [29236] = true, [29476] = true, [29588] = true, [29590] = true, [29738] = true,
-        [30431] = true, [30579] = true, [30756] = true, [31120] = true, [31239] = true, [31241] = true,
-        [31345] = true, [31363] = true, [31384] = true, [31489] = true, [31707] = true, [31890] = true,
-        [31891] = true, [31907] = true, [31914] = true, [32385] = true, [32386] = true, [32405] = true,
-        [32523] = true, [32621] = true, [32726] = true, [33102] = true, [33121] = true, [33289] = true,
-        [33314] = true, [33345] = true, [33347] = true, [33961] = true, [33962] = true, [33978] = true,
-        [34028] = true, [34090] = true, [34091] = true, [34469] = true, [34777] = true, [34815] = true,
-        [34984] = true, [35120] = true, [35567] = true, [35568] = true, [35569] = true, [35648] = true,
-        [35723] = true, [35787] = true, [35855] = true, [36742] = true, [36744] = true, [36746] = true,
-        [36756] = true, [36780] = true, [36855] = true, [36856] = true, [36940] = true, [36958] = true,
-        [37163] = true, [37164] = true, [37432] = true, [37571] = true, [37599] = true, [37736] = true,
-        [37737] = true, [37830] = true, [37833] = true, [38280] = true, [38281] = true, [38321] = true,
-        [38567] = true, [38660] = true, [38673] = true, [39713] = true, [40666] = true, [41267] = true,
-        [41556] = true, [42203] = true, [42772] = true, [43242] = true, [43297] = true, [43512] = true,
-        [44148] = true, [44158] = true, [44259] = true, [44276] = true, [44294] = true, [44326] = true,
-        [44569] = true, [44577] = true, [44725] = true, [44927] = true, [44979] = true, [45039] = true,
-        [45506] = true, [45857] = true, [46004] = true, [46052] = true, [46053] = true, [46128] = true,
-        [46318] = true, [46697] = true, [46875] = true, [46876] = true, [46877] = true, [46878] = true,
-        [46879] = true, [46880] = true, [46881] = true, [46882] = true, [46883] = true, [46884] = true,
-        [46955] = true, [47039] = true, [47246] = true, [48679] = true, [49010] = true, [49200] = true,
-        [49203] = true, [49205] = true, [49219] = true, [49220] = true, [49641] = true, [49643] = true,
-        [49644] = true, [49667] = true, [49676] = true, [49776] = true, [49932] = true, [50320] = true,
-        [50379] = true, [50380] = true, [51315] = true, [52079] = true, [52197] = true, [52831] = true,
-        [53053] = true, [53106] = true, [54345] = true, [54614] = true, [54639] = true, [55166] = true,
-        [55167] = true, [55181] = true, [55186] = true, [55243] = true, [56474] = true, [56571] = true,
-        [56812] = true, [57102] = true, [57118] = true, [57935] = true, [58117] = true, [58491] = true,
-        [58898] = true, [59143] = true, [60816] = true, [60886] = true, [60956] = true, [61310] = true,
-        [61322] = true, [61378] = true, [61505] = true, [62021] = true, [62044] = true, [62045] = true,
-        [62046] = true, [62056] = true, [62138] = true, [62281] = true, [62282] = true, [62483] = true,
-        [62768] = true, [62933] = true, [63090] = true, [63250] = true, [63276] = true, [63686] = true,
-        [63700] = true, [64353] = true, [64450] = true, [65894] = true, [65895] = true, [65896] = true,
-        [65897] = true, [69854] = true, [70928] = true, [70932] = true, [71635] = true, [71636] = true,
-        [71637] = true, [71638] = true, [71715] = true, [71716] = true, [71951] = true, [71952] = true,
-        [71953] = true, [73058] = true, [74034] = true, [77957] = true, [78912] = true, [79238] = true,
-        [79323] = true, [79324] = true, [79325] = true, [79326] = true, [79341] = true, [79343] = true,
-        [79812] = true, [80240] = true, [80241] = true, [80597] = true, [80827] = true, [82808] = true,
-        [82870] = true, [83076] = true, [83767] = true, [83769] = true, [83770] = true, [83771] = true,
-        [83772] = true, [83773] = true, [83774] = true, [83777] = true, [83779] = true, [83780] = true,
-        [85477] = true, [85557] = true, [85558] = true, [85783] = true, [86404] = true, [86433] = true,
-        [86434] = true, [86435] = true, [86436] = true, [86542] = true, [86544] = true, [86545] = true,
-        [87871] = true, [87878] = true, [88538] = true, [88563] = true, [88715] = true, [89169] = true,
-        [89170] = true, [89171] = true, [89172] = true, [89173] = true, [89174] = true, [89175] = true,
-        [89176] = true, [89178] = true, [89179] = true, [89180] = true, [89181] = true, [89182] = true,
-        [89183] = true, [89184] = true, [89185] = true, [89209] = true, [89317] = true, [89812] = true,
-        [89813] = true, [89814] = true, [91819] = true, [91821] = true, [91822] = true, [91854] = true,
-        [91855] = true, [91856] = true, [92441] = true, [94197] = true, [94198] = true, [94199] = true,
-        [94721] = true, [95383] = true, [95384] = true, [95385] = true, [95386] = true, [95387] = true,
-        [95388] = true, [95389] = true, [95390] = true, [97978] = true, [97979] = true, [97980] = true,
-        [97981] = true, [97982] = true, [97983] = true, [97984] = true, [97985] = true, [97986] = true,
-        [97987] = true, [97988] = true, [97990] = true, [102225] = true, [105891] = true, [108824] = true,
-        [108951] = true, [109012] = true, [109095] = true, [109121] = true, [110225] = true, [111478] = true,
-        [112378] = true, [112566] = true, [112692] = true, [113080] = true, [113103] = true, [113107] = true,
-        [113109] = true, [113260] = true, [113444] = true, [113445] = true, [113446] = true, [113447] = true,
-        [113448] = true, [113449] = true, [113453] = true, [113454] = true, [113456] = true, [113457] = true,
-        [113458] = true, [113459] = true, [113460] = true, [113461] = true, [113586] = true, [113590] = true,
-        [114018] = true, [114019] = true, [114020] = true, [114021] = true, [114022] = true, [114023] = true,
-        [114024] = true, [114025] = true, [114026] = true, [114027] = true, [114029] = true, [114030] = true,
-        [114031] = true, [114032] = true, [114033] = true, [114034] = true, [114035] = true, [114036] = true,
-        [114037] = true, [114038] = true, [114142] = true, [114144] = true, [114146] = true, [114148] = true,
-        [114150] = true, [114152] = true, [114154] = true, [114156] = true, [114158] = true, [114160] = true,
-        [114162] = true, [114164] = true, [114166] = true, [114168] = true, [114170] = true, [114172] = true,
-        [114174] = true, [114176] = true, [114178] = true, [114182] = true, [114184] = true, [114186] = true,
-        [114188] = true, [114208] = true, [114209] = true, [114210] = true, [114211] = true, [114212] = true,
-        [114213] = true, [114215] = true, [114216] = true, [114217] = true, [114218] = true, [114219] = true,
-        [114220] = true, [114221] = true, [114222] = true, [114223] = true, [114224] = true, [114877] = true,
-        [114965] = true, [114972] = true, [114973] = true, [114984] = true, [115008] = true, [115278] = true,
-        [115281] = true, [115287] = true, [115343] = true, [115467] = true, [115507] = true, [115593] = true,
-        [116068] = true, [116159] = true, [116160] = true, [116173] = true, [116438] = true, [119208] = true,
-        [119310] = true, [119316] = true, [119317] = true, [119323] = true, [120206] = true, [120207] = true,
-        [120208] = true, [120209] = true, [120210] = true, [120211] = true, [120277] = true, [120278] = true,
-        [120279] = true, [120280] = true, [120281] = true, [120282] = true, [120283] = true, [120284] = true,
-        [120285] = true, [122190] = true, [122399] = true, [122400] = true, [122401] = true, [122402] = true,
-        [122403] = true, [122404] = true, [122405] = true, [122406] = true, [122407] = true, [122408] = true,
-        [122409] = true, [122410] = true, [122411] = true, [122412] = true, [122413] = true, [122414] = true,
-        [122415] = true, [122416] = true, [122417] = true, [122418] = true, [122419] = true, [122420] = true,
-        [122421] = true, [122422] = true, [122423] = true, [122424] = true, [122572] = true, [122573] = true,
-    }
+    questStartItemSet = {}
+    for itemID in QUEST_START_ITEMS_CSV:gmatch("%d+") do
+        questStartItemSet[tonumber(itemID)] = true
+    end
 
     return questStartItemSet
 end
 
-local function SetButtonToItemPopup(button, itemID, itemName)
-    ResetPopupButtonState(button)
+local function GetItemInfoCompat(itemID)
+    if type(itemID) ~= "number" or itemID <= 0 then
+        return nil, nil, nil
+    end
 
-    button.mouseHandler = mouseHandlerPopup
-    button._popupType = "ITEM"
-    button._itemID = itemID
+    if C_Item and C_Item.GetItemNameByID and C_Item.GetItemIconByID then
+        local okName, itemName = SafeCall(C_Item.GetItemNameByID, itemID)
+        local okIcon, texture = SafeCall(C_Item.GetItemIconByID, itemID)
+        if okName and itemName then
+            return itemName, itemName and ("item:" .. itemID) or nil, okIcon and texture or nil
+        end
+    end
 
-    button.title:SetText(itemName or ITEM or "Item")
-    button.title:SetTextColor(opt_colors.PopupItemTitle[1], opt_colors.PopupItemTitle[2], opt_colors.PopupItemTitle[3])
-    button:AddLine("  Item Begins a Quest", nil, opt_colors.PopupItemDescription[1], opt_colors.PopupItemDescription[2], opt_colors.PopupItemDescription[3])
-    SetButtonBackdropColor(button, opt_colors.PopupItemBackground)
-    button:SetIcon("QuestIcon-Exclamation")
+    if type(GetItemInfo) == "function" then
+        local ok, itemName, itemLink, _, _, _, _, _, _, texture = SafeCall(GetItemInfo, itemID)
+        if ok and itemName then
+            return itemName, itemLink, texture
+        end
+    end
 
+    if type(GetItemInfoInstant) == "function" then
+        local ok, _, _, _, _, _, _, _, _, texture = SafeCall(GetItemInfoInstant, itemID)
+        if ok then
+            return nil, nil, texture
+        end
+    end
+
+    return nil, nil, nil
+end
+
+local function GetQuestPopupTitle(questID, questLogIndex)
+    if type(questLogIndex) == "number" and questLogIndex > 0 and type(QuestKing.GetQuestTaggedTitle) == "function" then
+        local ok, taggedTitle = SafeCall(QuestKing.GetQuestTaggedTitle, questLogIndex)
+        if ok and taggedTitle and taggedTitle ~= "" then
+            return taggedTitle
+        end
+    end
+
+    if C_QuestLog and C_QuestLog.GetTitleForQuestID and type(questID) == "number" and questID > 0 then
+        local ok, title = SafeCall(C_QuestLog.GetTitleForQuestID, questID)
+        if ok and title and title ~= "" then
+            return title
+        end
+    end
+
+    return NEW_QUEST_AVAILABLE or "New Quest!"
+end
+
+local function SetPopupVisuals(button, titleColorName, backgroundColorName, iconType)
+    local titleColor = GetColor(titleColorName)
+    local backgroundColor = GetColor(backgroundColorName)
+
+    button.title:SetTextColor(titleColor[1] or 1, titleColor[2] or 1, titleColor[3] or 1)
+    SetButtonBackdropColor(button, backgroundColor)
+    button:SetIcon(iconType)
     button.titleButton:EnableMouse(false)
     button:EnableMouse(true)
 end
 
-local function SetButtonToPopup(button, questID, popupType)
+local function SetButtonToItemPopup(button, itemID, popupInfo)
+    ResetPopupButtonState(button)
+
+    popupInfo = type(popupInfo) == "table" and popupInfo or {}
+
+    local itemName = popupInfo.name
+    local itemLink = popupInfo.link
+    local itemTexture = popupInfo.texture
+
+    if not itemName or not itemLink or not itemTexture then
+        local resolvedName, resolvedLink, resolvedTexture = GetItemInfoCompat(itemID)
+        itemName = itemName or resolvedName
+        itemLink = itemLink or resolvedLink
+        itemTexture = itemTexture or resolvedTexture
+    end
+
+    button._popupType = "ITEM"
+    button._popupKey = "item:" .. tostring(itemID)
+    button._itemID = itemID
+    button._itemName = itemName
+    button._itemLink = itemLink
+    button._itemTexture = itemTexture
+
+    button.title:SetText(itemName or ITEM or "Item")
+    button:AddLine(
+        "  " .. (ITEM_STARTS_QUEST or "Item Begins a Quest"),
+        nil,
+        (GetColor("PopupItemDescription"))[1],
+        (GetColor("PopupItemDescription"))[2],
+        (GetColor("PopupItemDescription"))[3]
+    )
+
+    SetPopupVisuals(button, "PopupItemTitle", "PopupItemBackground", "QuestIcon-Exclamation")
+end
+
+local function SetButtonToQuestPopup(button, questID, popupType)
     local questLogIndex = GetQuestLogIndexByIDCompat(questID)
-    local taggedTitle
 
     ResetPopupButtonState(button)
 
-    button.mouseHandler = mouseHandlerPopup
     button._popupType = popupType
+    button._popupKey = "quest:" .. tostring(questID) .. ":" .. tostring(popupType)
     button.questIndex = questLogIndex
     button.questLogIndex = questLogIndex
     button.questID = questID
 
-    if questLogIndex then
-        taggedTitle = QuestKing.GetQuestTaggedTitle(questLogIndex)
-    elseif C_QuestLog and C_QuestLog.GetTitleForQuestID then
-        taggedTitle = C_QuestLog.GetTitleForQuestID(questID)
-    end
-
-    if not taggedTitle or taggedTitle == "" then
-        taggedTitle = NEW_QUEST_AVAILABLE or "New Quest!"
-    end
-
-    button.title:SetText(taggedTitle)
+    button.title:SetText(GetQuestPopupTitle(questID, questLogIndex))
 
     if popupType == "COMPLETE" then
-        button.title:SetTextColor(opt_colors.PopupCompleteTitle[1], opt_colors.PopupCompleteTitle[2], opt_colors.PopupCompleteTitle[3])
+        local descriptionColor = GetColor("PopupCompleteDescription")
         button:AddLine(
-            ("  %s"):format(GetPopupCompleteLineText(questID)),
+            "  " .. GetPopupCompleteLineText(questID),
             nil,
-            opt_colors.PopupCompleteDescription[1],
-            opt_colors.PopupCompleteDescription[2],
-            opt_colors.PopupCompleteDescription[3]
+            descriptionColor[1],
+            descriptionColor[2],
+            descriptionColor[3]
         )
-        SetButtonBackdropColor(button, opt_colors.PopupCompleteBackground)
-        button:SetIcon("QuestIcon-QuestionMark")
+        SetPopupVisuals(button, "PopupCompleteTitle", "PopupCompleteBackground", "QuestIcon-QuestionMark")
     else
-        button.title:SetTextColor(opt_colors.PopupOfferTitle[1], opt_colors.PopupOfferTitle[2], opt_colors.PopupOfferTitle[3])
+        local descriptionColor = GetColor("PopupOfferDescription")
         button:AddLine(
-            ("  %s"):format(GetPopupOfferLineText()),
+            "  " .. GetPopupOfferLineText(),
             nil,
-            opt_colors.PopupOfferDescription[1],
-            opt_colors.PopupOfferDescription[2],
-            opt_colors.PopupOfferDescription[3]
+            descriptionColor[1],
+            descriptionColor[2],
+            descriptionColor[3]
         )
-        SetButtonBackdropColor(button, opt_colors.PopupOfferBackground)
-        button:SetIcon("QuestIcon-Exclamation")
+        SetPopupVisuals(button, "PopupOfferTitle", "PopupOfferBackground", "QuestIcon-Exclamation")
+    end
+end
+
+local function CleanupStaleItemPopups()
+    for itemID in pairs(itemPopups) do
+        if not FindContainerItemByID(itemID) then
+            itemPopups[itemID] = nil
+        end
+    end
+end
+
+local function OpenItemPopupTooltip(owner, itemID, popupInfo)
+    if not owner or type(itemID) ~= "number" or itemID <= 0 or not QuestKing.PrepareTooltip then
+        return
     end
 
-    button.titleButton:EnableMouse(false)
-    button:EnableMouse(true)
+    local tooltip = QuestKing:PrepareTooltip(owner, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    if not tooltip then
+        return
+    end
+
+    local itemLink = popupInfo and popupInfo.link or nil
+
+    if tooltip.SetHyperlink and itemLink then
+        local ok = SafeCall(tooltip.SetHyperlink, tooltip, itemLink)
+        if ok then
+            tooltip:AddLine(" ")
+            tooltip:AddLine("Left-click to use the item", 0.7, 0.7, 0.7)
+            tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
+            tooltip:Show()
+            return
+        end
+    end
+
+    if tooltip.SetItemByID then
+        local ok = SafeCall(tooltip.SetItemByID, tooltip, itemID)
+        if ok then
+            tooltip:AddLine(" ")
+            tooltip:AddLine("Left-click to use the item", 0.7, 0.7, 0.7)
+            tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
+            tooltip:Show()
+            return
+        end
+    end
+
+    local itemName = popupInfo and popupInfo.name or nil
+    tooltip:SetText(itemName or ITEM or "Item", 1, 0.82, 0)
+    tooltip:AddLine(ITEM_STARTS_QUEST or "Item Begins a Quest", 1, 1, 1, true)
+    tooltip:AddLine(" ")
+    tooltip:AddLine("Left-click to use the item", 0.7, 0.7, 0.7)
+    tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
+    tooltip:Show()
+end
+
+local function OpenQuestPopupTooltip(owner, questID, popupType, questLogIndex)
+    if not owner or type(questID) ~= "number" or questID <= 0 or not QuestKing.PrepareTooltip then
+        return
+    end
+
+    local tooltip = QuestKing:PrepareTooltip(owner, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    if not tooltip then
+        return
+    end
+
+    tooltip:SetText(GetQuestPopupTitle(questID, questLogIndex), 1, 0.82, 0)
+
+    if popupType == "COMPLETE" then
+        tooltip:AddLine(GetPopupCompleteLineText(questID), 1, 1, 1, true)
+    else
+        tooltip:AddLine(GetPopupOfferLineText(), 1, 1, 1, true)
+    end
+
+    tooltip:AddLine(" ")
+    tooltip:AddLine("Left-click to open the popup", 0.7, 0.7, 0.7)
+    tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
+    tooltip:Show()
 end
 
 function QuestKing:ParseLoot(msg)
-    if not opt.enableItemPopups or not msg then
+    if not opt.enableItemPopups or type(msg) ~= "string" or msg == "" then
         return
     end
 
-    local _, _, link = find(msg, LOOT_SELF_REGEX)
-    if not link then
-        return
-    end
+    local itemID = SafeNumber(msg:match("|Hitem:(%d+)"), nil)
+    local itemName = SafeString(msg:match("|h%[(.-)%]|h"), nil)
 
-    local _, _, itemID, itemName = find(link, "item:(%d+):.*|h%[(.+)%]|h")
-    itemID = tonumber(itemID)
+    if not itemID and LOOT_SELF_REGEX then
+        local _, _, link = find(msg, LOOT_SELF_REGEX)
+        if link then
+            itemID = SafeNumber(link:match("item:(%d+)"), nil)
+            itemName = itemName or SafeString(link:match("|h%[(.-)%]|h"), nil)
+        end
+    end
 
     if not itemID then
         return
     end
 
     if BuildQuestStartItemSet()[itemID] then
-        itemPopups[itemID] = itemName
+        local resolvedName, itemLink, itemTexture = GetItemInfoCompat(itemID)
+        itemPopups[itemID] = {
+            name = itemName or resolvedName,
+            link = itemLink,
+            texture = itemTexture,
+        }
         PlaySoundCompat(SOUNDKIT and SOUNDKIT.PVP_WARNING_HORDE, 9375)
-        self:UpdateTracker()
+        QueueTrackerRefresh(true)
     end
 end
 
@@ -475,65 +630,97 @@ function QuestKing:InitLoot()
 end
 
 function QuestKing:UpdateTrackerPopups()
-    for itemID, itemName in pairs(itemPopups) do
-        local button = WatchButton:GetKeyed("popup", itemID)
-        SetButtonToItemPopup(button, itemID, itemName)
+    CleanupStaleItemPopups()
+
+    for itemID, popupInfo in pairs(itemPopups) do
+        local button = WatchButton:GetKeyed("popup", "item:" .. tostring(itemID))
+        SetButtonToItemPopup(button, itemID, popupInfo)
     end
 
-    if not GetNumAutoQuestPopUps or not GetAutoQuestPopUp then
+    if type(GetNumAutoQuestPopUps) ~= "function" or type(GetAutoQuestPopUp) ~= "function" then
         return
     end
 
-    local numPopups = GetNumAutoQuestPopUps() or 0
-    for i = 1, numPopups do
-        local questID, popupType = GetAutoQuestPopUp(i)
+    local okCount, numPopups = SafeCall(GetNumAutoQuestPopUps)
+    numPopups = okCount and (SafeNumber(numPopups, 0) or 0) or 0
+
+    for index = 1, numPopups do
+        local okPopup, questID, popupType = SafeCall(GetAutoQuestPopUp, index)
+        questID = okPopup and (SafeNumber(questID, nil)) or nil
+        popupType = okPopup and SafeString(popupType, nil) or nil
+
         if questID and popupType then
-            local button = WatchButton:GetKeyed("popup", questID)
-            SetButtonToPopup(button, questID, popupType)
+            local button = WatchButton:GetKeyed("popup", "quest:" .. tostring(questID) .. ":" .. popupType)
+            SetButtonToQuestPopup(button, questID, popupType)
         end
     end
 end
 
 function mouseHandlerPopup:ButtonOnClick(mouse)
-    local popupType = self._popupType
+    local button = self
+    local popupType = button and button._popupType
 
     if popupType == "ITEM" then
-        local itemID = self._itemID
+        local itemID = button._itemID
         if not itemID then
             return
         end
 
         if mouse == "RightButton" then
             itemPopups[itemID] = nil
-            QuestKing:UpdateTracker()
+            QueueTrackerRefresh(true)
             return
         end
 
-        UseContainerItemByID(itemID)
-        itemPopups[itemID] = nil
-        QuestKing:UpdateTracker()
+        if UseContainerItemByID(itemID) then
+            itemPopups[itemID] = nil
+            QueueTrackerRefresh(true)
+        elseif not FindContainerItemByID(itemID) then
+            itemPopups[itemID] = nil
+            QueueTrackerRefresh(true)
+        end
         return
     end
 
-    local questID = self.questID
+    local questID = button and button.questID
+    local questLogIndex = button and (button.questLogIndex or button.questIndex)
     if not questID then
         return
     end
 
     if mouse == "RightButton" then
         RemoveAutoQuestPopUpCompat(questID)
-        QuestKing:UpdateTracker()
+        QueueTrackerRefresh(true)
         return
     end
 
     if popupType == "OFFER" then
-        CallQuestPopupAPICompat(ShowQuestOffer, questID, self.questIndex)
+        CallQuestPopupAPICompat(ShowQuestOffer, questID, questLogIndex)
         RemoveAutoQuestPopUpCompat(questID)
-        QuestKing:UpdateTracker()
+        QueueTrackerRefresh(true)
     elseif popupType == "COMPLETE" then
-        CallQuestPopupAPICompat(ShowQuestComplete, questID, self.questIndex)
+        CallQuestPopupAPICompat(ShowQuestComplete, questID, questLogIndex)
         RemoveAutoQuestPopUpCompat(questID)
-        QuestKing:UpdateTracker()
+        QueueTrackerRefresh(true)
+    end
+end
+
+function mouseHandlerPopup:TitleButtonOnEnter()
+    local button = self.parent or self
+    if not button then
+        return
+    end
+
+    if button._popupType == "ITEM" then
+        OpenItemPopupTooltip(self, button._itemID, itemPopups[button._itemID])
+    else
+        OpenQuestPopupTooltip(self, button.questID, button._popupType, button.questLogIndex or button.questIndex)
+    end
+end
+
+function mouseHandlerPopup:TitleButtonOnLeave()
+    if QuestKing.HideTooltip then
+        QuestKing:HideTooltip()
     end
 end
 
@@ -547,4 +734,9 @@ end
 
 function QuestKing:FindTrackedPopupItemInBags(itemID)
     return FindContainerItemByID(itemID)
+end
+
+function QuestKing:IsQuestStartItemID(itemID)
+    itemID = SafeNumber(itemID, nil)
+    return itemID and BuildQuestStartItemSet()[itemID] and true or false
 end

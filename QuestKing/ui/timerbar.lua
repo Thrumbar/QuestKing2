@@ -6,17 +6,16 @@ local tremove = table.remove
 local GetTime = GetTime
 local GetTimeStringFromSecondsShort = QuestKing.GetTimeStringFromSecondsShort
 
-local opt = QuestKing.options
-
 local tonumber = tonumber
 local type = type
+
+local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
 
 local BAR_HEIGHT = 15
 local BAR_LEFT_INSET = 16
 local BAR_TOP_OFFSET = -1
 local BAR_MIN_WIDTH = 80
-
-local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
+local UPDATE_INTERVAL = 0.05
 
 local timerBarPool = {}
 local numTimerBars = 0
@@ -26,14 +25,24 @@ local timerBackdrop = {
     insets = { left = 0, right = 0, top = 0, bottom = 0 },
 }
 
-local function SafeUpdateTracker()
-    if QuestKing and QuestKing.UpdateTracker then
-        QuestKing:UpdateTracker()
+local function GetOptions()
+    return QuestKing.options or {}
+end
+
+local function QueueTrackerRefresh(forceBuild)
+    if QuestKing and type(QuestKing.QueueTrackerUpdate) == "function" then
+        QuestKing:QueueTrackerUpdate(forceBuild, false)
+        return
+    end
+
+    if QuestKing and type(QuestKing.UpdateTracker) == "function" then
+        QuestKing:UpdateTracker(forceBuild, false)
     end
 end
 
 local function GetTimerBarWidth()
-    local width = ((opt and opt.buttonWidth) or 230) - 36
+    local opt = GetOptions()
+    local width = (tonumber(opt.buttonWidth) or 230) - 36
     if width < BAR_MIN_WIDTH then
         width = BAR_MIN_WIDTH
     end
@@ -45,12 +54,17 @@ local function ApplyFontStringStyle(fontString)
         return
     end
 
-    fontString:SetFont((opt and opt.font) or STANDARD_TEXT_FONT, (opt and opt.fontSize) or 12, (opt and opt.fontStyle) or "")
+    local opt = GetOptions()
+    fontString:SetFont(opt.font or STANDARD_TEXT_FONT, tonumber(opt.fontSize) or 12, opt.fontStyle or "")
     fontString:SetShadowOffset(1, -1)
     fontString:SetShadowColor(0, 0, 0, 1)
 end
 
 local function EnsureBackdrop(timerBar)
+    if not timerBar then
+        return
+    end
+
     if timerBar.SetBackdrop then
         timerBar:SetBackdrop(timerBackdrop)
         if timerBar.SetBackdropColor then
@@ -70,6 +84,30 @@ local function EnsureBackdrop(timerBar)
     end
 end
 
+local function ResetTimerBar(timerBar)
+    if not timerBar then
+        return
+    end
+
+    timerBar.baseLine = nil
+    timerBar.baseButton = nil
+    timerBar.duration = nil
+    timerBar.startTime = nil
+    timerBar._expired = nil
+    timerBar._nextUpdate = 0
+
+    timerBar:SetMinMaxValues(0, 1)
+    timerBar:SetValue(1)
+    timerBar:SetStatusBarColor(0.6, 0.1, 0.2)
+    timerBar:SetWidth(GetTimerBarWidth())
+    timerBar:SetHeight(BAR_HEIGHT)
+    timerBar:SetScript("OnUpdate", nil)
+
+    if timerBar.text then
+        timerBar.text:SetText("0:00")
+    end
+end
+
 local function FreeTimerBar(self)
     self:Hide()
     self:ClearAllPoints()
@@ -78,64 +116,77 @@ local function FreeTimerBar(self)
     if self.baseLine then
         self.baseLine.timerBar = nil
         self.baseLine.timerBarText = nil
+        self.baseLine.isTimer = nil
     end
 
-    self.baseLine = nil
-    self.baseButton = nil
-    self.duration = nil
-    self.startTime = nil
-    self._expired = nil
-
+    ResetTimerBar(self)
     tinsert(timerBarPool, self)
 end
 
-local function TimerBar_OnUpdate(self)
+local function UpdateTimerBarDisplay(self, forceNow)
     local duration = tonumber(self.duration)
     local startTime = tonumber(self.startTime)
 
     if not duration or not startTime or duration <= 0 then
+        self:SetMinMaxValues(0, 1)
         self:SetValue(0)
         self.text:SetText("0:00")
         return
     end
 
-    local timeNow = GetTime()
-    local timeRemaining = duration - (timeNow - startTime)
+    local timeRemaining = duration - (GetTime() - startTime)
 
-    if timeRemaining < 0 then
-        if timeRemaining > -0.5 then
+    if timeRemaining <= 0 then
+        if timeRemaining > -0.5 or forceNow then
             timeRemaining = 0
+            self:SetMinMaxValues(0, duration)
+            self:SetValue(0)
+            self.text:SetText("0:00")
         else
+            self:SetMinMaxValues(0, duration)
             self:SetValue(0)
             self.text:SetText("0:00")
             self:SetScript("OnUpdate", nil)
 
             if not self._expired then
                 self._expired = true
-                SafeUpdateTracker()
+                QueueTrackerRefresh(true)
             end
-            return
         end
+        return
     end
 
+    self:SetMinMaxValues(0, duration)
     self:SetValue(timeRemaining)
     self.text:SetText(GetTimeStringFromSecondsShort(timeRemaining))
+end
+
+local function TimerBar_OnUpdate(self, elapsed)
+    self._nextUpdate = (self._nextUpdate or 0) - elapsed
+    if self._nextUpdate > 0 then
+        return
+    end
+
+    self._nextUpdate = UPDATE_INTERVAL
+    UpdateTimerBarDisplay(self, false)
 end
 
 local function CreateTimerBar()
     numTimerBars = numTimerBars + 1
 
-    local timerBar = CreateFrame(
-        "StatusBar",
-        "QuestKing_TimerBar" .. numTimerBars,
-        QuestKing.Tracker,
-        BACKDROP_TEMPLATE
-    )
+    local parent = QuestKing and QuestKing.Tracker or UIParent
+    local timerBar = CreateFrame("StatusBar", nil, parent, BACKDROP_TEMPLATE)
+
     timerBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    timerBar:GetStatusBarTexture():SetHorizTile(false)
+
+    local statusTexture = timerBar:GetStatusBarTexture()
+    if statusTexture and statusTexture.SetHorizTile then
+        statusTexture:SetHorizTile(false)
+    end
+
     timerBar:SetStatusBarColor(0.6, 0.1, 0.2)
-    timerBar:SetMinMaxValues(0, 100)
-    timerBar:SetValue(100)
+    timerBar:SetMinMaxValues(0, 1)
+    timerBar:SetValue(1)
     timerBar:SetWidth(GetTimerBarWidth())
     timerBar:SetHeight(BAR_HEIGHT)
 
@@ -160,6 +211,7 @@ local function CreateTimerBar()
     timerBar.text = text
 
     timerBar.Free = FreeTimerBar
+    ResetTimerBar(timerBar)
 
     return timerBar
 end
@@ -177,13 +229,12 @@ function QuestKing.WatchButton:AddTimerBar(duration, startTime)
 
         line.timerBar = timerBar
         line.timerBarText = timerBar.text
-
-        timerBar.baseButton = self
-        timerBar.baseLine = line
-    else
-        timerBar.baseButton = self
-        timerBar.baseLine = line
     end
+
+    timerBar.baseButton = self
+    timerBar.baseLine = line
+    timerBar._expired = nil
+    timerBar._nextUpdate = 0
 
     duration = tonumber(duration) or 0
     startTime = tonumber(startTime) or GetTime()
@@ -192,7 +243,11 @@ function QuestKing.WatchButton:AddTimerBar(duration, startTime)
         duration = 1
     end
 
-    timerBar._expired = nil
+    timerBar.duration = duration
+    timerBar.startTime = startTime
+
+    timerBar:SetParent(self)
+    timerBar:SetFrameLevel((self.GetFrameLevel and self:GetFrameLevel()) or 1)
     timerBar:SetWidth(GetTimerBarWidth())
     timerBar:SetHeight(BAR_HEIGHT)
     EnsureBackdrop(timerBar)
@@ -201,17 +256,15 @@ function QuestKing.WatchButton:AddTimerBar(duration, startTime)
     timerBar:SetPoint("TOPLEFT", line, "TOPLEFT", BAR_LEFT_INSET, BAR_TOP_OFFSET)
     timerBar:Show()
 
-    timerBar:SetMinMaxValues(0, duration)
-    timerBar.duration = duration
-    timerBar.startTime = startTime
-    timerBar:SetScript("OnUpdate", TimerBar_OnUpdate)
-
     line.isTimer = true
     line:SetText("")
-    line.right:SetText("")
+    if line.right then
+        line.right:SetText("")
+    end
     line:SetHeight(BAR_HEIGHT)
 
-    TimerBar_OnUpdate(timerBar)
+    UpdateTimerBarDisplay(timerBar, true)
+    timerBar:SetScript("OnUpdate", TimerBar_OnUpdate)
 
     return timerBar
 end

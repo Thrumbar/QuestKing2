@@ -1,4 +1,4 @@
-## Interface: 120001, 40400, 11503
+## Interface: 120005, 120001, 50503, 40402, 20505, 11508
 ## Title: QuestKing
 ## Author: Original: Barjack (up to WotLK) Current: Thrumbar
 ## Version: @project-version@

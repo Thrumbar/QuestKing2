@@ -1,40 +1,37 @@
---[[
-QuestKing - quest.lua
-Validated quest tracker pass for:
-- normal quests
-- campaign quests
-- watched world quests
-- special assignments (capstone world quests)
-- prey quests
-- legacy/retail compatible fallbacks where possible
-
-Notes:
-- Task / bonus-objective ambient content is still handled by bonusobjective.lua.
-- This file owns the normal quest-log/watch-list based tracker rendering.
-- We deliberately classify using direct API predicates first, then safe tag fallbacks.
---]]
-
 local addonName, QuestKing = ...
 
-local CQL = C_QuestLog
-local CTQ = C_TaskQuest
-local CST = C_SuperTrack
+local C_QuestLog = C_QuestLog
+local C_TaskQuest = C_TaskQuest
+local C_SuperTrack = C_SuperTrack
+local C_CampaignInfo = C_CampaignInfo
 
 local WatchButton = QuestKing.WatchButton
-local opt = QuestKing.options
-local opt_colors = opt.colors
+local opt = QuestKing.options or {}
+local opt_colors = opt.colors or {}
 local opt_showCompletedObjectives = opt.showCompletedObjectives
 
+local floor = math.floor
 local format = string.format
 local match = string.match
 local sort = table.sort
-local floor = math.floor
-local raw_tonumber = tonumber
+local tonumber_raw = tonumber
 local tostring = tostring
 local type = type
 local wipe = wipe
+local pairs = pairs
 
 local UNKNOWN = UNKNOWN or "Unknown"
+local NORMAL_QUEST_HEADER = TRACKER_HEADER_QUESTS or QUESTS_LABEL or "Quests"
+local TASK_HEADER = TRACKER_HEADER_OBJECTIVE or "Tasks"
+local WORLD_QUEST_HEADER = TRACKER_HEADER_WORLD_QUESTS or "World Quests"
+local CAMPAIGN_HEADER = CAMPAIGN or "Campaign"
+
+local QUEST_TAG_CAPSTONE_WORLD_QUEST = 286
+
+local LINE_LEFT_PADDING = 16
+local LINE_RIGHT_PADDING = 8
+local LEVEL_GAP_X = 6
+local COMPLETED_ALPHA = 0.65
 
 local QUEST_KIND = {
     NORMAL = "normal",
@@ -51,11 +48,11 @@ local IsSecretValue = QuestKing.IsSecretValue or function()
     return false
 end
 
-local IsSafeNumber = QuestKing.IsSafeNumber or function(value)
+local function IsSafeNumber(value)
     return type(value) == "number" and not IsSecretValue(value)
 end
 
-local SafeNumber = QuestKing.SafeNumber or function(value, fallback)
+local function SafeNumber(value, fallback)
     if value == nil or IsSecretValue(value) then
         return fallback
     end
@@ -64,7 +61,7 @@ local SafeNumber = QuestKing.SafeNumber or function(value, fallback)
         return value
     end
 
-    local ok, numberValue = pcall(raw_tonumber, value)
+    local ok, numberValue = pcall(tonumber_raw, value)
     if ok and type(numberValue) == "number" and not IsSecretValue(numberValue) then
         return numberValue
     end
@@ -72,7 +69,7 @@ local SafeNumber = QuestKing.SafeNumber or function(value, fallback)
     return fallback
 end
 
-local SafeString = QuestKing.SafeString or function(value, fallback)
+local function SafeString(value, fallback)
     if value == nil or IsSecretValue(value) then
         return fallback
     end
@@ -84,166 +81,270 @@ local SafeString = QuestKing.SafeString or function(value, fallback)
     return fallback
 end
 
-local function tonumber(value)
-    return SafeNumber(value, nil)
+local function SafeBoolean(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    return value and true or false
 end
 
-local QUEST_TAG_CAPSTONE_WORLD_QUEST = 286
-
--- ============================================================================
--- Basic compat helpers
--- ============================================================================
-
-local function QK_GetInfo(index)
-    return CQL and CQL.GetInfo and CQL.GetInfo(index) or nil
-end
-
-local function QK_GetQuestLogIndexByID(questID)
-    if not questID then
-        return nil
-    end
-
-    if CQL and CQL.GetLogIndexForQuestID then
-        local index = CQL.GetLogIndexForQuestID(questID)
-        if index and index > 0 then
-            return index
-        end
-    end
-
-    if GetQuestLogIndexByID then
-        local index = GetQuestLogIndexByID(questID)
-        if index and index > 0 then
-            return index
-        end
-    end
-
-    return nil
-end
-
-local function QK_GetQuestIDForQuestLogIndex(questLogIndex)
-    if not questLogIndex or questLogIndex <= 0 then
-        return nil
-    end
-
-    if CQL and CQL.GetInfo then
-        local info = CQL.GetInfo(questLogIndex)
-        if info and info.questID then
-            return info.questID
-        end
-    end
-
-    if GetQuestLogTitle then
-        local _, _, _, _, _, _, _, questID = GetQuestLogTitle(questLogIndex)
-        return questID
-    end
-
-    return nil
-end
-
-local function QK_IsWatched(questID)
-    if not questID then
-        return false
-    end
-
-    if CQL and CQL.IsQuestWatched then
-        return CQL.IsQuestWatched(questID) and true or false
-    end
-
-    local questIndex = QK_GetQuestLogIndexByID(questID)
-    if questIndex and IsQuestWatched then
-        return IsQuestWatched(questIndex) and true or false
-    end
-
-    return false
-end
-
-local function QK_AddWatch(questID)
-    if not questID then
-        return
-    end
-
-    if CQL and CQL.AddQuestWatch then
-        if Enum and Enum.QuestWatchType and Enum.QuestWatchType.Manual ~= nil then
-            CQL.AddQuestWatch(questID, Enum.QuestWatchType.Manual)
-        else
-            CQL.AddQuestWatch(questID)
-        end
-        return
-    end
-
-    local questIndex = QK_GetQuestLogIndexByID(questID)
-    if questIndex and AddQuestWatch then
-        AddQuestWatch(questIndex)
-    end
-end
-
-local function QK_RemoveWatch(questID)
-    if not questID then
-        return
-    end
-
-    if CQL and CQL.RemoveQuestWatch then
-        CQL.RemoveQuestWatch(questID)
-        return
-    end
-
-    local questIndex = QK_GetQuestLogIndexByID(questID)
-    if questIndex and RemoveQuestWatch then
-        RemoveQuestWatch(questIndex)
-    end
-end
-
-local function QK_IsComplete(questID)
-    if not questID then
-        return false
-    end
-
-    if CQL and CQL.IsComplete then
-        return CQL.IsComplete(questID) and true or false
-    end
-
-    local questIndex = QK_GetQuestLogIndexByID(questID)
-    if questIndex and GetQuestLogIsComplete then
-        return GetQuestLogIsComplete(questIndex) and true or false
-    end
-
-    return false
-end
-
-local function QK_IsAutoComplete(questID, questLogIndex)
-    if not questID and not questLogIndex then
-        return false
-    end
-
-    if questID and CQL and CQL.IsAutoComplete then
-        return CQL.IsAutoComplete(questID) and true or false
-    end
-
-    if not questLogIndex and questID then
-        questLogIndex = QK_GetQuestLogIndexByID(questID)
-    end
-
-    if questLogIndex and GetQuestLogIsAutoComplete then
-        return GetQuestLogIsAutoComplete(questLogIndex) and true or false
-    end
-
-    return false
-end
-
-local function QK_ShowQuestAPICompat(func, questID, questLogIndex)
+local function SafeCall(func, ...)
     if type(func) ~= "function" then
+        return false, nil, nil, nil, nil, nil, nil, nil, nil
+    end
+
+    local ok, a, b, c, d, e, f, g, h = pcall(func, ...)
+    if ok then
+        return true, a, b, c, d, e, f, g, h
+    end
+
+    return false, nil, nil, nil, nil, nil, nil, nil, nil
+end
+
+local function QueueTrackerRefresh(forceBuild)
+    if type(QuestKing.QueueTrackerUpdate) == "function" then
+        QuestKing:QueueTrackerUpdate(forceBuild, false)
+        return
+    end
+
+    if type(QuestKing.UpdateTracker) == "function" then
+        QuestKing:UpdateTracker(forceBuild, false)
+    end
+end
+
+local FINISHED_COLOR = {
+    r = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[1]) or 0.60,
+    g = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[2]) or 1.00,
+    b = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[3]) or 0.60,
+}
+
+local UNFINISHED_COLOR = { r = 0.95, g = 0.95, b = 0.95 }
+local TITLE_COLOR = { r = 1.00, g = 0.82, b = 0.00 }
+
+local TITLE_COMPLETE_COLOR = {
+    r = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[1]) or 0.20,
+    g = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[2]) or 1.00,
+    b = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[3]) or 0.20,
+}
+
+local SECTION_HEADER_COLOR = {
+    r = (opt_colors.SectionHeader and opt_colors.SectionHeader[1]) or 1.00,
+    g = (opt_colors.SectionHeader and opt_colors.SectionHeader[2]) or 0.82,
+    b = (opt_colors.SectionHeader and opt_colors.SectionHeader[3]) or 0.00,
+}
+
+local function GetQuestInfoByLogIndex(questLogIndex)
+    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
+        return nil
+    end
+
+    if C_QuestLog and C_QuestLog.GetInfo then
+        local ok, info = SafeCall(C_QuestLog.GetInfo, questLogIndex)
+        if ok and type(info) == "table" then
+            return info
+        end
+    end
+
+    if _G.GetQuestLogTitle then
+        local ok, title, level, suggestedGroup, isHeader, isCollapsed, isComplete, frequency, questID, startEvent =
+            SafeCall(_G.GetQuestLogTitle, questLogIndex)
+
+        if ok and title then
+            return {
+                title = title,
+                level = level,
+                suggestedGroup = suggestedGroup,
+                isHeader = isHeader,
+                isCollapsed = isCollapsed,
+                isComplete = isComplete,
+                frequency = frequency,
+                questID = questID,
+                startEvent = startEvent,
+                isHidden = false,
+                isCampaign = false,
+                campaignID = 0,
+                isTask = false,
+            }
+        end
+    end
+
+    return nil
+end
+
+local function GetQuestLogIndexByIDCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return nil
+    end
+
+    if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
+        local ok, index = SafeCall(C_QuestLog.GetLogIndexForQuestID, questID)
+        if ok and type(index) == "number" and index > 0 then
+            return index
+        end
+    end
+
+    if _G.GetQuestLogIndexByID then
+        local ok, index = SafeCall(_G.GetQuestLogIndexByID, questID)
+        if ok and type(index) == "number" and index > 0 then
+            return index
+        end
+    end
+
+    return nil
+end
+
+local function GetQuestIDForQuestLogIndex(questLogIndex)
+    local info = GetQuestInfoByLogIndex(questLogIndex)
+    if info and type(info.questID) == "number" and info.questID > 0 then
+        return info.questID
+    end
+
+    return nil
+end
+
+local function GetQuestIDForWatchIndex(watchIndex)
+    if type(watchIndex) ~= "number" or watchIndex <= 0 then
+        return nil
+    end
+
+    if C_QuestLog and C_QuestLog.GetQuestIDForQuestWatchIndex then
+        local ok, questID = SafeCall(C_QuestLog.GetQuestIDForQuestWatchIndex, watchIndex)
+        if ok and type(questID) == "number" and questID > 0 then
+            return questID
+        end
+    end
+
+    if _G.GetQuestIndexForWatch then
+        local ok, questLogIndex = SafeCall(_G.GetQuestIndexForWatch, watchIndex)
+        if ok and type(questLogIndex) == "number" and questLogIndex > 0 then
+            return GetQuestIDForQuestLogIndex(questLogIndex)
+        end
+    end
+
+    return nil
+end
+
+local function IsQuestWatchedCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
         return false
     end
 
-    if questID then
-        local ok = pcall(func, questID)
+    if C_QuestLog and C_QuestLog.IsQuestWatched then
+        local ok, watched = SafeCall(C_QuestLog.IsQuestWatched, questID)
+        if ok then
+            return watched and true or false
+        end
+    end
+
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    if questLogIndex and _G.IsQuestWatched then
+        local ok, watched = SafeCall(_G.IsQuestWatched, questLogIndex)
+        if ok then
+            return watched and true or false
+        end
+    end
+
+    return false
+end
+
+local function AddQuestWatchByID(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if C_QuestLog and C_QuestLog.AddQuestWatch then
+        local ok = SafeCall(C_QuestLog.AddQuestWatch, questID)
+        return ok and true or false
+    end
+
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    if questLogIndex and _G.AddQuestWatch then
+        local ok = SafeCall(_G.AddQuestWatch, questLogIndex)
+        return ok and true or false
+    end
+
+    return false
+end
+
+local function RemoveQuestWatchByID(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if C_QuestLog and C_QuestLog.RemoveQuestWatch then
+        local ok = SafeCall(C_QuestLog.RemoveQuestWatch, questID)
+        return ok and true or false
+    end
+
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    if questLogIndex and _G.RemoveQuestWatch then
+        local ok = SafeCall(_G.RemoveQuestWatch, questLogIndex)
+        return ok and true or false
+    end
+
+    return false
+end
+
+local function IsQuestCompleteCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if C_QuestLog and C_QuestLog.IsComplete then
+        local ok, isComplete = SafeCall(C_QuestLog.IsComplete, questID)
+        if ok then
+            return isComplete and true or false
+        end
+    end
+
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    if questLogIndex and _G.GetQuestLogIsComplete then
+        local ok, isComplete = SafeCall(_G.GetQuestLogIsComplete, questLogIndex)
+        if ok then
+            return isComplete and true or false
+        end
+    end
+
+    return false
+end
+
+local function IsQuestAutoComplete(questID, questLogIndex)
+    if type(questID) == "number" and C_QuestLog and C_QuestLog.IsAutoComplete then
+        local ok, isAutoComplete = SafeCall(C_QuestLog.IsAutoComplete, questID)
+        if ok then
+            return isAutoComplete and true or false
+        end
+    end
+
+    if (not questLogIndex or questLogIndex <= 0) and type(questID) == "number" then
+        questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    end
+
+    if questLogIndex and _G.GetQuestLogIsAutoComplete then
+        local ok, isAutoComplete = SafeCall(_G.GetQuestLogIsAutoComplete, questLogIndex)
+        if ok then
+            return isAutoComplete and true or false
+        end
+    end
+
+    return false
+end
+
+local function ShowQuestCompleteCompat(questID, questLogIndex)
+    if type(_G.ShowQuestComplete) ~= "function" then
+        return false
+    end
+
+    if type(questID) == "number" and questID > 0 then
+        local ok = SafeCall(_G.ShowQuestComplete, questID)
         if ok then
             return true
         end
     end
 
-    if questLogIndex then
-        local ok = pcall(func, questLogIndex)
+    if type(questLogIndex) == "number" and questLogIndex > 0 then
+        local ok = SafeCall(_G.ShowQuestComplete, questLogIndex)
         if ok then
             return true
         end
@@ -252,18 +353,14 @@ local function QK_ShowQuestAPICompat(func, questID, questLogIndex)
     return false
 end
 
-local function QK_ShowQuestComplete(questID, questLogIndex)
-    return QK_ShowQuestAPICompat(ShowQuestComplete, questID, questLogIndex)
-end
-
-local function QK_GetDifficultyLevel(info)
-    if not info then
+local function GetDifficultyLevel(info)
+    if type(info) ~= "table" then
         return nil
     end
 
-    if CQL and CQL.GetQuestDifficultyLevel and info.questID then
-        local level = CQL.GetQuestDifficultyLevel(info.questID)
-        if IsSafeNumber(level) then
+    if C_QuestLog and C_QuestLog.GetQuestDifficultyLevel and type(info.questID) == "number" then
+        local ok, level = SafeCall(C_QuestLog.GetQuestDifficultyLevel, info.questID)
+        if ok and IsSafeNumber(level) then
             return level
         end
     end
@@ -275,24 +372,34 @@ local function QK_GetDifficultyLevel(info)
     return nil
 end
 
-local function QK_GetDifficultyColor(level)
-    if level and GetQuestDifficultyColor then
-        return GetQuestDifficultyColor(level)
+local function GetDifficultyColor(level)
+    if level and _G.GetQuestDifficultyColor then
+        local ok, color = SafeCall(_G.GetQuestDifficultyColor, level)
+        if ok and type(color) == "table" then
+            return color
+        end
     end
 
     return { r = 1, g = 0.82, b = 0 }
 end
 
-local function QK_GetTagInfo(questID)
-    if CQL and CQL.GetQuestTagInfo and questID then
-        return CQL.GetQuestTagInfo(questID)
+local function GetQuestTagInfoCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return nil
     end
 
-    if GetQuestTagInfo and questID then
-        local tagID, tagName, worldQuestType, quality, isElite, tradeskillLineID, displayExpiration =
-            GetQuestTagInfo(questID)
+    if C_QuestLog and C_QuestLog.GetQuestTagInfo then
+        local ok, info = SafeCall(C_QuestLog.GetQuestTagInfo, questID)
+        if ok and type(info) == "table" then
+            return info
+        end
+    end
 
-        if tagID or tagName or worldQuestType or quality or isElite then
+    if _G.GetQuestTagInfo then
+        local ok, tagID, tagName, worldQuestType, quality, isElite, tradeskillLineID, displayExpiration =
+            SafeCall(_G.GetQuestTagInfo, questID)
+
+        if ok and (tagID or tagName or worldQuestType or quality or isElite) then
             return {
                 tagID = tagID,
                 tagName = tagName,
@@ -308,7 +415,7 @@ local function QK_GetTagInfo(questID)
     return nil
 end
 
-local function QK_ObjectiveTextAlreadyHasProgress(text)
+local function ObjectiveTextAlreadyHasProgress(text)
     if type(text) ~= "string" or text == "" then
         return false
     end
@@ -324,19 +431,23 @@ local function QK_ObjectiveTextAlreadyHasProgress(text)
     return false
 end
 
-local function QK_GetQuestObjectives(questID)
+local function GetQuestObjectives(questID)
     local out = {}
 
-    if CQL and CQL.GetQuestObjectives and questID then
-        local objectives = CQL.GetQuestObjectives(questID)
-        if type(objectives) == "table" then
+    if type(questID) ~= "number" or questID <= 0 then
+        return out
+    end
+
+    if C_QuestLog and C_QuestLog.GetQuestObjectives then
+        local ok, objectives = SafeCall(C_QuestLog.GetQuestObjectives, questID)
+        if ok and type(objectives) == "table" then
             for i = 1, #objectives do
                 local objective = objectives[i]
-                if objective then
+                if type(objective) == "table" then
                     out[#out + 1] = {
-                        text = objective.text or "",
+                        text = SafeString(objective.text, "") or "",
                         type = objective.type or objective.objectiveType,
-                        finished = (objective.finished or objective.completed) and true or false,
+                        finished = SafeBoolean(objective.finished or objective.completed, false),
                         numFulfilled = SafeNumber(objective.numFulfilled, nil),
                         numRequired = SafeNumber(objective.numRequired, nil),
                     }
@@ -349,53 +460,71 @@ local function QK_GetQuestObjectives(questID)
         end
     end
 
-    local questLogIndex = QK_GetQuestLogIndexByID(questID)
-    if questLogIndex and GetNumQuestLeaderBoards and GetQuestLogLeaderBoard then
-        local numObjectives = GetNumQuestLeaderBoards(questLogIndex) or 0
-        for i = 1, numObjectives do
-            local text, objectiveType, finished = GetQuestLogLeaderBoard(i, questLogIndex, true)
-            if text then
-                out[#out + 1] = {
-                    text = text or "",
-                    type = objectiveType,
-                    finished = finished and true or false,
-                }
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    if questLogIndex and _G.GetNumQuestLeaderBoards and _G.GetQuestLogLeaderBoard then
+        local okNum, numObjectives = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndex)
+        if okNum then
+            for i = 1, SafeNumber(numObjectives, 0) or 0 do
+                local okObj, text, objectiveType, finished = SafeCall(_G.GetQuestLogLeaderBoard, i, questLogIndex, true)
+                if okObj and text then
+                    out[#out + 1] = {
+                        text = SafeString(text, "") or "",
+                        type = objectiveType,
+                        finished = finished and true or false,
+                    }
+                end
             end
         end
-    elseif questID and GetNumQuestLeaderBoards and GetQuestObjectiveInfo then
-        local numObjectives = GetNumQuestLeaderBoards(questLogIndex or 0) or 0
-        for i = 1, numObjectives do
-            local text, objectiveType, finished = GetQuestObjectiveInfo(questID, i, false)
-            out[#out + 1] = {
-                text = text or "",
-                type = objectiveType,
-                finished = finished and true or false,
-            }
+    elseif _G.GetQuestObjectiveInfo then
+        local questLogIndexCompat = questLogIndex or 0
+        local okNum, numObjectives = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndexCompat)
+        if okNum then
+            for i = 1, SafeNumber(numObjectives, 0) or 0 do
+                local okObj, text, objectiveType, finished = SafeCall(_G.GetQuestObjectiveInfo, questID, i, false)
+                if okObj then
+                    out[#out + 1] = {
+                        text = SafeString(text, "") or "",
+                        type = objectiveType,
+                        finished = finished and true or false,
+                    }
+                end
+            end
         end
     end
 
     return out
 end
 
-local function QK_GetRequiredMoney(questID)
-    if CQL and CQL.GetRequiredMoney and questID then
-        return SafeNumber(CQL.GetRequiredMoney(questID), 0) or 0
+local function GetRequiredMoney(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return 0
+    end
+
+    if C_QuestLog and C_QuestLog.GetRequiredMoney then
+        local ok, amount = SafeCall(C_QuestLog.GetRequiredMoney, questID)
+        if ok then
+            return SafeNumber(amount, 0) or 0
+        end
     end
 
     return 0
 end
 
-local function QK_GetQuestPercent(questID)
-    if CQL and CQL.GetQuestProgressBarPercent and questID then
-        local percent = CQL.GetQuestProgressBarPercent(questID)
-        if IsSafeNumber(percent) and percent >= 0 and percent <= 100 then
+local function GetQuestProgressPercent(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return nil
+    end
+
+    if C_QuestLog and C_QuestLog.GetQuestProgressBarPercent then
+        local ok, percent = SafeCall(C_QuestLog.GetQuestProgressBarPercent, questID)
+        if ok and IsSafeNumber(percent) and percent >= 0 and percent <= 100 then
             return percent
         end
     end
 
-    if GetQuestProgressBarPercent and questID then
-        local percent = GetQuestProgressBarPercent(questID)
-        if IsSafeNumber(percent) and percent >= 0 and percent <= 100 then
+    if _G.GetQuestProgressBarPercent then
+        local ok, percent = SafeCall(_G.GetQuestProgressBarPercent, questID)
+        if ok and IsSafeNumber(percent) and percent >= 0 and percent <= 100 then
             return percent
         end
     end
@@ -403,99 +532,115 @@ local function QK_GetQuestPercent(questID)
     return nil
 end
 
-local function QK_GetQuestLogSpecialItemInfo(questLogIndex)
-    if not questLogIndex or questLogIndex <= 0 then
+local function GetQuestLogSpecialItemInfoCompat(questLogIndex)
+    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
         return nil, nil, nil, nil
     end
 
-    if GetQuestLogSpecialItemInfo then
-        return GetQuestLogSpecialItemInfo(questLogIndex)
+    if _G.GetQuestLogSpecialItemInfo then
+        local ok, itemLink, itemTexture, charges, itemShowWhenComplete = SafeCall(_G.GetQuestLogSpecialItemInfo, questLogIndex)
+        if ok then
+            return itemLink, itemTexture, charges, itemShowWhenComplete
+        end
     end
 
     return nil, nil, nil, nil
 end
 
-local function QK_GetActivePreyQuest()
-    if CQL and CQL.GetActivePreyQuest then
-        return CQL.GetActivePreyQuest()
+local function GetActivePreyQuest()
+    if C_QuestLog and C_QuestLog.GetActivePreyQuest then
+        local ok, questID = SafeCall(C_QuestLog.GetActivePreyQuest)
+        if ok and type(questID) == "number" and questID > 0 then
+            return questID
+        end
     end
 
     return nil
 end
 
-local function QK_IsCampaignQuest(questID, info)
-    if not questID then
+local function IsCampaignQuest(questID, info)
+    if type(questID) ~= "number" or questID <= 0 then
         return false
     end
 
-    local function IsCampaignFromInfo(questInfo)
-        if type(questInfo) ~= "table" then
-            return nil
+    if type(info) == "table" then
+        if info.isCampaign ~= nil then
+            return info.isCampaign and true or false
         end
 
-        if questInfo.isCampaign ~= nil then
-            return questInfo.isCampaign and true or false
-        end
-
-        local campaignID = tonumber(questInfo.campaignID)
-        if campaignID and campaignID > 0 then
+        local campaignID = SafeNumber(info.campaignID, 0) or 0
+        if campaignID > 0 then
             return true
         end
-
-        return false
     end
 
-    local isCampaign = IsCampaignFromInfo(info)
-    if isCampaign ~= nil then
-        return isCampaign
-    end
-
-    local questLogIndex = QK_GetQuestLogIndexByID(questID)
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
     if questLogIndex then
-        local liveInfo = QK_GetInfo(questLogIndex)
-        isCampaign = IsCampaignFromInfo(liveInfo)
-        if isCampaign ~= nil then
-            return isCampaign
+        local liveInfo = GetQuestInfoByLogIndex(questLogIndex)
+        if type(liveInfo) == "table" then
+            if liveInfo.isCampaign ~= nil then
+                return liveInfo.isCampaign and true or false
+            end
+
+            local campaignID = SafeNumber(liveInfo.campaignID, 0) or 0
+            if campaignID > 0 then
+                return true
+            end
         end
     end
 
     if C_CampaignInfo and C_CampaignInfo.IsCampaignQuest then
-        return C_CampaignInfo.IsCampaignQuest(questID) and true or false
+        local ok, isCampaign = SafeCall(C_CampaignInfo.IsCampaignQuest, questID)
+        if ok then
+            return isCampaign and true or false
+        end
     end
 
     return false
 end
 
-local function QK_IsTaskQuest(questID)
-    if not questID then
+local function IsTaskQuest(questID)
+    if type(questID) ~= "number" or questID <= 0 then
         return false
     end
 
-    if CQL and CQL.IsQuestTask then
-        return CQL.IsQuestTask(questID) and true or false
+    if C_QuestLog and C_QuestLog.IsQuestTask then
+        local ok, isTask = SafeCall(C_QuestLog.IsQuestTask, questID)
+        if ok then
+            return isTask and true or false
+        end
     end
 
-    if CTQ and CTQ.IsActive then
-        return CTQ.IsActive(questID) and true or false
+    if C_TaskQuest and C_TaskQuest.IsActive then
+        local ok, isTask = SafeCall(C_TaskQuest.IsActive, questID)
+        if ok then
+            return isTask and true or false
+        end
     end
 
-    if IsQuestTask then
-        return IsQuestTask(questID) and true or false
+    if _G.IsQuestTask then
+        local ok, isTask = SafeCall(_G.IsQuestTask, questID)
+        if ok then
+            return isTask and true or false
+        end
     end
 
     return false
 end
 
-local function QK_IsWorldQuest(questID)
-    if not questID then
+local function IsWorldQuest(questID)
+    if type(questID) ~= "number" or questID <= 0 then
         return false
     end
 
-    if CQL and CQL.IsWorldQuest then
-        return CQL.IsWorldQuest(questID) and true or false
+    if C_QuestLog and C_QuestLog.IsWorldQuest then
+        local ok, isWorldQuest = SafeCall(C_QuestLog.IsWorldQuest, questID)
+        if ok then
+            return isWorldQuest and true or false
+        end
     end
 
-    local tagInfo = QK_GetTagInfo(questID)
+    local tagInfo = GetQuestTagInfoCompat(questID)
     if not tagInfo then
         return false
     end
@@ -515,73 +660,47 @@ local function QK_IsWorldQuest(questID)
     return false
 end
 
-local function QK_IsSpecialAssignment(questID)
-    local tagInfo = QK_GetTagInfo(questID)
+local function IsSpecialAssignment(questID)
+    local tagInfo = GetQuestTagInfoCompat(questID)
     return tagInfo and tagInfo.tagID == QUEST_TAG_CAPSTONE_WORLD_QUEST or false
 end
 
-local function QK_IsPreyQuest(questID)
-    if not questID then
-        return false
-    end
-
-    return QK_GetActivePreyQuest() == questID
+local function IsPreyQuest(questID)
+    return type(questID) == "number" and questID > 0 and GetActivePreyQuest() == questID
 end
 
-local function QK_GetSuperTrackedQuestID()
-    if CST and CST.GetSuperTrackedQuestID then
-        return CST.GetSuperTrackedQuestID() or 0
+local function GetSuperTrackedQuestIDCompat()
+    if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
+        local ok, questID = SafeCall(C_SuperTrack.GetSuperTrackedQuestID)
+        if ok then
+            return SafeNumber(questID, 0) or 0
+        end
     end
 
-    if GetSuperTrackedQuestID then
-        return GetSuperTrackedQuestID() or 0
+    if _G.GetSuperTrackedQuestID then
+        local ok, questID = SafeCall(_G.GetSuperTrackedQuestID)
+        if ok then
+            return SafeNumber(questID, 0) or 0
+        end
     end
 
     return 0
 end
 
-function QuestKing:GetQuestKind(questID, info)
-    if not questID then
-        return QUEST_KIND.NORMAL
-    end
-
-    if QK_IsPreyQuest(questID) then
-        return QUEST_KIND.PREY
-    end
-
-    if QK_IsSpecialAssignment(questID) then
-        return QUEST_KIND.SPECIAL_ASSIGNMENT
-    end
-
-    if QK_IsWorldQuest(questID) then
-        return QUEST_KIND.WORLD_QUEST
-    end
-
-    if QK_IsCampaignQuest(questID, info) then
-        return QUEST_KIND.CAMPAIGN
-    end
-
-    if QK_IsTaskQuest(questID) then
-        return QUEST_KIND.TASK
-    end
-
-    return QUEST_KIND.NORMAL
-end
-
 local function GetKindHeader(kind)
     if kind == QUEST_KIND.CAMPAIGN then
-        return CAMPAIGN or "Campaign"
+        return CAMPAIGN_HEADER
     elseif kind == QUEST_KIND.WORLD_QUEST then
-        return TRACKER_HEADER_WORLD_QUESTS or "World Quests"
+        return WORLD_QUEST_HEADER
     elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
         return "Special Assignments"
     elseif kind == QUEST_KIND.PREY then
         return "Prey"
     elseif kind == QUEST_KIND.TASK then
-        return TRACKER_HEADER_OBJECTIVE or "Tasks"
+        return TASK_HEADER
     end
 
-    return TRACKER_HEADER_QUESTS or "Quests"
+    return NORMAL_QUEST_HEADER
 end
 
 local function GetKindOrder(kind)
@@ -616,12 +735,36 @@ local function GetKindPrefix(kind)
     return nil
 end
 
--- ============================================================================
--- Quest title / objective text
--- ============================================================================
+function QuestKing:GetQuestKind(questID, info)
+    if type(questID) ~= "number" or questID <= 0 then
+        return QUEST_KIND.NORMAL
+    end
+
+    if IsPreyQuest(questID) then
+        return QUEST_KIND.PREY
+    end
+
+    if IsSpecialAssignment(questID) then
+        return QUEST_KIND.SPECIAL_ASSIGNMENT
+    end
+
+    if IsWorldQuest(questID) then
+        return QUEST_KIND.WORLD_QUEST
+    end
+
+    if IsCampaignQuest(questID, info) then
+        return QUEST_KIND.CAMPAIGN
+    end
+
+    if IsTaskQuest(questID) then
+        return QUEST_KIND.TASK
+    end
+
+    return QUEST_KIND.NORMAL
+end
 
 function QuestKing:GetQuestTagBracket(questID)
-    local info = QK_GetTagInfo(questID)
+    local info = GetQuestTagInfoCompat(questID)
     if not info then
         return nil
     end
@@ -639,7 +782,7 @@ end
 
 function QuestKing:GetQuestObjectivesText(questID)
     local out = {}
-    local objectives = QK_GetQuestObjectives(questID)
+    local objectives = GetQuestObjectives(questID)
     local hasProgressBarObjective = false
 
     for index = 1, #objectives do
@@ -655,7 +798,7 @@ function QuestKing:GetQuestObjectivesText(questID)
             elseif IsSafeNumber(numRequired)
                 and numRequired > 0
                 and text ~= ""
-                and not QK_ObjectiveTextAlreadyHasProgress(text) then
+                and not ObjectiveTextAlreadyHasProgress(text) then
                 text = ("%s (%d/%d)"):format(text, numFulfilled or 0, numRequired)
             end
 
@@ -663,26 +806,26 @@ function QuestKing:GetQuestObjectivesText(questID)
                 index = index,
                 text = text,
                 type = objectiveType,
-                finished = (objective.finished or objective.completed) and true or false,
+                finished = SafeBoolean(objective.finished or objective.completed, false),
                 numFulfilled = numFulfilled,
                 numRequired = numRequired,
             }
         end
     end
 
-    local reqMoney = QK_GetRequiredMoney(questID)
-    if reqMoney and reqMoney > 0 then
-        local have = SafeNumber(GetMoney and GetMoney() or 0, 0)
-        local done = have >= reqMoney
-        local moneyText = GetMoneyString and GetMoneyString(reqMoney) or tostring(reqMoney)
+    local requiredMoney = GetRequiredMoney(questID)
+    if requiredMoney > 0 then
+        local playerMoney = SafeNumber(_G.GetMoney and _G.GetMoney() or 0, 0) or 0
+        local complete = playerMoney >= requiredMoney
+        local moneyText = _G.GetMoneyString and _G.GetMoneyString(requiredMoney) or tostring(requiredMoney)
 
         out[#out + 1] = {
             index = #out + 1,
             text = moneyText,
             type = "money",
-            finished = done,
-            numFulfilled = have,
-            numRequired = reqMoney,
+            finished = complete,
+            numFulfilled = playerMoney,
+            numRequired = requiredMoney,
         }
 
         QuestKing.watchMoney = true
@@ -691,29 +834,19 @@ function QuestKing:GetQuestObjectivesText(questID)
     return out, hasProgressBarObjective
 end
 
--- ============================================================================
--- Button rendering helpers
--- ============================================================================
+local function FreeLineBars(line)
+    if not line then
+        return
+    end
 
-local LINE_LEFT_PADDING = 16
-local LINE_RIGHT_PADDING = 8
-local LEVEL_GAP_X = 6
-local COMPLETED_ALPHA = 0.65
+    if line.timerBar then
+        line.timerBar:Free()
+    end
 
-local FINISHED_COLOR = {
-    r = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[1]) or 0.60,
-    g = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[2]) or 1.00,
-    b = (opt_colors.ObjectiveGradientComplete and opt_colors.ObjectiveGradientComplete[3]) or 0.60,
-}
-
-local UNFINISHED_COLOR = { r = 0.95, g = 0.95, b = 0.95 }
-local TITLE_COLOR = { r = 1.00, g = 0.82, b = 0.00 }
-
-local TITLE_COMPLETE_COLOR = {
-    r = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[1]) or 0.20,
-    g = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[2]) or 1.00,
-    b = (opt_colors.ObjectiveComplete and opt_colors.ObjectiveComplete[3]) or 0.20,
-}
+    if line.progressBar then
+        line.progressBar:Free()
+    end
+end
 
 local function ShouldShowQuestObjective(row, isQuestComplete)
     if not row then
@@ -737,7 +870,7 @@ end
 
 local function GetQuestCompletionLineText(questID, isAutoComplete)
     if isAutoComplete then
-        if questID and QK_IsTaskQuest(questID) then
+        if questID and IsTaskQuest(questID) then
             return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE_TASK
                 or QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
                 or QUEST_WATCH_QUEST_READY
@@ -759,21 +892,7 @@ local function GetQuestCompletionLineText(questID, isAutoComplete)
         or "Complete"
 end
 
-local function FreeLineBars(line)
-    if not line then
-        return
-    end
-
-    if line.timerBar then
-        line.timerBar:Free()
-    end
-
-    if line.progressBar then
-        line.progressBar:Free()
-    end
-end
-
-local function AddQuestObjectiveLine(button, row, isQuestComplete, isNewQuest)
+local function AddQuestObjectiveLine(button, row, isNewQuest)
     if not button or not row then
         return nil
     end
@@ -823,10 +942,6 @@ local function AddQuestProgressBar(button, percent)
     return progressBar
 end
 
--- ============================================================================
--- Tooltip helpers
--- ============================================================================
-
 local function AddTooltipLine(tooltip, text, r, g, b)
     if tooltip and text and text ~= "" then
         tooltip:AddLine(text, r or 1, g or 1, b or 1, true)
@@ -864,22 +979,15 @@ local function AddQuestTooltipObjectives(tooltip, questID)
 
     for i = 1, #objectives do
         local row = objectives[i]
-        if row then
-            local text = row.text or ""
-            if text ~= "" then
-                if row.finished then
-                    AddTooltipLine(tooltip, "- " .. text, FINISHED_COLOR.r, FINISHED_COLOR.g, FINISHED_COLOR.b)
-                else
-                    AddTooltipLine(tooltip, "- " .. text, 1, 1, 1)
-                end
+        if row and row.text and row.text ~= "" then
+            if row.finished then
+                AddTooltipLine(tooltip, "- " .. row.text, FINISHED_COLOR.r, FINISHED_COLOR.g, FINISHED_COLOR.b)
+            else
+                AddTooltipLine(tooltip, "- " .. row.text, 1, 1, 1)
             end
         end
     end
 end
-
--- ============================================================================
--- Mouse / tooltip behavior for quest buttons
--- ============================================================================
 
 local mouseHandlerQuest = {}
 
@@ -892,15 +1000,20 @@ function mouseHandlerQuest:TitleButtonOnClick(mouse)
         return
     end
 
-    if IsModifiedClick and IsModifiedClick("CHATLINK") and ChatEdit_GetActiveWindow then
-        local activeWindow = ChatEdit_GetActiveWindow()
+    if _G.IsModifiedClick and _G.IsModifiedClick("CHATLINK") and _G.ChatEdit_GetActiveWindow then
+        local activeWindow = _G.ChatEdit_GetActiveWindow()
         if activeWindow then
-            local link
-            if GetQuestLink and questLogIndex then
-                link = GetQuestLink(questLogIndex)
+            local link = nil
+
+            if _G.GetQuestLink and questLogIndex then
+                local ok, questLink = SafeCall(_G.GetQuestLink, questLogIndex)
+                if ok and questLink then
+                    link = questLink
+                end
             end
+
             if link then
-                ChatEdit_InsertLink(link)
+                _G.ChatEdit_InsertLink(link)
                 return
             end
         end
@@ -908,43 +1021,46 @@ function mouseHandlerQuest:TitleButtonOnClick(mouse)
 
     if mouse == "RightButton" then
         if QuestKing.SetSuperTrackedQuestID then
-            local currentID = QK_GetSuperTrackedQuestID()
-
+            local currentID = GetSuperTrackedQuestIDCompat()
             if currentID == questID then
                 QuestKing:SetSuperTrackedQuestID(0)
             else
                 QuestKing:SetSuperTrackedQuestID(questID)
             end
 
-            QuestKing:UpdateTracker()
+            QueueTrackerRefresh(true)
         end
         return
     end
 
-    local isAutoCompleteQuest = QK_IsAutoComplete(questID, questLogIndex)
-    if isAutoCompleteQuest and QK_IsComplete(questID) and QK_ShowQuestComplete(questID, questLogIndex) then
+    local isAutoCompleteQuest = IsQuestAutoComplete(questID, questLogIndex)
+    if isAutoCompleteQuest and IsQuestCompleteCompat(questID) and ShowQuestCompleteCompat(questID, questLogIndex) then
         return
     end
 
-    if QuestObjectiveTracker_OpenQuestMap and questLogIndex then
-        QuestObjectiveTracker_OpenQuestMap(nil, questLogIndex)
-        return
+    if _G.QuestObjectiveTracker_OpenQuestMap and questLogIndex then
+        local ok = SafeCall(_G.QuestObjectiveTracker_OpenQuestMap, nil, questLogIndex)
+        if ok then
+            return
+        end
     end
 
-    if QuestMapFrame_OpenToQuestDetails and questID then
-        QuestMapFrame_OpenToQuestDetails(questID)
-        return
+    if _G.QuestMapFrame_OpenToQuestDetails and questID then
+        local ok = SafeCall(_G.QuestMapFrame_OpenToQuestDetails, questID)
+        if ok then
+            return
+        end
     end
 
-    if ToggleQuestLog and questLogIndex then
-        ToggleQuestLog()
+    if _G.ToggleQuestLog and questLogIndex then
+        SafeCall(_G.ToggleQuestLog)
     end
 end
 
 function mouseHandlerQuest:TitleButtonOnEnter()
     local button = self.parent
-    local questLogIndex = button.questLogIndex
     local questID = button.questID
+    local questLogIndex = button.questLogIndex
 
     if not questID then
         return
@@ -957,12 +1073,22 @@ function mouseHandlerQuest:TitleButtonOnEnter()
 
     local titleText = nil
 
-    if questLogIndex and questLogIndex > 0 and QuestUtils_GetQuestName then
-        titleText = QuestUtils_GetQuestName(questID)
+    if _G.QuestUtils_GetQuestName then
+        local ok, questName = SafeCall(_G.QuestUtils_GetQuestName, questID)
+        if ok and questName and questName ~= "" then
+            titleText = questName
+        end
+    end
+
+    if (not titleText or titleText == "") and questLogIndex then
+        local info = GetQuestInfoByLogIndex(questLogIndex)
+        if info then
+            titleText = SafeString(info.title, nil)
+        end
     end
 
     if not titleText or titleText == "" then
-        titleText = button.title and button.title:GetText() or QUESTS_LABEL or UNKNOWN
+        titleText = button.title and button.title:GetText() or UNKNOWN
     end
 
     tooltip:SetText(titleText, 1, 0.82, 0)
@@ -974,41 +1100,48 @@ function mouseHandlerQuest:TitleButtonOnEnter()
         AddTooltipLine(tooltip, tagBracket, 0.85, 0.85, 0.85)
     end
 
-    local superTrackedQuestID = QK_GetSuperTrackedQuestID()
-    if superTrackedQuestID == questID then
+    if GetSuperTrackedQuestIDCompat() == questID then
         AddTooltipLine(tooltip, "Super tracked", 1, 0.82, 0.2)
     end
 
-    AddQuestTooltipObjectives(tooltip, questID)
+    AddTooltipLine(tooltip, "Left-click to open quest", 0.7, 0.7, 0.7)
+    AddTooltipLine(tooltip, "Right-click to toggle super tracking", 0.7, 0.7, 0.7)
 
+    AddQuestTooltipObjectives(tooltip, questID)
     tooltip:Show()
 end
 
--- ============================================================================
--- Public rendering API
--- ============================================================================
+function mouseHandlerQuest:TitleButtonOnLeave()
+    if QuestKing.HideTooltip then
+        QuestKing:HideTooltip()
+    end
+end
 
 function QuestKing:GetQuestDisplayData(questLogIndex)
-    local info = QK_GetInfo(questLogIndex)
+    local info = GetQuestInfoByLogIndex(questLogIndex)
     if not info or info.isHeader then
         return nil
     end
 
-    local questID = info.questID
+    local questID = SafeNumber(info.questID, nil)
+    if not questID then
+        return nil
+    end
+
     local kind = self:GetQuestKind(questID, info)
     local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID)
     local percent = nil
 
     if hasProgressBarObjective then
-        percent = QK_GetQuestPercent(questID)
+        percent = GetQuestProgressPercent(questID)
     end
 
     return {
         questID = questID,
         kind = kind,
         title = SafeString(info.title, UNKNOWN) or UNKNOWN,
-        level = QK_GetDifficultyLevel(info),
-        isComplete = QK_IsComplete(questID),
+        level = GetDifficultyLevel(info),
+        isComplete = IsQuestCompleteCompat(questID),
         tagBracket = self:GetQuestTagBracket(questID),
         objectives = objectives,
         hasProgressBarObjective = hasProgressBarObjective,
@@ -1026,9 +1159,15 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         return
     end
 
-    local isAutoCompleteQuest = QK_IsAutoComplete(data.questID, questLogIndex)
+    local isAutoCompleteQuest = IsQuestAutoComplete(data.questID, questLogIndex)
 
-    local itemLink, itemTexture, itemCharges = QK_GetQuestLogSpecialItemInfo(questLogIndex)
+    local itemLink, itemTexture, itemCharges, itemShowWhenComplete = GetQuestLogSpecialItemInfoCompat(questLogIndex)
+    if itemShowWhenComplete == false and data.isComplete then
+        itemLink = nil
+        itemTexture = nil
+        itemCharges = nil
+    end
+
     local itemAnchorSide = (opt.itemAnchorSide == "left") and "left" or "right"
     local itemScale = SafeNumber(QuestKing.itemButtonScale, nil) or SafeNumber(opt.itemButtonScale, nil) or 1
     if itemScale <= 0 then
@@ -1070,8 +1209,8 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     end
 
     if button.title then
-        if data.isComplete and isAutoCompleteQuest and button.title.SetFormattedTextIcon then
-            button.title:SetFormattedTextIcon("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t %s", displayTitle)
+        if data.isComplete and isAutoCompleteQuest then
+            button.title:SetText("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t " .. displayTitle)
             button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
         else
             button.title:SetText(displayTitle)
@@ -1089,7 +1228,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     end
 
     if button.level then
-        local col = QK_GetDifficultyColor(data.level)
+        local col = GetDifficultyColor(data.level)
         local lvlText = (IsSafeNumber(data.level) and data.level > 0) and ("[" .. tostring(data.level) .. "]") or ""
         local levelLeftInset = 4
 
@@ -1120,7 +1259,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         local row = data.objectives[i]
         if ShouldShowQuestObjective(row, data.isComplete) then
             if row.type ~= "progressbar" then
-                AddQuestObjectiveLine(button, row, data.isComplete, isNewQuest)
+                AddQuestObjectiveLine(button, row, isNewQuest)
             end
             visibleObjectives = visibleObjectives + 1
         end
@@ -1150,47 +1289,18 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     end
 
     if itemLink and itemTexture then
-        button:SetItemButton(
-            questLogIndex,
-            itemLink,
-            itemTexture,
-            itemCharges,
-            visibleObjectives
-        )
+        button:SetItemButton(questLogIndex, itemLink, itemTexture, itemCharges, visibleObjectives)
     else
         button:RemoveItemButton()
     end
 end
 
--- ============================================================================
--- Section / sort / tracker pass
--- ============================================================================
-
 local function AddSectionHeader(headerText)
     local header = WatchButton:GetKeyed("header", "quest_header_" .. tostring(headerText))
     header.title:SetText(headerText)
-    header.title:SetTextColor(
-        opt_colors.SectionHeader[1],
-        opt_colors.SectionHeader[2],
-        opt_colors.SectionHeader[3]
-    )
+    header.title:SetTextColor(SECTION_HEADER_COLOR.r, SECTION_HEADER_COLOR.g, SECTION_HEADER_COLOR.b)
     header.titleButton:EnableMouse(false)
     return header
-end
-
-local function GetQuestIDForWatchIndexCompat(watchIndex)
-    if CQL and CQL.GetQuestIDForQuestWatchIndex then
-        return CQL.GetQuestIDForQuestWatchIndex(watchIndex)
-    end
-
-    if GetQuestIndexForWatch and GetQuestLogTitle then
-        local questLogIndex = GetQuestIndexForWatch(watchIndex)
-        if questLogIndex then
-            return QK_GetQuestIDForQuestLogIndex(questLogIndex)
-        end
-    end
-
-    return nil
 end
 
 function QuestKing:BuildQuestSortTable()
@@ -1202,17 +1312,23 @@ function QuestKing:BuildQuestSortTable()
     local rows = {}
 
     local numWatches = 0
-    if CQL and CQL.GetNumQuestWatches then
-        numWatches = CQL.GetNumQuestWatches() or 0
-    elseif GetNumQuestWatches then
-        numWatches = GetNumQuestWatches() or 0
+    if C_QuestLog and C_QuestLog.GetNumQuestWatches then
+        local ok, count = SafeCall(C_QuestLog.GetNumQuestWatches)
+        if ok then
+            numWatches = SafeNumber(count, 0) or 0
+        end
+    elseif _G.GetNumQuestWatches then
+        local ok, count = SafeCall(_G.GetNumQuestWatches)
+        if ok then
+            numWatches = SafeNumber(count, 0) or 0
+        end
     end
 
     for i = 1, numWatches do
-        local questID = GetQuestIDForWatchIndexCompat(i)
+        local questID = GetQuestIDForWatchIndex(i)
         if questID and not seenQuestIDs[questID] then
-            local questLogIndex = QK_GetQuestLogIndexByID(questID)
-            local info = questLogIndex and QK_GetInfo(questLogIndex) or nil
+            local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+            local info = questLogIndex and GetQuestInfoByLogIndex(questLogIndex) or nil
             if info and not info.isHeader and not info.isHidden then
                 seenQuestIDs[questID] = true
                 rows[#rows + 1] = {
@@ -1225,27 +1341,34 @@ function QuestKing:BuildQuestSortTable()
         end
     end
 
-    local preyQuestID = QK_GetActivePreyQuest()
+    local preyQuestID = GetActivePreyQuest()
     if preyQuestID and not seenQuestIDs[preyQuestID] then
-        local preyIndex = QK_GetQuestLogIndexByID(preyQuestID)
-        local preyInfo = preyIndex and QK_GetInfo(preyIndex) or nil
+        local preyIndex = GetQuestLogIndexByIDCompat(preyQuestID)
+        local preyInfo = preyIndex and GetQuestInfoByLogIndex(preyIndex) or nil
         if preyInfo and not preyInfo.isHeader and not preyInfo.isHidden then
             seenQuestIDs[preyQuestID] = true
             rows[#rows + 1] = {
                 questID = preyQuestID,
                 questLogIndex = preyIndex,
                 kind = self:GetQuestKind(preyQuestID, preyInfo),
-                sortText = preyInfo.title or "",
+                sortText = SafeString(preyInfo.title, "") or "",
             }
         end
     end
 
     sort(rows, function(a, b)
-        local ao = GetKindOrder(a.kind)
-        local bo = GetKindOrder(b.kind)
-        if ao ~= bo then
-            return ao < bo
+        local aOrder = GetKindOrder(a.kind)
+        local bOrder = GetKindOrder(b.kind)
+        if aOrder ~= bOrder then
+            return aOrder < bOrder
         end
+
+        local aTracked = GetSuperTrackedQuestIDCompat() == a.questID and 1 or 0
+        local bTracked = GetSuperTrackedQuestIDCompat() == b.questID and 1 or 0
+        if aTracked ~= bTracked then
+            return aTracked > bTracked
+        end
+
         return (a.sortText or "") < (b.sortText or "")
     end)
 
@@ -1261,16 +1384,16 @@ function QuestKing:ShouldSkipBonusTask(questID)
         return false
     end
 
-    local questLogIndex = QK_GetQuestLogIndexByID(questID)
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
     if not questLogIndex then
         return false
     end
 
-    if not QK_IsWatched(questID) and not QK_IsPreyQuest(questID) then
+    if not IsQuestWatchedCompat(questID) and not IsPreyQuest(questID) then
         return false
     end
 
-    local info = QK_GetInfo(questLogIndex)
+    local info = GetQuestInfoByLogIndex(questLogIndex)
     local kind = self:GetQuestKind(questID, info)
 
     return kind == QUEST_KIND.TASK
@@ -1302,7 +1425,7 @@ function QuestKing:UpdateTrackerQuests()
             self:SetButtonToQuest(button, row.questLogIndex)
 
             if button.fresh and self.newlyAddedQuests and self.newlyAddedQuests[row.questID] then
-                if button.Pulse then
+                if button.Pulse and opt_colors.ObjectiveAlertGlow then
                     button:Pulse(
                         opt_colors.ObjectiveAlertGlow[1],
                         opt_colors.ObjectiveAlertGlow[2],
@@ -1316,33 +1439,40 @@ function QuestKing:UpdateTrackerQuests()
     self.newlyAddedQuests = {}
 end
 
--- ============================================================================
--- Public watch controls
--- ============================================================================
-
 function QuestKing:AddWatch(questLogIndex)
-    local info = QK_GetInfo(questLogIndex)
+    local info = GetQuestInfoByLogIndex(questLogIndex)
     if info and info.questID then
-        QK_AddWatch(info.questID)
+        AddQuestWatchByID(info.questID)
     end
 end
 
 function QuestKing:RemoveWatch(questLogIndex)
-    local info = QK_GetInfo(questLogIndex)
+    local info = GetQuestInfoByLogIndex(questLogIndex)
     if info and info.questID then
-        QK_RemoveWatch(info.questID)
+        RemoveQuestWatchByID(info.questID)
     end
 end
 
 function QuestKing:IterateWatched()
     local i = 0
-    local n = (CQL and CQL.GetNumQuestWatches and CQL.GetNumQuestWatches()) or 0
+    local n = 0
+
+    if C_QuestLog and C_QuestLog.GetNumQuestWatches then
+        local ok, count = SafeCall(C_QuestLog.GetNumQuestWatches)
+        if ok then
+            n = SafeNumber(count, 0) or 0
+        end
+    elseif _G.GetNumQuestWatches then
+        local ok, count = SafeCall(_G.GetNumQuestWatches)
+        if ok then
+            n = SafeNumber(count, 0) or 0
+        end
+    end
 
     return function()
         i = i + 1
         if i <= n then
-            local qid = GetQuestIDForWatchIndexCompat(i)
-            return i, qid
+            return i, GetQuestIDForWatchIndex(i)
         end
     end
 end

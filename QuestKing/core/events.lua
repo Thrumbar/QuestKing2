@@ -1,124 +1,156 @@
--- events.lua - QuestKing
--- Patched to support the validated tracker flow:
---   - normal quests
---   - campaign quests
---   - task / bonus objective quests
---   - world quests
---   - special assignments
---   - prey quests
---   - scenarios
---   - timers / challenge content
---
--- Additional scenario integration fixes:
---   - refreshes scenario criteria visibility cache on scenario events
---   - handles SCENARIO_CRITERIA_SHOW_STATE_UPDATE explicitly
---   - keeps scenario tracker state in sync when entering world / completing scenarios
-
 local addonName, QuestKing = ...
 
--- -----------------------------------------------------------------------------
--- Frame & Tables
--- -----------------------------------------------------------------------------
-
-local EventsFrame = CreateFrame("Frame", "QuestKing_EventsFrame")
+local EventsFrame = CreateFrame("Frame")
 local Events = {}
 
 QuestKing.EventsFrame = EventsFrame
 QuestKing.Events = Events
 
+local _G = _G
+local C_CVar = C_CVar
+local C_QuestLog = C_QuestLog
+local C_SuperTrack = C_SuperTrack
+local C_TaskQuest = C_TaskQuest
+local C_Timer = C_Timer
+local Enum = Enum
+local SOUNDKIT = SOUNDKIT
+
 local pairs = pairs
+local pcall = pcall
+local select = select
 local type = type
+local tonumber = tonumber
 
--- -----------------------------------------------------------------------------
--- Compat / Helpers
--- -----------------------------------------------------------------------------
+local Compat = QuestKing.Compatibility or {}
+local WOW_PROJECT_ID = _G.WOW_PROJECT_ID
+local WOW_PROJECT_MAINLINE = _G.WOW_PROJECT_MAINLINE
+local IS_MAINLINE = WOW_PROJECT_MAINLINE and WOW_PROJECT_ID == WOW_PROJECT_MAINLINE or false
 
-local function PlaySoundSafe(kit)
-    if not kit or not PlaySound then
-        return
+local trackerRefreshQueued = false
+local trackerRefreshFollowupQueued = false
+
+local function SafeCall(func, ...)
+    if type(func) ~= "function" then
+        return false, nil, nil, nil, nil
     end
 
-    if SOUNDKIT then
-        PlaySound(kit)
-        return
+    local ok, a, b, c, d = pcall(func, ...)
+    if ok then
+        return true, a, b, c, d
     end
 
-    if type(kit) == "string" or type(kit) == "number" then
-        PlaySound(kit)
+    if _G.geterrorhandler then
+        _G.geterrorhandler()(a)
     end
+
+    return false, nil, nil, nil, nil
 end
 
-local function IsTaskQuestCompat(questID)
-    if not questID then
+local function SafeCallMethod(target, method, ...)
+    if type(target) ~= "table" then
+        return false, nil, nil, nil, nil
+    end
+
+    local func = target[method]
+    if type(func) ~= "function" then
+        return false, nil, nil, nil, nil
+    end
+
+    return SafeCall(func, target, ...)
+end
+
+local function RegisterEventSafe(frame, eventName)
+    if not frame or type(eventName) ~= "string" or eventName == "" then
         return false
     end
 
-    if C_QuestLog and C_QuestLog.IsQuestTask then
-        return C_QuestLog.IsQuestTask(questID) and true or false
+    local ok = pcall(frame.RegisterEvent, frame, eventName)
+    return ok and true or false
+end
+
+local function PlaySoundSafe(soundKitID, legacyFallback)
+    if type(_G.PlaySound) ~= "function" then
+        return
     end
 
-    if C_TaskQuest and C_TaskQuest.IsActive then
-        return C_TaskQuest.IsActive(questID) and true or false
+    if soundKitID then
+        pcall(_G.PlaySound, soundKitID)
+        return
     end
 
-    if _G.IsQuestTask then
-        return _G.IsQuestTask(questID) and true or false
+    if legacyFallback then
+        pcall(_G.PlaySound, legacyFallback)
     end
-
-    return false
 end
 
 local function GetCVarBoolCompat(name)
-    if not name or name == "" then
+    if type(name) ~= "string" or name == "" then
         return false
     end
 
     if C_CVar and C_CVar.GetCVarBool then
-        return C_CVar.GetCVarBool(name) and true or false
+        local ok, value = SafeCall(C_CVar.GetCVarBool, name)
+        if ok then
+            return value and true or false
+        end
     end
 
-    if GetCVar then
-        return GetCVar(name) == "1"
+    if type(_G.GetCVar) == "function" then
+        local ok, value = SafeCall(_G.GetCVar, name)
+        if ok then
+            return value == "1"
+        end
     end
 
     return false
 end
 
 local function GetNumQuestWatchesCompat()
-    if C_QuestLog and C_QuestLog.GetNumQuestWatches then
-        return C_QuestLog.GetNumQuestWatches() or 0
+    if type(Compat.GetNumQuestWatches) == "function" then
+        local count = Compat.GetNumQuestWatches()
+        return tonumber(count) or 0
     end
 
-    if _G.GetNumQuestWatches then
-        return _G.GetNumQuestWatches() or 0
+    if C_QuestLog and C_QuestLog.GetNumQuestWatches then
+        local ok, count = SafeCall(C_QuestLog.GetNumQuestWatches)
+        if ok then
+            return tonumber(count) or 0
+        end
+    end
+
+    if type(_G.GetNumQuestWatches) == "function" then
+        local ok, count = SafeCall(_G.GetNumQuestWatches)
+        if ok then
+            return tonumber(count) or 0
+        end
     end
 
     return 0
 end
 
 local function GetMaxQuestWatchesCompat()
-    if type(MAX_WATCHABLE_QUESTS) == "number" and MAX_WATCHABLE_QUESTS > 0 then
-        return MAX_WATCHABLE_QUESTS
-    end
-
-    return 25
+    return (type(_G.MAX_WATCHABLE_QUESTS) == "number" and _G.MAX_WATCHABLE_QUESTS > 0) and _G.MAX_WATCHABLE_QUESTS or 25
 end
 
 local function GetQuestLogIndexByIDCompat(questID)
-    if not questID then
+    if type(Compat.GetQuestLogIndexByID) == "function" then
+        return Compat.GetQuestLogIndexByID(questID)
+    end
+
+    if type(questID) ~= "number" or questID <= 0 then
         return nil
     end
 
     if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
-        local index = C_QuestLog.GetLogIndexForQuestID(questID)
-        if index and index > 0 then
+        local ok, index = SafeCall(C_QuestLog.GetLogIndexForQuestID, questID)
+        if ok and type(index) == "number" and index > 0 then
             return index
         end
     end
 
-    if _G.GetQuestLogIndexByID then
-        local index = _G.GetQuestLogIndexByID(questID)
-        if index and index > 0 then
+    if type(_G.GetQuestLogIndexByID) == "function" then
+        local ok, index = SafeCall(_G.GetQuestLogIndexByID, questID)
+        if ok and type(index) == "number" and index > 0 then
             return index
         end
     end
@@ -127,20 +159,24 @@ local function GetQuestLogIndexByIDCompat(questID)
 end
 
 local function GetQuestIDFromQuestLogIndexCompat(questLogIndex)
-    if not questLogIndex or questLogIndex <= 0 then
+    if type(Compat.GetQuestIDForLogIndex) == "function" then
+        return Compat.GetQuestIDForLogIndex(questLogIndex)
+    end
+
+    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
         return nil
     end
 
     if C_QuestLog and C_QuestLog.GetInfo then
-        local info = C_QuestLog.GetInfo(questLogIndex)
-        if info and info.questID then
+        local ok, info = SafeCall(C_QuestLog.GetInfo, questLogIndex)
+        if ok and type(info) == "table" and type(info.questID) == "number" and info.questID > 0 then
             return info.questID
         end
     end
 
-    if _G.GetQuestLogTitle then
-        local _, _, _, _, _, _, _, questID = _G.GetQuestLogTitle(questLogIndex)
-        if questID then
+    if type(_G.GetQuestLogTitle) == "function" then
+        local ok, _, _, _, _, _, _, _, questID = SafeCall(_G.GetQuestLogTitle, questLogIndex)
+        if ok and type(questID) == "number" and questID > 0 then
             return questID
         end
     end
@@ -148,170 +184,268 @@ local function GetQuestIDFromQuestLogIndexCompat(questLogIndex)
     return nil
 end
 
-local function IsAutoCompleteQuestCompat(questID, questLogIndex)
-    if not questID and not questLogIndex then
-        return false
+local function GetQuestIDForWatchIndexCompat(watchIndex)
+    if type(Compat.GetQuestIDForWatchIndex) == "function" then
+        return Compat.GetQuestIDForWatchIndex(watchIndex)
     end
 
-    if questID and C_QuestLog and C_QuestLog.IsAutoComplete then
-        return C_QuestLog.IsAutoComplete(questID) and true or false
+    if type(watchIndex) ~= "number" or watchIndex <= 0 then
+        return nil
     end
 
-    if not questLogIndex and questID then
-        questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    if C_QuestLog and C_QuestLog.GetQuestIDForQuestWatchIndex then
+        local ok, questID = SafeCall(C_QuestLog.GetQuestIDForQuestWatchIndex, watchIndex)
+        if ok and type(questID) == "number" and questID > 0 then
+            return questID
+        end
     end
 
-    if questLogIndex and _G.GetQuestLogIsAutoComplete then
-        return _G.GetQuestLogIsAutoComplete(questLogIndex) and true or false
+    if type(_G.GetQuestIndexForWatch) == "function" then
+        local ok, questLogIndex = SafeCall(_G.GetQuestIndexForWatch, watchIndex)
+        if ok and type(questLogIndex) == "number" and questLogIndex > 0 then
+            return GetQuestIDFromQuestLogIndexCompat(questLogIndex)
+        end
     end
 
-    return false
-end
-
-local function NormalizeQuestAcceptedPayload(...)
-    local a, b = ...
-
-    -- Mainline / Retail / Midnight:
-    -- QUEST_ACCEPTED(questID)
-    if b == nil then
-        local questID = a
-        local questLogIndex = GetQuestLogIndexByIDCompat(questID)
-        return questLogIndex, questID
-    end
-
-    -- Classic-style payload:
-    -- QUEST_ACCEPTED(questLogIndex, questID)
-    return a, b
+    return nil
 end
 
 local function IsQuestWatchedCompat(questID, questLogIndex)
-    if questID and C_QuestLog and C_QuestLog.IsQuestWatched then
-        return C_QuestLog.IsQuestWatched(questID) and true or false
+    if type(Compat.IsQuestWatched) == "function" and questID then
+        return Compat.IsQuestWatched(questID) and true or false
     end
 
-    if questLogIndex and _G.IsQuestWatched then
-        return _G.IsQuestWatched(questLogIndex) and true or false
+    if type(questID) == "number" and C_QuestLog and C_QuestLog.IsQuestWatched then
+        local ok, watched = SafeCall(C_QuestLog.IsQuestWatched, questID)
+        if ok then
+            return watched and true or false
+        end
+    end
+
+    if type(questLogIndex) == "number" and type(_G.IsQuestWatched) == "function" then
+        local ok, watched = SafeCall(_G.IsQuestWatched, questLogIndex)
+        if ok then
+            return watched and true or false
+        end
     end
 
     return false
 end
 
 local function AddQuestWatchCompat(questLogIndex, questID)
-    if C_QuestLog and C_QuestLog.AddQuestWatch then
-        if not questID then
-            questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
-        end
-
-        if questID then
-            return C_QuestLog.AddQuestWatch(questID) and true or false
-        end
-
-        return false
+    if type(Compat.AddQuestWatch) == "function" and questID then
+        return Compat.AddQuestWatch(questID) and true or false
     end
 
-    if _G.AddQuestWatch and questLogIndex then
-        _G.AddQuestWatch(questLogIndex)
-        return true
+    if type(questID) ~= "number" or questID <= 0 then
+        questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
+    end
+
+    if type(questID) == "number" and C_QuestLog and C_QuestLog.AddQuestWatch then
+        local ok = SafeCall(C_QuestLog.AddQuestWatch, questID)
+        return ok and true or false
+    end
+
+    if type(questLogIndex) == "number" and questLogIndex > 0 and type(_G.AddQuestWatch) == "function" then
+        local ok = SafeCall(_G.AddQuestWatch, questLogIndex)
+        return ok and true or false
     end
 
     return false
 end
 
 local function RemoveQuestWatchCompat(questLogIndex, questID)
-    if C_QuestLog and C_QuestLog.RemoveQuestWatch then
-        if not questID then
-            questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
-        end
-
-        if questID then
-            return C_QuestLog.RemoveQuestWatch(questID) and true or false
-        end
-
-        return false
+    if type(Compat.RemoveQuestWatch) == "function" and questID then
+        return Compat.RemoveQuestWatch(questID) and true or false
     end
 
-    if _G.RemoveQuestWatch and questLogIndex then
-        _G.RemoveQuestWatch(questLogIndex)
-        return true
+    if type(questID) ~= "number" or questID <= 0 then
+        questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
+    end
+
+    if type(questID) == "number" and C_QuestLog and C_QuestLog.RemoveQuestWatch then
+        local ok = SafeCall(C_QuestLog.RemoveQuestWatch, questID)
+        return ok and true or false
+    end
+
+    if type(questLogIndex) == "number" and questLogIndex > 0 and type(_G.RemoveQuestWatch) == "function" then
+        local ok = SafeCall(_G.RemoveQuestWatch, questLogIndex)
+        return ok and true or false
     end
 
     return false
 end
 
-local function GetQuestIDForWatchIndexCompat(watchIndex)
-    if not watchIndex or watchIndex <= 0 then
-        return nil
+local function GetSuperTrackedQuestIDCompat()
+    if type(Compat.GetSuperTrackedQuestID) == "function" then
+        local questID = Compat.GetSuperTrackedQuestID()
+        return tonumber(questID) or 0
     end
 
-    if C_QuestLog and C_QuestLog.GetQuestIDForQuestWatchIndex then
-        return C_QuestLog.GetQuestIDForQuestWatchIndex(watchIndex)
-    end
-
-    if _G.GetQuestIndexForWatch and _G.GetQuestLogTitle then
-        local questLogIndex = _G.GetQuestIndexForWatch(watchIndex)
-        if questLogIndex then
-            local _, _, _, _, _, _, _, questID = _G.GetQuestLogTitle(questLogIndex)
-            return questID
+    if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
+        local ok, questID = SafeCall(C_SuperTrack.GetSuperTrackedQuestID)
+        if ok then
+            return tonumber(questID) or 0
         end
     end
 
-    return nil
-end
-
-local function GetSuperTrackedQuestIDCompat()
-    if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
-        return C_SuperTrack.GetSuperTrackedQuestID() or 0
-    end
-
-    if _G.GetSuperTrackedQuestID then
-        return _G.GetSuperTrackedQuestID() or 0
+    if type(_G.GetSuperTrackedQuestID) == "function" then
+        local ok, questID = SafeCall(_G.GetSuperTrackedQuestID)
+        if ok then
+            return tonumber(questID) or 0
+        end
     end
 
     return 0
 end
 
-local function IsPreyQuestCompat(questID)
-    if not questID then
+local function IsTaskQuestCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
         return false
     end
 
-    if C_QuestLog and C_QuestLog.GetActivePreyQuest then
-        return C_QuestLog.GetActivePreyQuest() == questID
+    if C_QuestLog and C_QuestLog.IsQuestTask then
+        local ok, isTask = SafeCall(C_QuestLog.IsQuestTask, questID)
+        if ok then
+            return isTask and true or false
+        end
+    end
+
+    if C_TaskQuest and C_TaskQuest.IsActive then
+        local ok, isTask = SafeCall(C_TaskQuest.IsActive, questID)
+        if ok then
+            return isTask and true or false
+        end
+    end
+
+    if type(_G.IsQuestTask) == "function" then
+        local ok, isTask = SafeCall(_G.IsQuestTask, questID)
+        if ok then
+            return isTask and true or false
+        end
     end
 
     return false
 end
 
-local questRefreshToken = 0
+local function IsPreyQuestCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
 
-local function UpdateTracker()
-    if QuestKing and QuestKing.UpdateTracker then
-        QuestKing:UpdateTracker()
+    if C_QuestLog and C_QuestLog.GetActivePreyQuest then
+        local ok, activeQuestID = SafeCall(C_QuestLog.GetActivePreyQuest)
+        if ok and activeQuestID == questID then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function IsAutoCompleteQuestCompat(questID, questLogIndex)
+    if type(questID) == "number" and C_QuestLog and C_QuestLog.IsAutoComplete then
+        local ok, isAutoComplete = SafeCall(C_QuestLog.IsAutoComplete, questID)
+        if ok then
+            return isAutoComplete and true or false
+        end
+    end
+
+    if (type(questLogIndex) ~= "number" or questLogIndex <= 0) and type(questID) == "number" then
+        questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    end
+
+    if type(questLogIndex) == "number" and type(_G.GetQuestLogIsAutoComplete) == "function" then
+        local ok, isAutoComplete = SafeCall(_G.GetQuestLogIsAutoComplete, questLogIndex)
+        if ok then
+            return isAutoComplete and true or false
+        end
+    end
+
+    return false
+end
+
+local function NormalizeQuestAcceptedPayload(...)
+    local arg1 = select(1, ...)
+    local arg2 = select(2, ...)
+
+    if type(arg2) == "number" and arg2 > 0 then
+        local questLogIndex = type(arg1) == "number" and arg1 or nil
+        local questID = arg2
+
+        if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
+            questLogIndex = GetQuestLogIndexByIDCompat(questID)
+        end
+
+        return questLogIndex, questID
+    end
+
+    if type(arg1) ~= "number" or arg1 <= 0 then
+        return nil, nil
+    end
+
+    if IS_MAINLINE then
+        return GetQuestLogIndexByIDCompat(arg1), arg1
+    end
+
+    local questIDFromIndex = GetQuestIDFromQuestLogIndexCompat(arg1)
+    if type(questIDFromIndex) == "number" and questIDFromIndex > 0 then
+        return arg1, questIDFromIndex
+    end
+
+    local questLogIndexFromID = GetQuestLogIndexByIDCompat(arg1)
+    if type(questLogIndexFromID) == "number" and questLogIndexFromID > 0 then
+        return questLogIndexFromID, arg1
+    end
+
+    return arg1, nil
+end
+
+local function QueueTrackerRefresh(delay, isFollowup)
+    if not (C_Timer and C_Timer.After) then
+        SafeCallMethod(QuestKing, "QueueTrackerUpdate", false, false)
+        SafeCallMethod(QuestKing, "UpdateTracker")
+        return
+    end
+
+    if isFollowup then
+        if trackerRefreshFollowupQueued then
+            return
+        end
+        trackerRefreshFollowupQueued = true
+    else
+        if trackerRefreshQueued then
+            return
+        end
+        trackerRefreshQueued = true
+    end
+
+    C_Timer.After(delay or 0, function()
+        if isFollowup then
+            trackerRefreshFollowupQueued = false
+        else
+            trackerRefreshQueued = false
+        end
+
+        if not SafeCallMethod(QuestKing, "QueueTrackerUpdate", false, false) then
+            SafeCallMethod(QuestKing, "UpdateTracker")
+        end
+    end)
+end
+
+local function UpdateTracker(forceBuild)
+    if not SafeCallMethod(QuestKing, "QueueTrackerUpdate", forceBuild and true or false, false) then
+        SafeCallMethod(QuestKing, "UpdateTracker", forceBuild and true or false, false)
     end
 end
 
 local function QueueQuestStateRefresh()
-    if not (C_Timer and C_Timer.After) then
-        return
-    end
-
-    questRefreshToken = questRefreshToken + 1
-    local token = questRefreshToken
-
-    local function RunIfCurrent()
-        if token ~= questRefreshToken then
-            return
-        end
-
-        UpdateTracker()
-    end
-
-    C_Timer.After(0, RunIfCurrent)
-    C_Timer.After(0.15, RunIfCurrent)
+    QueueTrackerRefresh(0, false)
+    QueueTrackerRefresh(0.15, true)
 end
 
 local function UpdateTrackerAndQueueQuestStateRefresh()
-    UpdateTracker()
+    UpdateTracker(false)
     QueueQuestStateRefresh()
 end
 
@@ -320,11 +454,11 @@ local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
         return false
     end
 
-    if not questID and questLogIndex then
+    if (type(questID) ~= "number" or questID <= 0) and type(questLogIndex) == "number" then
         questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
     end
 
-    if not questLogIndex and questID then
+    if (type(questLogIndex) ~= "number" or questLogIndex <= 0) and type(questID) == "number" then
         questLogIndex = GetQuestLogIndexByIDCompat(questID)
     end
 
@@ -345,18 +479,16 @@ local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
             local retryQuestID = questID
             local retryQuestLogIndex = questLogIndex
 
-            if not retryQuestID and retryQuestLogIndex then
+            if (type(retryQuestID) ~= "number" or retryQuestID <= 0) and type(retryQuestLogIndex) == "number" then
                 retryQuestID = GetQuestIDFromQuestLogIndexCompat(retryQuestLogIndex)
             end
 
-            if not retryQuestLogIndex and retryQuestID then
+            if (type(retryQuestLogIndex) ~= "number" or retryQuestLogIndex <= 0) and type(retryQuestID) == "number" then
                 retryQuestLogIndex = GetQuestLogIndexByIDCompat(retryQuestID)
             end
 
             if TryAutoWatchQuest(retryQuestLogIndex, retryQuestID, true) then
-                if QuestKing and QuestKing.UpdateTracker then
-                    QuestKing:UpdateTracker()
-                end
+                UpdateTracker(true)
             end
         end)
     end
@@ -365,17 +497,14 @@ local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
 end
 
 local function RefreshScenarioCriteriaState(shouldShow)
-    if not QuestKing then
-        return nil
-    end
-
     if type(shouldShow) == "boolean" then
         QuestKing.scenarioShouldShowCriteria = shouldShow
         return shouldShow
     end
 
-    if QuestKing.RefreshShouldShowScenarioCriteria then
-        return QuestKing:RefreshShouldShowScenarioCriteria()
+    local ok, result = SafeCallMethod(QuestKing, "RefreshShouldShowScenarioCriteria")
+    if ok then
+        return result
     end
 
     return nil
@@ -387,75 +516,77 @@ end
 
 local function RefreshScenarioAndUpdate(shouldShow)
     RefreshScenarioCriteriaState(shouldShow)
-    UpdateTracker()
+    UpdateTracker(false)
 end
 
--- -----------------------------------------------------------------------------
--- Event bootstrap
--- -----------------------------------------------------------------------------
-
-local function handleEvent(self, event, ...)
+local function DispatchEvent(self, event, ...)
     local handler = Events[event]
-    if handler then
-        handler(self, event, ...)
+    if type(handler) ~= "function" then
+        return
+    end
+
+    local ok, err = pcall(handler, self, event, ...)
+    if not ok and _G.geterrorhandler then
+        _G.geterrorhandler()(err)
     end
 end
 
-local function addonLoaded(self, event, name)
-    if name ~= addonName then
+local function OnAddonLoaded(self, event, loadedAddonName)
+    if loadedAddonName ~= addonName then
         return
     end
 
     self:UnregisterEvent("ADDON_LOADED")
 
-    for key in pairs(Events) do
-        pcall(self.RegisterEvent, self, key)
+    for eventName in pairs(Events) do
+        RegisterEventSafe(self, eventName)
     end
 
-    self:SetScript("OnEvent", handleEvent)
-
-    if QuestKing and QuestKing.Init then
-        QuestKing:Init()
-    end
+    self:SetScript("OnEvent", DispatchEvent)
+    SafeCallMethod(QuestKing, "Init")
 end
 
-EventsFrame:SetScript("OnEvent", addonLoaded)
+EventsFrame:SetScript("OnEvent", OnAddonLoaded)
 EventsFrame:RegisterEvent("ADDON_LOADED")
 
-QuestKing.HandleEvent = handleEvent
-
--- -----------------------------------------------------------------------------
--- Loot parsing / popup acquisition
--- -----------------------------------------------------------------------------
+QuestKing.HandleEvent = DispatchEvent
 
 Events.CHAT_MSG_LOOT = function(self, event, ...)
-    if QuestKing and QuestKing.ParseLoot then
-        QuestKing:ParseLoot(...)
-    end
+    SafeCallMethod(QuestKing, "ParseLoot", ...)
 end
-
--- -----------------------------------------------------------------------------
--- Money changes
--- -----------------------------------------------------------------------------
 
 Events.PLAYER_MONEY = function()
-    if QuestKing and QuestKing.watchMoney and QuestKing.UpdateTracker then
-        QuestKing:UpdateTracker()
+    if QuestKing.watchMoney then
+        UpdateTracker(false)
     end
 end
-
--- -----------------------------------------------------------------------------
--- Quest / tracker update events
--- -----------------------------------------------------------------------------
 
 Events.QUEST_LOG_UPDATE = UpdateTrackerAndQueueQuestStateRefresh
 Events.QUEST_WATCH_LIST_CHANGED = UpdateTrackerAndQueueQuestStateRefresh
+Events.QUEST_DATA_LOAD_RESULT = UpdateTrackerAndQueueQuestStateRefresh
+Events.CONTENT_TRACKING_UPDATE = function()
+    SafeCallMethod(QuestKing, "OnTrackedAchievementListChanged")
+    UpdateTracker(false)
+end
+Events.TRACKED_ACHIEVEMENT_LIST_CHANGED = function()
+    if not SafeCallMethod(QuestKing, "OnTrackedAchievementListChanged") then
+        UpdateTracker(false)
+    end
+end
+Events.TRACKED_ACHIEVEMENT_UPDATE = function(self, event, ...)
+    if not SafeCallMethod(QuestKing, "OnTrackedAchievementUpdate", ...) then
+        UpdateTracker(false)
+    end
+end
+Events.CRITERIA_UPDATE = function()
+    SafeCallMethod(QuestKing, "OnAchievementCriteriaUpdate")
+end
+Events.ACHIEVEMENT_EARNED = function()
+    SafeCallMethod(QuestKing, "OnAchievementEarned")
+end
 
 Events.QUEST_WATCH_UPDATE = function(self, event, questID)
-    if QuestKing and QuestKing.OnQuestObjectivesCompleted then
-        QuestKing:OnQuestObjectivesCompleted(questID)
-    end
-
+    SafeCallMethod(QuestKing, "OnQuestObjectivesCompleted", questID)
     UpdateTrackerAndQueueQuestStateRefresh()
 end
 
@@ -466,67 +597,40 @@ Events.UNIT_QUEST_LOG_CHANGED = function(self, event, unit)
 end
 
 Events.QUEST_POI_UPDATE = function()
-    if QuestKing and QuestKing.OnPOIUpdate then
-        QuestKing:OnPOIUpdate()
-    else
-        UpdateTracker()
+    if not SafeCallMethod(QuestKing, "OnPOIUpdate") then
+        UpdateTracker(false)
     end
 end
-
-Events.TRACKED_ACHIEVEMENT_LIST_CHANGED = UpdateTracker
-
-Events.TRACKED_ACHIEVEMENT_UPDATE = function(self, event, ...)
-    if QuestKing and QuestKing.OnTrackedAchievementUpdate then
-        QuestKing:OnTrackedAchievementUpdate(...)
-    else
-        UpdateTracker()
-    end
-end
-
--- -----------------------------------------------------------------------------
--- Quest accepted / watch management
--- -----------------------------------------------------------------------------
 
 Events.QUEST_ACCEPTED = function(self, event, ...)
     local questLogIndex, questID = NormalizeQuestAcceptedPayload(...)
     local isTaskQuest = IsTaskQuestCompat(questID)
 
-    -- Respect Blizzard auto-watch for all newly accepted quests, including campaign and task quests.
     TryAutoWatchQuest(questLogIndex, questID, false)
 
-    if isTaskQuest and SOUNDKIT and SOUNDKIT.UI_SCENARIO_STAGE_END then
-        PlaySoundSafe(SOUNDKIT.UI_SCENARIO_STAGE_END)
+    if isTaskQuest then
+        PlaySoundSafe(SOUNDKIT and SOUNDKIT.UI_SCENARIO_STAGE_END, nil)
     end
 
-    if QuestKing and QuestKing.OnQuestAccepted then
-        QuestKing:OnQuestAccepted(questID)
-    else
-        UpdateTracker()
+    if not SafeCallMethod(QuestKing, "OnQuestAccepted", questID) then
+        UpdateTracker(false)
     end
 
     QueueQuestStateRefresh()
 end
 
 Events.QUEST_REMOVED = function(self, event, questID)
-    if QuestKing and QuestKing.ClearDummyTask then
-        QuestKing:ClearDummyTask(questID)
-    end
-
+    SafeCallMethod(QuestKing, "ClearDummyTask", questID)
     UpdateTrackerAndQueueQuestStateRefresh()
 end
-
--- -----------------------------------------------------------------------------
--- Quest completion / turn-in
--- -----------------------------------------------------------------------------
 
 Events.QUEST_AUTOCOMPLETE = function(self, event, questID)
     local questLogIndex = GetQuestLogIndexByIDCompat(questID)
 
-    if IsAutoCompleteQuestCompat(questID, questLogIndex) then
-        if AddAutoQuestPopUp and AddAutoQuestPopUp(questID, "COMPLETE") then
-            if SOUNDKIT and SOUNDKIT.UI_AUTO_QUEST_COMPLETE then
-                PlaySoundSafe(SOUNDKIT.UI_AUTO_QUEST_COMPLETE)
-            end
+    if IsAutoCompleteQuestCompat(questID, questLogIndex) and type(_G.AddAutoQuestPopUp) == "function" then
+        local ok, shown = SafeCall(_G.AddAutoQuestPopUp, questID, "COMPLETE")
+        if ok and shown then
+            PlaySoundSafe(SOUNDKIT and SOUNDKIT.UI_AUTO_QUEST_COMPLETE, nil)
         end
     end
 
@@ -534,10 +638,8 @@ Events.QUEST_AUTOCOMPLETE = function(self, event, questID)
 end
 
 Events.QUEST_TURNED_IN = function(self, event, questID, xp, money)
-    if QuestKing and QuestKing.OnTaskTurnedIn then
-        if IsTaskQuestCompat(questID) or IsPreyQuestCompat(questID) then
-            QuestKing:OnTaskTurnedIn(questID, xp, money)
-        end
+    if IsTaskQuestCompat(questID) or IsPreyQuestCompat(questID) then
+        SafeCallMethod(QuestKing, "OnTaskTurnedIn", questID, xp, money)
     end
 
     UpdateTrackerAndQueueQuestStateRefresh()
@@ -546,17 +648,11 @@ end
 Events.QUEST_COMPLETE = UpdateTrackerAndQueueQuestStateRefresh
 Events.QUEST_FINISHED = UpdateTrackerAndQueueQuestStateRefresh
 
--- -----------------------------------------------------------------------------
--- Scenario / bonus-step content
--- -----------------------------------------------------------------------------
-
 Events.SCENARIO_UPDATE = function(self, event, ...)
     RefreshScenarioCriteriaState()
 
-    if QuestKing and QuestKing.OnScenarioUpdate then
-        QuestKing:OnScenarioUpdate(...)
-    else
-        UpdateTracker()
+    if not SafeCallMethod(QuestKing, "OnScenarioUpdate", ...) then
+        UpdateTracker(false)
     end
 end
 
@@ -581,79 +677,59 @@ Events.SCENARIO_BONUS_VISIBILITY_UPDATE = function()
 end
 
 Events.CRITERIA_COMPLETE = function(self, event, ...)
-    if QuestKing and QuestKing.OnCriteriaComplete then
-        QuestKing:OnCriteriaComplete(...)
-    else
+    if not SafeCallMethod(QuestKing, "OnCriteriaComplete", ...) then
         RefreshScenarioAndUpdate()
     end
 end
 
 Events.SCENARIO_COMPLETED = function(self, event, ...)
     RefreshScenarioCriteriaState()
-
-    if QuestKing and QuestKing.OnScenarioCompleted then
-        QuestKing:OnScenarioCompleted(...)
-    end
-
-    UpdateTracker()
+    SafeCallMethod(QuestKing, "OnScenarioCompleted", ...)
+    UpdateTracker(false)
 end
-
--- -----------------------------------------------------------------------------
--- Challenge / timer content
--- -----------------------------------------------------------------------------
 
 Events.PROVING_GROUNDS_SCORE_UPDATE = function(self, event, score)
-    if score and QuestKing and QuestKing.ProvingGroundsScoreUpdate then
-        QuestKing.ProvingGroundsScoreUpdate(score)
-    else
-        UpdateTracker()
+    if not SafeCallMethod(QuestKing, "ProvingGroundsScoreUpdate", score) then
+        UpdateTracker(false)
     end
 end
 
-Events.WORLD_STATE_TIMER_START = UpdateTracker
-Events.WORLD_STATE_TIMER_STOP = UpdateTracker
-
--- -----------------------------------------------------------------------------
--- World / session transitions
--- -----------------------------------------------------------------------------
+Events.WORLD_STATE_TIMER_START = function()
+    UpdateTracker(false)
+end
+Events.WORLD_STATE_TIMER_STOP = function()
+    UpdateTracker(false)
+end
 
 Events.PLAYER_ENTERING_WORLD = function()
     RefreshScenarioCriteriaState()
-
-    if QuestKing and QuestKing.OnPlayerEnteringWorld then
-        QuestKing:OnPlayerEnteringWorld()
-    end
-
-    UpdateTracker()
+    SafeCallMethod(QuestKing, "OnPlayerEnteringWorld")
+    UpdateTrackerAndQueueQuestStateRefresh()
 end
 
 Events.PLAYER_LEVEL_UP = function(self, event, ...)
-    if QuestKing and QuestKing.OnPlayerLevelUp then
-        QuestKing:OnPlayerLevelUp(...)
-    else
-        UpdateTracker()
+    if not SafeCallMethod(QuestKing, "OnPlayerLevelUp", ...) then
+        UpdateTracker(false)
     end
 end
 
--- -----------------------------------------------------------------------------
--- Super tracking
--- -----------------------------------------------------------------------------
+Events.PLAYER_DEAD = UpdateTrackerAndQueueQuestStateRefresh
+Events.PLAYER_ALIVE = UpdateTrackerAndQueueQuestStateRefresh
+Events.PLAYER_UNGHOST = UpdateTrackerAndQueueQuestStateRefresh
+Events.ZONE_CHANGED_NEW_AREA = function()
+    UpdateTracker(false)
+end
 
 Events.SUPER_TRACKING_CHANGED = function()
     local questID = GetSuperTrackedQuestIDCompat()
-
-    if QuestKing and QuestKing.OnSuperTrackedQuestChanged then
-        QuestKing:OnSuperTrackedQuestChanged(questID)
-    else
-        UpdateTracker()
+    if not SafeCallMethod(QuestKing, "OnSuperTrackedQuestChanged", questID) then
+        UpdateTracker(false)
     end
 end
 
-Events.SUPER_TRACKING_PATH_UPDATED = UpdateTracker
-
--- -----------------------------------------------------------------------------
--- Optional quest watch helpers exposed on addon table
--- -----------------------------------------------------------------------------
+Events.SUPER_TRACKING_PATH_UPDATED = function()
+    UpdateTracker(false)
+end
 
 function QuestKing:AddQuestWatchByID(questID)
     local questLogIndex = GetQuestLogIndexByIDCompat(questID)

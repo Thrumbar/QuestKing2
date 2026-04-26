@@ -3,17 +3,15 @@ local addonName, QuestKing = ...
 local tinsert = table.insert
 local tremove = table.remove
 
-local opt = QuestKing.options
-
 local tonumber = tonumber
 local type = type
+
+local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
 
 local BAR_HEIGHT = 15
 local BAR_LEFT_INSET = 16
 local BAR_TOP_OFFSET = -1
 local BAR_MIN_WIDTH = 80
-
-local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
 
 local progressBarPool = {}
 local numProgressBars = 0
@@ -23,19 +21,17 @@ local progressBackdrop = {
     insets = { left = 0, right = 0, top = 0, bottom = 0 },
 }
 
-local function ClampPercent(percent)
-    percent = tonumber(percent) or 0
-    if percent < 0 then
-        return 0
-    end
-    if percent > 100 then
-        return 100
-    end
-    return percent
+local function GetOptions()
+    return QuestKing.options or {}
 end
 
 local function GetButtonWidth()
-    return (opt and opt.buttonWidth) or 230
+    local opt = GetOptions()
+    local width = tonumber(opt.buttonWidth) or 230
+    if width < 120 then
+        width = 120
+    end
+    return width
 end
 
 local function GetProgressBarWidth()
@@ -47,24 +43,63 @@ local function GetProgressBarWidth()
 end
 
 local function GetFontPath()
-    return (opt and opt.font) or STANDARD_TEXT_FONT
+    local opt = GetOptions()
+    return opt.font or STANDARD_TEXT_FONT
 end
 
 local function GetFontSize()
-    return ((opt and opt.fontSize) or 12) - 1
+    local opt = GetOptions()
+    local size = tonumber(opt.fontSize) or 12
+    size = size - 1
+    if size < 8 then
+        size = 8
+    end
+    return size
 end
 
 local function GetFontStyle()
-    return (opt and opt.fontStyle) or ""
+    local opt = GetOptions()
+    return opt.fontStyle or ""
 end
 
-local function UpdateBurstWidths(progressBar)
-    local burstWidth = progressBar:GetWidth() * 0.6
-    progressBar.topLineBurst:SetWidth(burstWidth)
-    progressBar.bottomLineBurst:SetWidth(burstWidth)
+local function ClampPercent(percent)
+    percent = tonumber(percent) or 0
+
+    if percent <= 1 and percent >= 0 then
+        percent = percent * 100
+    end
+
+    if percent < 0 then
+        return 0
+    end
+
+    if percent > 100 then
+        return 100
+    end
+
+    return percent
+end
+
+local function ApplyFontStringStyle(fontString)
+    if not fontString then
+        return
+    end
+
+    fontString:SetFont(GetFontPath(), GetFontSize(), GetFontStyle())
+    fontString:SetJustifyH("CENTER")
+    fontString:SetJustifyV("MIDDLE")
+    fontString:SetTextColor(1, 1, 1)
+    fontString:SetShadowOffset(1, -1)
+    fontString:SetShadowColor(0, 0, 0, 1)
+    fontString:SetWordWrap(false)
+    fontString:SetNonSpaceWrap(false)
 end
 
 local function EnsureBackdrop(progressBar)
+    if not progressBar then
+        return
+    end
+
     if progressBar.SetBackdrop then
         progressBar:SetBackdrop(progressBackdrop)
         if progressBar.SetBackdropColor then
@@ -84,6 +119,83 @@ local function EnsureBackdrop(progressBar)
     end
 end
 
+local function StopAnimationGroupSafe(animGroup)
+    if animGroup and animGroup.IsPlaying and animGroup:IsPlaying() then
+        animGroup:Stop()
+    end
+end
+
+local function HideBurstTextures(progressBar)
+    if progressBar.glow then
+        progressBar.glow:SetAlpha(0)
+        progressBar.glow:Hide()
+    end
+
+    if progressBar.topLineBurst then
+        progressBar.topLineBurst:SetAlpha(0)
+        progressBar.topLineBurst:Hide()
+    end
+
+    if progressBar.bottomLineBurst then
+        progressBar.bottomLineBurst:SetAlpha(0)
+        progressBar.bottomLineBurst:Hide()
+    end
+
+    if progressBar.pulse then
+        progressBar.pulse:SetAlpha(0)
+        progressBar.pulse:Hide()
+    end
+end
+
+local function UpdateBurstWidths(progressBar)
+    if not progressBar then
+        return
+    end
+
+    local burstWidth = (progressBar:GetWidth() or GetProgressBarWidth()) * 0.6
+    if burstWidth < 8 then
+        burstWidth = 8
+    end
+
+    if progressBar.topLineBurst then
+        progressBar.topLineBurst:SetWidth(burstWidth)
+    end
+
+    if progressBar.bottomLineBurst then
+        progressBar.bottomLineBurst:SetWidth(burstWidth)
+    end
+end
+
+local function ResetProgressBar(progressBar)
+    if not progressBar then
+        return
+    end
+
+    progressBar.baseLine = nil
+    progressBar.baseButton = nil
+    progressBar._lastPercent = nil
+
+    progressBar:SetMinMaxValues(0, 100)
+    progressBar:SetValue(100)
+    progressBar:SetStatusBarColor(0.2, 0.4, 0.9)
+    progressBar:SetWidth(GetProgressBarWidth())
+    progressBar:SetHeight(BAR_HEIGHT)
+
+    if progressBar.text then
+        progressBar.text:SetText("0.0%")
+        ApplyFontStringStyle(progressBar.text)
+    end
+
+    StopAnimationGroupSafe(progressBar.glow and progressBar.glow.animGroup)
+    StopAnimationGroupSafe(progressBar.topLineBurst and progressBar.topLineBurst.animGroup)
+    StopAnimationGroupSafe(progressBar.bottomLineBurst and progressBar.bottomLineBurst.animGroup)
+    StopAnimationGroupSafe(progressBar.pulse and progressBar.pulse.animGroup)
+
+    HideBurstTextures(progressBar)
+    EnsureBackdrop(progressBar)
+    UpdateBurstWidths(progressBar)
+end
+
 local function FreeProgressBar(self)
     self:Hide()
     self:ClearAllPoints()
@@ -94,59 +206,67 @@ local function FreeProgressBar(self)
         self.baseLine.progressBarText = nil
     end
 
-    self.baseLine = nil
-    self.baseButton = nil
-    self._lastPercent = nil
-
+    ResetProgressBar(self)
     tinsert(progressBarPool, self)
+end
+
+local function PlayBurstAnimations(self, delta, percent)
+    if delta < 0 then
+        delta = 0
+    end
+
+    if delta >= 5 then
+        StopAnimationGroupSafe(self.topLineBurst and self.topLineBurst.animGroup)
+        StopAnimationGroupSafe(self.bottomLineBurst and self.bottomLineBurst.animGroup)
+
+        if self.topLineBurst then
+            self.topLineBurst:Show()
+            self.topLineBurst.animGroup:Play()
+        end
+
+        if self.bottomLineBurst then
+            self.bottomLineBurst:Show()
+            self.bottomLineBurst.animGroup:Play()
+        end
+    end
+
+    if delta >= 1 and self.glow then
+        local width = self:GetWidth() or GetProgressBarWidth()
+        local offset = width * percent / 100
+        local deltaWidth = delta * (width / 100)
+
+        if deltaWidth < 2 then
+            deltaWidth = 2
+        end
+
+        self.glow:SetWidth(deltaWidth)
+        self.glow:ClearAllPoints()
+        self.glow:SetPoint("RIGHT", self, "LEFT", offset, 0)
+        self.glow:Show()
+
+        StopAnimationGroupSafe(self.glow.animGroup)
+        self.glow.animGroup:Play()
+    end
+
+    if self.pulse then
+        self.pulse:Show()
+        StopAnimationGroupSafe(self.pulse.animGroup)
+        self.pulse.animGroup:Play()
+    end
 end
 
 local function SetPercent(self, percent)
     percent = ClampPercent(percent)
 
     self:SetValue(percent)
-    self.text:SetFormattedText("%.1f%%", percent)
+
+    if self.text then
+        self.text:SetFormattedText("%.1f%%", percent)
+    end
 
     local lastPercent = self._lastPercent
     if type(lastPercent) == "number" and percent ~= lastPercent then
-        local delta = percent - lastPercent
-        if delta < 0 then
-            delta = 0
-        end
-
-        if delta >= 5 then
-            if self.topLineBurst.animGroup:IsPlaying() then
-                self.topLineBurst.animGroup:Stop()
-                self.bottomLineBurst.animGroup:Stop()
-            end
-
-            self.topLineBurst.animGroup:Play()
-            self.bottomLineBurst.animGroup:Play()
-        end
-
-        if delta >= 1 then
-            local width = self:GetWidth()
-            local offset = width * percent / 100
-            local deltaWidth = delta * (width / 100)
-
-            if deltaWidth < 2 then
-                deltaWidth = 2
-            end
-
-            self.glow:SetWidth(deltaWidth)
-            self.glow:ClearAllPoints()
-            self.glow:SetPoint("RIGHT", self, "LEFT", offset, 0)
-
-            if self.glow.animGroup:IsPlaying() then
-                self.glow.animGroup:Stop()
-            end
-            self.glow.animGroup:Play()
-        end
-
-        if self.pulse.animGroup:IsPlaying() then
-            self.pulse.animGroup:Stop()
-        end
-        self.pulse.animGroup:Play()
+        PlayBurstAnimations(self, percent - lastPercent, percent)
     end
 
     self._lastPercent = percent
@@ -155,14 +275,16 @@ end
 local function CreateProgressBar()
     numProgressBars = numProgressBars + 1
 
-    local progressBar = CreateFrame(
-        "StatusBar",
-        "QuestKing_ProgressBar" .. numProgressBars,
-        QuestKing.Tracker,
-        BACKDROP_TEMPLATE
-    )
+    local parent = (QuestKing and QuestKing.Tracker) or UIParent
+    local progressBar = CreateFrame("StatusBar", nil, parent, BACKDROP_TEMPLATE)
+
     progressBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    progressBar:GetStatusBarTexture():SetHorizTile(false)
+
+    local statusTexture = progressBar:GetStatusBarTexture()
+    if statusTexture and statusTexture.SetHorizTile then
+        statusTexture:SetHorizTile(false)
+    end
+
     progressBar:SetStatusBarColor(0.2, 0.4, 0.9)
     progressBar:SetMinMaxValues(0, 100)
     progressBar:SetValue(100)
@@ -178,17 +300,10 @@ local function CreateProgressBar()
     progressBar.border = border
 
     local text = progressBar:CreateFontString(nil, "OVERLAY")
-    text:SetFont(GetFontPath(), GetFontSize(), GetFontStyle())
-    text:SetJustifyH("CENTER")
-    text:SetJustifyV("MIDDLE")
+    ApplyFontStringStyle(text)
     text:SetPoint("TOPLEFT", progressBar, "TOPLEFT", 0, 0)
     text:SetPoint("BOTTOMRIGHT", progressBar, "BOTTOMRIGHT", 0, 2)
-    text:SetTextColor(1, 1, 1)
-    text:SetShadowOffset(1, -1)
-    text:SetShadowColor(0, 0, 0, 1)
-    text:SetWordWrap(false)
-    text:SetVertexColor(0.8, 0.8, 0.8)
-    text:SetText("0%")
+    text:SetText("0.0%")
     progressBar.text = text
 
     local glow = progressBar:CreateTexture(nil, "OVERLAY")
@@ -198,6 +313,7 @@ local function CreateProgressBar()
     glow:SetTexture([[Interface\AddOns\QuestKing\textures\Full-Line-Glow-White]])
     glow:SetVertexColor(0.6, 0.8, 1, 0)
     glow:SetBlendMode("ADD")
+    glow:Hide()
     progressBar.glow = glow
 
     do
@@ -217,6 +333,11 @@ local function CreateProgressBar()
         a1:SetDuration(0.2)
         a1:SetOrder(1)
 
+        animGroup:SetScript("OnFinished", function()
+            glow:Hide()
+            glow:SetAlpha(0)
+        end)
+
         glow.animGroup = animGroup
     end
 
@@ -227,6 +348,7 @@ local function CreateProgressBar()
     topLineBurst:SetTexCoord(0.1640625, 0.33203125, 0.66796875, 0.74609375)
     topLineBurst:SetVertexColor(0.6, 0.8, 1, 0)
     topLineBurst:SetBlendMode("ADD")
+    topLineBurst:Hide()
     progressBar.topLineBurst = topLineBurst
 
     do
@@ -252,6 +374,11 @@ local function CreateProgressBar()
         a2:SetDuration(0.25)
         a2:SetOrder(1)
 
+        animGroup:SetScript("OnFinished", function()
+            topLineBurst:Hide()
+            topLineBurst:SetAlpha(0)
+        end)
+
         topLineBurst.animGroup = animGroup
     end
 
@@ -262,6 +389,7 @@ local function CreateProgressBar()
     bottomLineBurst:SetTexCoord(0.1640625, 0.33203125, 0.66796875, 0.74609375)
     bottomLineBurst:SetVertexColor(0.6, 0.8, 1, 0)
     bottomLineBurst:SetBlendMode("ADD")
+    bottomLineBurst:Hide()
     progressBar.bottomLineBurst = bottomLineBurst
 
     do
@@ -287,6 +415,11 @@ local function CreateProgressBar()
         a2:SetDuration(0.25)
         a2:SetOrder(1)
 
+        animGroup:SetScript("OnFinished", function()
+            bottomLineBurst:Hide()
+            bottomLineBurst:SetAlpha(0)
+        end)
+
         bottomLineBurst.animGroup = animGroup
     end
 
@@ -295,6 +428,7 @@ local function CreateProgressBar()
     pulse:SetTexture([[Interface\QuestFrame\UI-QuestLogTitleHighlight]])
     pulse:SetVertexColor(0.6, 0.8, 1, 0)
     pulse:SetBlendMode("ADD")
+    pulse:Hide()
     progressBar.pulse = pulse
 
     do
@@ -314,6 +448,11 @@ local function CreateProgressBar()
         a2:SetToAlpha(0)
         a2:SetOrder(1)
 
+        animGroup:SetScript("OnFinished", function()
+            pulse:Hide()
+            pulse:SetAlpha(0)
+        end)
+
         pulse.animGroup = animGroup
     end
 
@@ -321,12 +460,11 @@ local function CreateProgressBar()
     progressBar.SetPercent = SetPercent
     progressBar.UpdateBurstWidths = UpdateBurstWidths
 
-    UpdateBurstWidths(progressBar)
-
+    ResetProgressBar(progressBar)
     return progressBar
 end
 
-function QuestKing.WatchButton:AddProgressBar(duration, startTime)
+function QuestKing.WatchButton:AddProgressBar()
     local line = self:AddLine()
     local progressBar = line.progressBar
 
@@ -339,15 +477,14 @@ function QuestKing.WatchButton:AddProgressBar(duration, startTime)
 
         line.progressBar = progressBar
         line.progressBarText = progressBar.text
-
-        progressBar.baseButton = self
-        progressBar.baseLine = line
-    else
-        progressBar.baseButton = self
-        progressBar.baseLine = line
     end
 
+    progressBar.baseButton = self
+    progressBar.baseLine = line
     progressBar._lastPercent = nil
+
+    progressBar:SetParent(self)
+    progressBar:SetFrameLevel((self.GetFrameLevel and self:GetFrameLevel()) or 1)
     progressBar:SetWidth(GetProgressBarWidth())
     progressBar:SetHeight(BAR_HEIGHT)
     progressBar:UpdateBurstWidths()
@@ -359,7 +496,9 @@ function QuestKing.WatchButton:AddProgressBar(duration, startTime)
 
     line.isTimer = false
     line:SetText("")
-    line.right:SetText("")
+    if line.right then
+        line.right:SetText("")
+    end
     line:SetHeight(BAR_HEIGHT)
 
     return progressBar
