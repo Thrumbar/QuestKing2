@@ -689,6 +689,54 @@ function QuestKing.MatchObjectiveRep(objectiveDesc)
     return quantCur, quantMax, quantName
 end
 
+local BLIZZARD_TRACKER_FRAME_NAMES = {
+    -- Retail / Midnight objective tracker roots and common child roots.
+    "ObjectiveTrackerFrame",
+    "ObjectiveTrackerBlocksFrame",
+    "QuestObjectiveTracker",
+    "AchievementObjectiveTracker",
+    "BonusObjectiveTracker",
+    "BonusObjectiveTrackerFrame",
+    "ScenarioObjectiveTracker",
+    "ScenarioBlocksFrame",
+    "MonthlyActivitiesObjectiveTracker",
+    "ProfessionsRecipeTracker",
+
+    -- Wrath / Cataclysm / Mists Classic tracker roots.
+    "WatchFrame",
+    "AchievementWatchFrame",
+
+    -- Classic Era / Burning Crusade Classic quest watch root.
+    "QuestWatchFrame",
+}
+
+local BLIZZARD_TRACKER_REFRESH_FUNCTION_NAMES = {
+    -- Retail / Midnight.
+    "ObjectiveTracker_Update",
+    "BonusObjectiveTracker_Update",
+    "ScenarioObjectiveTracker_Update",
+    "AchievementObjectiveTracker_Update",
+    "QuestObjectiveTracker_Update",
+    "MonthlyActivitiesObjectiveTracker_Update",
+
+    -- Wrath / Cataclysm / Mists Classic.
+    "WatchFrame_Update",
+    "AchievementWatchFrame_Update",
+
+    -- Classic Era / Burning Crusade Classic.
+    "QuestWatch_Update",
+}
+
+local BLIZZARD_TRACKER_LEGACY_HARD_HIDE_NAMES = {
+    QuestWatchFrame = true,
+    WatchFrame = true,
+    AchievementWatchFrame = true,
+}
+
+local trackerVisualHookedFrames = {}
+local trackerVisualHookedFunctions = {}
+local trackerVisualHookedObjects = {}
+
 local function SafeEnableMouse(frame, enabled)
     if frame and frame.EnableMouse then
         pcall(frame.EnableMouse, frame, enabled and true or false)
@@ -707,8 +755,44 @@ local function SafeSetIgnoreParentAlpha(frame, enabled)
     end
 end
 
+local function SafeShow(frame)
+    if frame and frame.Show then
+        pcall(frame.Show, frame)
+    end
+end
+
+local function SafeHide(frame)
+    if frame and frame.Hide then
+        pcall(frame.Hide, frame)
+    end
+end
+
+local function SafeGetFrameName(frame)
+    if frame and frame.GetName then
+        local ok, name = pcall(frame.GetName, frame)
+        if ok and type(name) == "string" then
+            return name
+        end
+    end
+
+    return nil
+end
+
+local function SafeGetGlobalFrame(name)
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+
+    local frame = _G[name]
+    if type(frame) == "table" then
+        return frame
+    end
+
+    return nil
+end
+
 local function RegisterEventSafe(frame, eventName)
-    if not frame or type(eventName) ~= "string" or eventName == "" then
+    if not frame or type(eventName) ~= "string" or eventName == "" or not frame.RegisterEvent then
         return false
     end
 
@@ -718,6 +802,10 @@ end
 
 local function HookMethodSafe(target, methodName, callback)
     if not target or type(methodName) ~= "string" or type(callback) ~= "function" or not hooksecurefunc then
+        return false
+    end
+
+    if type(target[methodName]) ~= "function" then
         return false
     end
 
@@ -738,29 +826,91 @@ local function HookGlobalSafe(functionName, callback)
     return ok and true or false
 end
 
-local function CanSafelySuppressBlizzardTracker()
-    -- Classic-family clients still tolerate direct visual suppression of the
-    -- legacy tracker much better than Mainline.
-    return IS_CLASSIC_FAMILY
-end
-
 local function ShouldHideBlizzardTracker()
     local options = GetOptions()
-    return options and options.disableBlizzard and true or false
+    return options and options.disableBlizzard == true or false
 end
 
-local function ShouldUseRetailTrackerCloak()
-    return IS_MAINLINE and ShouldHideBlizzardTracker()
+local function AddTrackerFrame(frames, seen, frame)
+    if not frame or seen[frame] then
+        return
+    end
+
+    seen[frame] = true
+    frames[#frames + 1] = frame
+end
+
+local function AddTrackerFrameByName(frames, seen, frameName)
+    AddTrackerFrame(frames, seen, SafeGetGlobalFrame(frameName))
+end
+
+local function AddTrackerObjectChild(frames, seen, object, childKey)
+    if object and type(object) == "table" and type(childKey) == "string" then
+        AddTrackerFrame(frames, seen, object[childKey])
+    end
 end
 
 local function GetBlizzardTrackerRootFrames()
-    return {
-        _G.ObjectiveTrackerFrame,
-        _G.ObjectiveTrackerFrame and _G.ObjectiveTrackerFrame.BlocksFrame or nil,
-        _G.ObjectiveTrackerBlocksFrame,
-        _G.ScenarioBlocksFrame,
-        _G.WatchFrame,
-    }
+    local frames = {}
+    local seen = {}
+
+    for index = 1, #BLIZZARD_TRACKER_FRAME_NAMES do
+        AddTrackerFrameByName(frames, seen, BLIZZARD_TRACKER_FRAME_NAMES[index])
+    end
+
+    local objectiveTracker = SafeGetGlobalFrame("ObjectiveTrackerFrame")
+    AddTrackerObjectChild(frames, seen, objectiveTracker, "BlocksFrame")
+    AddTrackerObjectChild(frames, seen, objectiveTracker, "ScrollContents")
+    AddTrackerObjectChild(frames, seen, objectiveTracker, "HeaderMenu")
+    AddTrackerObjectChild(frames, seen, objectiveTracker, "Header")
+    AddTrackerObjectChild(frames, seen, objectiveTracker, "HeaderFrame")
+    AddTrackerObjectChild(frames, seen, objectiveTracker, "Background")
+
+    local watchFrame = SafeGetGlobalFrame("WatchFrame")
+    AddTrackerObjectChild(frames, seen, watchFrame, "Lines")
+    AddTrackerObjectChild(frames, seen, watchFrame, "Header")
+    AddTrackerObjectChild(frames, seen, watchFrame, "CollapseExpandButton")
+
+    local questWatchFrame = SafeGetGlobalFrame("QuestWatchFrame")
+    AddTrackerObjectChild(frames, seen, questWatchFrame, "Lines")
+    AddTrackerObjectChild(frames, seen, questWatchFrame, "Header")
+    AddTrackerObjectChild(frames, seen, questWatchFrame, "CollapseExpandButton")
+
+    return frames
+end
+
+local function IsLegacyHardHideTrackerFrame(frame)
+    local name = SafeGetFrameName(frame)
+    return name and BLIZZARD_TRACKER_LEGACY_HARD_HIDE_NAMES[name] == true or false
+end
+
+local function IsModernManagedTrackerFrame(frame)
+    if not frame then
+        return false
+    end
+
+    if frame.isManagedFrame or frame.isRightManagedFrame or frame.layoutParent then
+        return true
+    end
+
+    local name = SafeGetFrameName(frame)
+    if not name then
+        return false
+    end
+
+    if name == "ObjectiveTrackerFrame" or name == "ObjectiveTrackerBlocksFrame" then
+        return true
+    end
+
+    if string.find(name, "ObjectiveTracker", 1, true) then
+        return true
+    end
+
+    if name == "MonthlyActivitiesObjectiveTracker" or name == "ProfessionsRecipeTracker" then
+        return true
+    end
+
+    return false
 end
 
 local function ApplySuppressionToTrackerRoot(frame, hide)
@@ -768,53 +918,45 @@ local function ApplySuppressionToTrackerRoot(frame, hide)
         return
     end
 
-    SafeSetIgnoreParentAlpha(frame, false)
-    SafeSetAlpha(frame, hide and 0 or 1)
-    SafeEnableMouse(frame, not hide)
-end
+    local legacyHardHide = IsLegacyHardHideTrackerFrame(frame)
+    local modernManaged = IsModernManagedTrackerFrame(frame)
 
-local function ApplyRetailTrackerCloak(frame, hide)
-    if not frame then
-        return
-    end
-
-    -- Do not toggle mouse propagation/click handling on Mainline managed frames.
-    -- Just visually cloak the tracker root and its known art/text containers.
+    -- Do not destructively hide modern managed tracker frames. Retail and newer
+    -- clients can treat those frames as protected layout participants. Alpha-only
+    -- suppression avoids the protected Show/Hide path while keeping the Blizzard
+    -- layout system intact.
     SafeSetIgnoreParentAlpha(frame, false)
     SafeSetAlpha(frame, hide and 0 or 1)
 
-    if frame.BlocksFrame then
-        SafeSetIgnoreParentAlpha(frame.BlocksFrame, false)
-        SafeSetAlpha(frame.BlocksFrame, hide and 0 or 1)
-    end
+    if legacyHardHide then
+        SafeEnableMouse(frame, not hide)
 
-    if frame.HeaderMenu then
-        SafeSetIgnoreParentAlpha(frame.HeaderMenu, false)
-        SafeSetAlpha(frame.HeaderMenu, hide and 0 or 1)
-    end
-
-    if frame.Background then
-        SafeSetIgnoreParentAlpha(frame.Background, false)
-        SafeSetAlpha(frame.Background, hide and 0 or 1)
+        if hide then
+            SafeHide(frame)
+        else
+            SafeShow(frame)
+        end
+    elseif not modernManaged then
+        -- Non-managed child frames can safely have mouse disabled so invisible
+        -- leftovers do not catch cursor interaction on Classic-family clients.
+        SafeEnableMouse(frame, not hide)
     end
 end
 
 local function ApplyBlizzardTrackerVisualState()
     local hide = ShouldHideBlizzardTracker()
-
-    if ShouldUseRetailTrackerCloak() then
-        if type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() then
-            return
-        end
-
-        ApplyRetailTrackerCloak(_G.ObjectiveTrackerFrame, hide)
-        return
-    end
-
+    local inCombat = type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown()
     local trackerFrames = GetBlizzardTrackerRootFrames()
 
     for index = 1, #trackerFrames do
-        ApplySuppressionToTrackerRoot(trackerFrames[index], hide)
+        local frame = trackerFrames[index]
+
+        if inCombat and IsModernManagedTrackerFrame(frame) then
+            -- Mainline-style managed frames are left alone during combat. The
+            -- queued PLAYER_REGEN_ENABLED refresh below reapplies suppression.
+        else
+            ApplySuppressionToTrackerRoot(frame, hide)
+        end
     end
 end
 
@@ -841,7 +983,74 @@ local function RequestBlizzardTrackerVisualRefresh()
     ScheduleBlizzardTrackerVisualRefresh(0)
 end
 
+local function InstallTrackerFrameShowHook(frame)
+    if not frame or trackerVisualHookedFrames[frame] then
+        return false
+    end
+
+    if HookMethodSafe(frame, "Show", RequestBlizzardTrackerVisualRefresh) then
+        trackerVisualHookedFrames[frame] = true
+        return true
+    end
+
+    return false
+end
+
+local function InstallTrackerGlobalFunctionHook(functionName)
+    if trackerVisualHookedFunctions[functionName] then
+        return false
+    end
+
+    if HookGlobalSafe(functionName, RequestBlizzardTrackerVisualRefresh) then
+        trackerVisualHookedFunctions[functionName] = true
+        return true
+    end
+
+    return false
+end
+
+local function InstallTrackerObjectMethodHook(object, methodName, key)
+    if trackerVisualHookedObjects[key] then
+        return false
+    end
+
+    if HookMethodSafe(object, methodName, RequestBlizzardTrackerVisualRefresh) then
+        trackerVisualHookedObjects[key] = true
+        return true
+    end
+
+    return false
+end
+
+local function InstallTrackerVisualHooks()
+    local hookedAnything = false
+    local trackerFrames = GetBlizzardTrackerRootFrames()
+
+    for index = 1, #trackerFrames do
+        if InstallTrackerFrameShowHook(trackerFrames[index]) then
+            hookedAnything = true
+        end
+    end
+
+    for index = 1, #BLIZZARD_TRACKER_REFRESH_FUNCTION_NAMES do
+        if InstallTrackerGlobalFunctionHook(BLIZZARD_TRACKER_REFRESH_FUNCTION_NAMES[index]) then
+            hookedAnything = true
+        end
+    end
+
+    if InstallTrackerObjectMethodHook(_G.ObjectiveTrackerManager, "Update", "ObjectiveTrackerManager.Update") then
+        hookedAnything = true
+    end
+
+    if InstallTrackerObjectMethodHook(_G.ObjectiveTrackerManager, "MarkDirty", "ObjectiveTrackerManager.MarkDirty") then
+        hookedAnything = true
+    end
+
+    trackerVisualHooksInstalled = trackerVisualHooksInstalled or hookedAnything
+end
+
 local function OnTrackerVisualStateEvent()
+    InstallTrackerVisualHooks()
     RequestBlizzardTrackerVisualRefresh()
 end
 
@@ -854,58 +1063,18 @@ local function RegisterTrackerVisualStateEvents()
 
     trackerVisualStateFrame:SetScript("OnEvent", OnTrackerVisualStateEvent)
 
+    RegisterEventSafe(trackerVisualStateFrame, "ADDON_LOADED")
+    RegisterEventSafe(trackerVisualStateFrame, "PLAYER_LOGIN")
     RegisterEventSafe(trackerVisualStateFrame, "PLAYER_ENTERING_WORLD")
+    RegisterEventSafe(trackerVisualStateFrame, "QUEST_LOG_UPDATE")
+    RegisterEventSafe(trackerVisualStateFrame, "TRACKED_QUEST_LIST_CHANGED")
+    RegisterEventSafe(trackerVisualStateFrame, "UPDATE_QUEST_WATCH")
+    RegisterEventSafe(trackerVisualStateFrame, "ZONE_CHANGED")
+    RegisterEventSafe(trackerVisualStateFrame, "ZONE_CHANGED_NEW_AREA")
     RegisterEventSafe(trackerVisualStateFrame, "DISPLAY_SIZE_CHANGED")
     RegisterEventSafe(trackerVisualStateFrame, "UI_SCALE_CHANGED")
     RegisterEventSafe(trackerVisualStateFrame, "EDIT_MODE_LAYOUTS_UPDATED")
     RegisterEventSafe(trackerVisualStateFrame, "PLAYER_REGEN_ENABLED")
-end
-
-local function InstallTrackerVisualHooks()
-    if trackerVisualHooksInstalled then
-        return
-    end
-
-    if ShouldUseRetailTrackerCloak() then
-        trackerVisualHooksInstalled = true
-        return
-    end
-
-    local hookedAnything = false
-
-    if HookMethodSafe(_G.ObjectiveTrackerFrame, "Show", RequestBlizzardTrackerVisualRefresh) then
-        hookedAnything = true
-    end
-
-    if _G.WatchFrame and _G.WatchFrame ~= _G.ObjectiveTrackerFrame then
-        if HookMethodSafe(_G.WatchFrame, "Show", RequestBlizzardTrackerVisualRefresh) then
-            hookedAnything = true
-        end
-    end
-
-    if HookGlobalSafe("ObjectiveTracker_Update", RequestBlizzardTrackerVisualRefresh) then
-        hookedAnything = true
-    end
-
-    if HookGlobalSafe("BonusObjectiveTracker_Update", RequestBlizzardTrackerVisualRefresh) then
-        hookedAnything = true
-    end
-
-    if HookGlobalSafe("ScenarioObjectiveTracker_Update", RequestBlizzardTrackerVisualRefresh) then
-        hookedAnything = true
-    end
-
-    if HookGlobalSafe("WatchFrame_Update", RequestBlizzardTrackerVisualRefresh) then
-        hookedAnything = true
-    end
-
-    if _G.ObjectiveTrackerManager and _G.ObjectiveTrackerManager.Update then
-        if HookMethodSafe(_G.ObjectiveTrackerManager, "Update", RequestBlizzardTrackerVisualRefresh) then
-            hookedAnything = true
-        end
-    end
-
-    trackerVisualHooksInstalled = hookedAnything
 end
 
 function QuestKing:DisableBlizzard()
@@ -913,6 +1082,17 @@ function QuestKing:DisableBlizzard()
         return
     end
 
+    RegisterTrackerVisualStateEvents()
+    InstallTrackerVisualHooks()
+    ScheduleBlizzardTrackerVisualRefresh(0)
+
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0.5, OnTrackerVisualStateEvent)
+        C_Timer.After(2, OnTrackerVisualStateEvent)
+    end
+end
+
+function QuestKing:RefreshBlizzardTrackerSuppression()
     RegisterTrackerVisualStateEvents()
     InstallTrackerVisualHooks()
     ScheduleBlizzardTrackerVisualRefresh(0)

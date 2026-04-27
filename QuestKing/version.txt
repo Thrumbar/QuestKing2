@@ -1,3 +1,11 @@
+3.0.7
+- Fixed Classic Era and TBC Classic Blizzard watch window suppression by covering the legacy QuestWatchFrame root used before ObjectiveTrackerFrame existed.
+- Added QuestWatch_Update and late Blizzard UI panel load retries so opt.disableBlizzard continues hiding the Blizzard watch frame after quest log updates.
+- Kept suppression visual-only for modern protected tracker frames while safely hiding the legacy QuestWatchFrame after Blizzard refreshes it.
+
+3.0.6
+
+
 3.0.5
 - Added a Retail/Midnight guard for Blizzard TextWithState UIWidget setup so secret GetStringHeight/GetStringWidth values cannot crash map POI tooltips while execution is tainted by QuestKing.
 - Catches Blizzard_UIWidgetTemplateTextWithState setup failures and falls back to sanitized width, height, padding, scale, and text setup values.
