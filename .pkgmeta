@@ -6,9 +6,8 @@ manual-changelog:
 
 enable-nolib-creation: no
 
-move-folders:
-  QuestKing: QuestKing
-
+# Remove move-folders if the folder names in the repo 
+# already match the desired addon folder names.
 ignore:
   - .github
   - docs
