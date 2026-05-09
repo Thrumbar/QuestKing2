@@ -1,2 +1,27 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Normalize text files to LF so BigWigsMods/packager and WoW clients see clean files.
+* text=auto eol=lf
+
+# Source and metadata files.
+*.lua text eol=lf
+*.toc text eol=lf
+*.xml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Binary assets.
+*.blp binary
+*.tga binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ttf binary
+*.otf binary
+*.ogg binary
+*.mp3 binary
+*.wav binary
+*.zip binary
+*.7z binary
+*.rar binary

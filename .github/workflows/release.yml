@@ -1,15 +1,17 @@
-name: Release QuestKing
+name: Release QuestKing2 Reborn
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   package:
+    name: Package and publish QuestKing2 = Reborn
     runs-on: ubuntu-latest
 
     steps:
@@ -21,7 +23,10 @@ jobs:
       - name: Package and publish
         uses: BigWigsMods/packager@v2
         with:
-          args: -S
+          args: >-
+            -S
+            -p 1516209
+            -n "QuestKing2-Reborn-{project-version}{nolib}{classic}:QuestKing2 = Reborn {project-version}{classic}{nolib}"
         env:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

@@ -1,3 +1,8 @@
+# BigWigsMods packager metadata for QuestKing2 = Reborn.
+# Keep package-as matching the actual addon folder and TOC basename:
+#   QuestKing/QuestKing.toc
+# Do not change this to the CurseForge slug unless the addon folder and TOC
+# are also renamed and all hard-coded Interface\\AddOns\\QuestKing paths are updated.
 package-as: QuestKing
 
 manual-changelog:
@@ -6,10 +11,12 @@ manual-changelog:
 
 enable-nolib-creation: no
 
-# Remove move-folders if the folder names in the repo 
-# already match the desired addon folder names.
 ignore:
   - .github
+  - .release
   - docs
   - tools
   - tests
+  - '*.zip'
+  - '*.7z'
+  - '*.rar'
