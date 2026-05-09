@@ -6,6 +6,7 @@ local C_SuperTrack = C_SuperTrack
 local C_CampaignInfo = C_CampaignInfo
 
 local WatchButton = QuestKing.WatchButton
+local Compat = QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
 local opt = QuestKing.options or {}
 local opt_colors = opt.colors or {}
 local opt_showCompletedObjectives = opt.showCompletedObjectives
@@ -993,63 +994,43 @@ local mouseHandlerQuest = {}
 
 function mouseHandlerQuest:TitleButtonOnClick(mouse)
     local button = self.parent
+
+    if mouse == "RightButton" then
+        if button.questID then
+            local questID = button.questID
+            local questLogIndex = button.questLogIndex
+
+            if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
+                SafeCall(C_SuperTrack.SetSuperTrackedQuestID, questID)
+            elseif QuestSuperTracking_ChooseClosestQuest then
+                SafeCall(QuestSuperTracking_ChooseClosestQuest)
+            end
+
+            if QuestKing.UpdateTracker then
+                QuestKing:UpdateTracker()
+            end
+        end
+
+        return
+    end
+
     local questID = button.questID
     local questLogIndex = button.questLogIndex
+
+    if not questLogIndex and questID then
+        questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    end
+
+    if not questID and questLogIndex then
+        questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
+    end
 
     if not questID then
         return
     end
 
-    if _G.IsModifiedClick and _G.IsModifiedClick("CHATLINK") and _G.ChatEdit_GetActiveWindow then
-        local activeWindow = _G.ChatEdit_GetActiveWindow()
-        if activeWindow then
-            local link = nil
-
-            if _G.GetQuestLink and questLogIndex then
-                local ok, questLink = SafeCall(_G.GetQuestLink, questLogIndex)
-                if ok and questLink then
-                    link = questLink
-                end
-            end
-
-            if link then
-                _G.ChatEdit_InsertLink(link)
-                return
-            end
-        end
-    end
-
-    if mouse == "RightButton" then
-        if QuestKing.SetSuperTrackedQuestID then
-            local currentID = GetSuperTrackedQuestIDCompat()
-            if currentID == questID then
-                QuestKing:SetSuperTrackedQuestID(0)
-            else
-                QuestKing:SetSuperTrackedQuestID(questID)
-            end
-
-            QueueTrackerRefresh(true)
-        end
+    if Compat.OpenQuestDetails and Compat.OpenQuestDetails(questID, questLogIndex) then
         return
-    end
-
-    local isAutoCompleteQuest = IsQuestAutoComplete(questID, questLogIndex)
-    if isAutoCompleteQuest and IsQuestCompleteCompat(questID) and ShowQuestCompleteCompat(questID, questLogIndex) then
-        return
-    end
-
-    if _G.QuestObjectiveTracker_OpenQuestMap and questLogIndex then
-        local ok = SafeCall(_G.QuestObjectiveTracker_OpenQuestMap, nil, questLogIndex)
-        if ok then
-            return
-        end
-    end
-
-    if _G.QuestMapFrame_OpenToQuestDetails and questID then
-        local ok = SafeCall(_G.QuestMapFrame_OpenToQuestDetails, questID)
-        if ok then
-            return
-        end
     end
 
     if _G.ToggleQuestLog and questLogIndex then

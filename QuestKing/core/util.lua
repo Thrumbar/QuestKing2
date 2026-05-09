@@ -146,297 +146,28 @@ QuestKing.IsCataclysmClassic = IS_CATACLYSM_CLASSIC
 QuestKing.IsClassicFamily = IS_CLASSIC_FAMILY
 
 
-local TEXT_WITH_STATE_WIDGET_DEFAULT_WIDTH = 237
-local TEXT_WITH_STATE_WIDGET_DEFAULT_HEIGHT = 16
-local textWithStateWidgetGuardInstalled = false
-local textWithStateWidgetGuardFrame = nil
-local originalTextWithStateWidgetSetup = nil
+--[[
+    Retail / Midnight tooltip taint note
 
-local function SafeFrameMethod(frame, methodName, ...)
-    if not frame or type(methodName) ~= "string" then
-        return false, nil
-    end
+    QuestKing intentionally does not replace Blizzard tooltip, UIWidget, or
+    embedded item-tooltip functions.
 
-    local method = frame[methodName]
-    if type(method) ~= "function" then
-        return false, nil
-    end
+    Earlier builds wrapped UIWidgetTemplateTextWithStateMixin.Setup to catch a
+    Blizzard map-tooltip failure. That stopped one TextWithState crash, but it
+    also made Blizzard's own GameTooltip world-quest hover path execute with
+    QuestKing taint. In current Retail builds, that taint can reach
+    EmbeddedItemTooltip_UpdateSize and make Blizzard's own width/height math
+    fail when GetWidth/GetHeight returns secret values.
 
-    local ok, result = pcall(method, frame, ...)
-    if ok then
-        return true, result
-    end
-
-    return false, nil
-end
-
-local function SafeFrameDimension(frame, methodName, fallback)
-    local ok, value = SafeFrameMethod(frame, methodName)
-    if ok and type(value) == "number" and not IsSecretValue(value) then
-        return value
-    end
-
-    return fallback
-end
-
-local function GetDefaultUIWidgetFontType()
-    return (Enum and Enum.UIWidgetFontType and Enum.UIWidgetFontType.Normal) or 0
-end
-
-local function GetDefaultUIWidgetTextSizeType()
-    return (Enum and Enum.UIWidgetTextSizeType and Enum.UIWidgetTextSizeType.Standard14Pt) or 0
-end
-
-local function GetDefaultUIWidgetHAlignType()
-    return (Enum and Enum.WidgetTextHorizontalAlignmentType and Enum.WidgetTextHorizontalAlignmentType.Left) or 0
-end
-
-local function EstimateTextWithStateWidgetHeight(textSizeType)
-    local sizeEnum = Enum and Enum.UIWidgetTextSizeType
-    if not sizeEnum then
-        return TEXT_WITH_STATE_WIDGET_DEFAULT_HEIGHT
-    end
-
-    if textSizeType == sizeEnum.Small10Pt then
-        return 12
-    elseif textSizeType == sizeEnum.Small11Pt then
-        return 13
-    elseif textSizeType == sizeEnum.Small12Pt then
-        return 14
-    elseif textSizeType == sizeEnum.Medium16Pt then
-        return 18
-    elseif textSizeType == sizeEnum.Medium18Pt then
-        return 20
-    elseif textSizeType == sizeEnum.Large20Pt then
-        return 22
-    elseif textSizeType == sizeEnum.Large24Pt then
-        return 26
-    elseif textSizeType == sizeEnum.Huge27Pt then
-        return 30
-    end
-
-    return TEXT_WITH_STATE_WIDGET_DEFAULT_HEIGHT
-end
-
-local function GetSafeUIWidgetScale(widgetScale)
-    widgetScale = SafeNumber(widgetScale, nil)
-
-    local scaleEnum = Enum and Enum.UIWidgetScale
-    if not scaleEnum then
-        return 1
-    end
-
-    if widgetScale == scaleEnum.Ninty then
-        return 0.9
-    elseif widgetScale == scaleEnum.Eighty then
-        return 0.8
-    elseif widgetScale == scaleEnum.Seventy then
-        return 0.7
-    elseif widgetScale == scaleEnum.Sixty then
-        return 0.6
-    elseif widgetScale == scaleEnum.Fifty then
-        return 0.5
-    elseif widgetScale == scaleEnum.OneHundredTen then
-        return 1.1
-    elseif widgetScale == scaleEnum.OneHundredTwenty then
-        return 1.2
-    elseif widgetScale == scaleEnum.OneHundredThirty then
-        return 1.3
-    elseif widgetScale == scaleEnum.OneHundredForty then
-        return 1.4
-    elseif widgetScale == scaleEnum.OneHundredFifty then
-        return 1.5
-    elseif widgetScale == scaleEnum.OneHundredSixty then
-        return 1.6
-    elseif widgetScale == scaleEnum.OneHundredSeventy then
-        return 1.7
-    elseif widgetScale == scaleEnum.OneHundredEighty then
-        return 1.8
-    elseif widgetScale == scaleEnum.OneHundredNinety then
-        return 1.9
-    elseif widgetScale == scaleEnum.TwoHundred then
-        return 2
-    end
-
-    return 1
-end
-
-local function ClampWidgetPadding(value, textHeight)
-    value = SafeNumber(value, 0) or 0
-
-    if value < 0 then
-        value = 0
-    end
-
-    local maximum = (textHeight or TEXT_WITH_STATE_WIDGET_DEFAULT_HEIGHT) - 1
-    if maximum < 0 then
-        maximum = 0
-    end
-
-    if value > maximum then
-        value = maximum
-    end
-
-    return value
-end
-
-local function SetupTextWithStateWidgetBaseFallback(widget, widgetInfo, widgetContainer)
-    SafeFrameMethod(widget, "SetScale", GetSafeUIWidgetScale(widgetInfo and widgetInfo.widgetScale))
-
-    if widget.SetTooltip then
-        SafeFrameMethod(widget, "SetTooltip", SafeString(widgetInfo and widgetInfo.tooltip, ""))
-    end
-
-    widget.disableTooltip = widgetContainer and widgetContainer.disableWidgetTooltips and true or false
-
-    if widget.SetTooltipLocation then
-        SafeFrameMethod(widget, "SetTooltipLocation", SafeNumber(widgetInfo and widgetInfo.tooltipLoc, 0) or 0)
-    end
-
-    if widget.UpdateMouseEnabled then
-        SafeFrameMethod(widget, "UpdateMouseEnabled")
-    end
-
-    widget.widgetContainer = widgetContainer
-    widget.orderIndex = SafeNumber(widgetInfo and widgetInfo.orderIndex, 0) or 0
-    widget.layoutDirection = SafeNumber(widgetInfo and widgetInfo.layoutDirection, 0) or 0
-
-    if widget.AnimIn then
-        SafeFrameMethod(widget, "AnimIn")
-    else
-        SafeFrameMethod(widget, "Show")
-    end
-end
-
-local function SetupTextWithStateWidgetTextFallback(widget, widgetInfo)
-    local textRegion = widget and widget.Text
-    if not textRegion then
-        return
-    end
-
-    local widgetSizeSetting = SafeNumber(widgetInfo and widgetInfo.widgetSizeSetting, 0) or 0
-    local fontType = SafeNumber(widgetInfo and widgetInfo.fontType, GetDefaultUIWidgetFontType()) or GetDefaultUIWidgetFontType()
-    local textSizeType = SafeNumber(widgetInfo and widgetInfo.textSizeType, GetDefaultUIWidgetTextSizeType()) or GetDefaultUIWidgetTextSizeType()
-    local enabledState = SafeNumber(widgetInfo and widgetInfo.enabledState, nil)
-    local hAlign = SafeNumber(widgetInfo and widgetInfo.hAlign, GetDefaultUIWidgetHAlignType()) or GetDefaultUIWidgetHAlignType()
-    local text = SafeString(widgetInfo and widgetInfo.text, "")
-
-    if widgetSizeSetting > 0 then
-        SafeFrameMethod(textRegion, "SetWidth", widgetSizeSetting)
-    else
-        SafeFrameMethod(textRegion, "SetWidth", 0)
-    end
-
-    if textRegion.Setup then
-        local ok = pcall(textRegion.Setup, textRegion, text, fontType, textSizeType, enabledState, hAlign)
-        if not ok then
-            SafeFrameMethod(textRegion, "SetText", text)
-        end
-    else
-        SafeFrameMethod(textRegion, "SetText", text)
-    end
-
-    if widget.fontColor and textRegion.SetTextColor and widget.fontColor.GetRGB then
-        local ok, r, g, b = pcall(widget.fontColor.GetRGB, widget.fontColor)
-        if ok then
-            pcall(textRegion.SetTextColor, textRegion, r, g, b)
-        end
-    end
-
-    local widgetWidth = widgetSizeSetting
-    if widgetWidth <= 0 then
-        widgetWidth = SafeFrameDimension(textRegion, "GetStringWidth", TEXT_WITH_STATE_WIDGET_DEFAULT_WIDTH)
-        if not widgetWidth or widgetWidth <= 0 then
-            widgetWidth = TEXT_WITH_STATE_WIDGET_DEFAULT_WIDTH
-        end
-    end
-
-    SafeFrameMethod(widget, "SetWidth", widgetWidth)
-
-    local estimatedHeight = EstimateTextWithStateWidgetHeight(textSizeType)
-    local textHeight = SafeFrameDimension(textRegion, "GetStringHeight", estimatedHeight)
-    if not textHeight or textHeight <= 0 then
-        textHeight = estimatedHeight
-    end
-
-    local bottomPadding = ClampWidgetPadding(widgetInfo and widgetInfo.bottomPadding, textHeight)
-    SafeFrameMethod(widget, "SetHeight", textHeight + bottomPadding)
-end
-
-local function SetupTextWithStateWidgetFallback(widget, widgetInfo, widgetContainer)
-    if not widget or type(widgetInfo) ~= "table" then
-        return
-    end
-
-    SetupTextWithStateWidgetBaseFallback(widget, widgetInfo, widgetContainer)
-    SetupTextWithStateWidgetTextFallback(widget, widgetInfo)
-end
-
-local function QuestKingTextWithStateWidgetSetup(widget, widgetInfo, widgetContainer)
-    if originalTextWithStateWidgetSetup then
-        local ok = pcall(originalTextWithStateWidgetSetup, widget, widgetInfo, widgetContainer)
-        if ok then
-            return
-        end
-    end
-
-    SetupTextWithStateWidgetFallback(widget, widgetInfo, widgetContainer)
-end
-
-local function TryInstallTextWithStateWidgetGuard()
-    if textWithStateWidgetGuardInstalled or not IS_MAINLINE then
-        return textWithStateWidgetGuardInstalled
-    end
-
-    local mixin = _G.UIWidgetTemplateTextWithStateMixin
-    if type(mixin) ~= "table" or type(mixin.Setup) ~= "function" then
-        return false
-    end
-
-    if mixin._QuestKingTextWithStateWidgetGuard then
-        textWithStateWidgetGuardInstalled = true
-        return true
-    end
-
-    originalTextWithStateWidgetSetup = mixin.Setup
-    mixin.Setup = QuestKingTextWithStateWidgetSetup
-    mixin._QuestKingTextWithStateWidgetGuard = true
-    textWithStateWidgetGuardInstalled = true
-    return true
-end
-
+    The safe fix is isolation: QuestKing only sanitizes values it owns and only
+    styles its own private tooltip. Blizzard's GameTooltip, map POI tooltips,
+    widget setup, and embedded reward tooltip sizing are left to Blizzard code.
+]]
 local function InstallTextWithStateWidgetGuard()
-    if not IS_MAINLINE or TryInstallTextWithStateWidgetGuard() then
-        return
-    end
-
-    if textWithStateWidgetGuardFrame then
-        return
-    end
-
-    textWithStateWidgetGuardFrame = CreateFrame("Frame")
-
-    if textWithStateWidgetGuardFrame.RegisterEvent then
-        pcall(textWithStateWidgetGuardFrame.RegisterEvent, textWithStateWidgetGuardFrame, "ADDON_LOADED")
-        pcall(textWithStateWidgetGuardFrame.RegisterEvent, textWithStateWidgetGuardFrame, "PLAYER_LOGIN")
-    end
-
-    textWithStateWidgetGuardFrame:SetScript("OnEvent", function(frame, eventName, loadedAddonName)
-        if eventName == "PLAYER_LOGIN" or loadedAddonName == "Blizzard_UIWidgets" then
-            if TryInstallTextWithStateWidgetGuard() and frame.UnregisterAllEvents then
-                frame:UnregisterAllEvents()
-            end
-        end
-    end)
-
-    if _G.C_Timer and _G.C_Timer.After then
-        _G.C_Timer.After(0, TryInstallTextWithStateWidgetGuard)
-        _G.C_Timer.After(1, TryInstallTextWithStateWidgetGuard)
-    end
+    return false
 end
 
 QuestKing.InstallTextWithStateWidgetGuard = InstallTextWithStateWidgetGuard
-InstallTextWithStateWidgetGuard()
 
 
 local function GetQuestIDForLogIndexCompat(questLogIndex)
@@ -921,10 +652,18 @@ local function ApplySuppressionToTrackerRoot(frame, hide)
     local legacyHardHide = IsLegacyHardHideTrackerFrame(frame)
     local modernManaged = IsModernManagedTrackerFrame(frame)
 
-    -- Do not destructively hide modern managed tracker frames. Retail and newer
-    -- clients can treat those frames as protected layout participants. Alpha-only
-    -- suppression avoids the protected Show/Hide path while keeping the Blizzard
-    -- layout system intact.
+    -- Retail / Midnight: keep suppression to one visual alpha write only.
+    -- Do not call Show/Hide, EnableMouse, SetIgnoreParentAlpha, or any Blizzard
+    -- tracker update hook path from QuestKing on Mainline. The world-map reward
+    -- tooltip stack is too sensitive to addon-tainted Blizzard execution.
+    if IS_MAINLINE then
+        SafeSetAlpha(frame, hide and 0 or 1)
+        return
+    end
+
+    -- Classic-family clients use older watch frames. They still need the
+    -- stronger legacy hide path because alpha-only suppression is not reliable
+    -- for QuestWatchFrame/WatchFrame refreshes.
     SafeSetIgnoreParentAlpha(frame, false)
     SafeSetAlpha(frame, hide and 0 or 1)
 
@@ -936,7 +675,7 @@ local function ApplySuppressionToTrackerRoot(frame, hide)
         else
             SafeShow(frame)
         end
-    elseif not modernManaged then
+    else
         -- Non-managed child frames can safely have mouse disabled so invisible
         -- leftovers do not catch cursor interaction on Classic-family clients.
         SafeEnableMouse(frame, not hide)
@@ -1023,6 +762,15 @@ local function InstallTrackerObjectMethodHook(object, methodName, key)
 end
 
 local function InstallTrackerVisualHooks()
+    -- Mainline/Retail world-map reward tooltips are very sensitive to addon
+    -- taint on Blizzard-owned execution paths. Do not hook Blizzard tracker
+    -- Show/Update/Manager methods on Mainline; suppression is re-applied from
+    -- QuestKing-owned events instead. Classic-family clients keep the legacy
+    -- hooks because their watch frames are not the same protected managed UI.
+    if IS_MAINLINE then
+        return
+    end
+
     local hookedAnything = false
     local trackerFrames = GetBlizzardTrackerRootFrames()
 
@@ -1245,53 +993,78 @@ local function ClearTooltipTextRegions(tooltip)
     end
 end
 
+local function HideFrameSafe(frame)
+    if frame and frame.Hide then
+        pcall(frame.Hide, frame)
+    end
+end
+
+local function ClearPrivateTooltipMoneyFrames(tooltip)
+    if not tooltip or not tooltip.GetName then
+        return
+    end
+
+    local name = tooltip:GetName()
+    if type(name) ~= "string" or name == "" then
+        return
+    end
+
+    local count = SafeNumber(tooltip.numMoneyFrames, 0) or 0
+    local shown = SafeNumber(tooltip.shownMoneyFrames, 0) or 0
+
+    if shown > count then
+        count = shown
+    end
+
+    if count < 1 then
+        count = 4
+    end
+
+    for index = 1, count do
+        HideFrameSafe(_G[name .. "MoneyFrame" .. index])
+    end
+
+    tooltip.shownMoneyFrames = nil
+    tooltip.hasMoney = nil
+end
+
+local function ClearPrivateTooltipItemState(tooltip)
+    if not tooltip then
+        return
+    end
+
+    HideFrameSafe(tooltip.ItemTooltip)
+
+    if tooltip.ItemTooltip then
+        HideFrameSafe(tooltip.ItemTooltip.Tooltip)
+        HideFrameSafe(tooltip.ItemTooltip.FollowerTooltip)
+    end
+
+    local shoppingTooltips = tooltip.shoppingTooltips
+    if type(shoppingTooltips) == "table" then
+        for index = 1, #shoppingTooltips do
+            HideFrameSafe(shoppingTooltips[index])
+        end
+    end
+
+    tooltip.suppressAutomaticCompareItem = nil
+end
+
 local function ClearTooltipBlizzardState(tooltip)
     if not tooltip then
         return
     end
 
-    if type(_G.SharedTooltip_ClearInsertedFrames) == "function" then
-        pcall(_G.SharedTooltip_ClearInsertedFrames, tooltip)
-    end
-
-    if type(_G.GameTooltip_ClearMoney) == "function" then
-        pcall(_G.GameTooltip_ClearMoney, tooltip)
-    end
-
-    if type(_G.GameTooltip_ClearStatusBars) == "function" then
-        pcall(_G.GameTooltip_ClearStatusBars, tooltip)
-    end
-
-    if type(_G.GameTooltip_ClearStatusBarWatch) == "function" then
-        pcall(_G.GameTooltip_ClearStatusBarWatch, tooltip)
-    end
-
-    if type(_G.GameTooltip_ClearProgressBars) == "function" then
-        pcall(_G.GameTooltip_ClearProgressBars, tooltip)
-    end
-
-    if type(_G.GameTooltip_ClearWidgetSet) == "function" then
-        pcall(_G.GameTooltip_ClearWidgetSet, tooltip)
-    end
-
-    if _G.TooltipComparisonManager and _G.TooltipComparisonManager.Clear then
-        pcall(_G.TooltipComparisonManager.Clear, _G.TooltipComparisonManager, tooltip)
-    end
-
-    if tooltip.ItemTooltip then
-        if type(_G.EmbeddedItemTooltip_Hide) == "function" then
-            pcall(_G.EmbeddedItemTooltip_Hide, tooltip.ItemTooltip)
-        elseif tooltip.ItemTooltip.Hide then
-            tooltip.ItemTooltip:Hide()
-        end
-    end
+    -- Do not call Blizzard GameTooltip_Clear* or EmbeddedItemTooltip_* helpers
+    -- from QuestKing code. Those helpers are designed for Blizzard's tooltip
+    -- pipeline and can make current Retail/Midnight tooltip reward sizing run
+    -- under QuestKing-tainted execution. QuestKing owns only QuestKingTooltip,
+    -- so keep cleanup local and visual-only.
+    ClearPrivateTooltipMoneyFrames(tooltip)
+    ClearPrivateTooltipItemState(tooltip)
 
     if tooltip.ClearHandlerInfo then
         pcall(tooltip.ClearHandlerInfo, tooltip)
-    end
-
-    if tooltip.ClearPadding then
-        pcall(tooltip.ClearPadding, tooltip)
     end
 end
 

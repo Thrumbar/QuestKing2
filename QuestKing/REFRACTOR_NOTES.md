@@ -96,6 +96,43 @@ After this merge, the old standalone `QuestKingSounds` addon should be removed o
 
 ## Changelog
 
+## 3.0.9
+
+### Fixed
+- Further isolated QuestKing from Blizzard's `GameTooltip` world-map reward path after the follow-up `GameTooltipMoneyFrame1` / `EmbeddedItemTooltip_UpdateSize` secret-number errors.
+- Removed Mainline/Retail secure hooks on Blizzard Objective Tracker `Show`, update functions, and `ObjectiveTrackerManager` methods.
+- Stopped QuestKing's private tooltip reset from calling Blizzard `GameTooltip_Clear*` and `EmbeddedItemTooltip_*` helpers from addon code.
+
+### Changed
+- Retail / Midnight Blizzard tracker suppression now refreshes from QuestKing-owned events instead of Blizzard-owned hook callbacks.
+- Modern managed tracker frames receive only a single alpha write; Classic-family frames keep the legacy visual hard-hide path.
+- QuestKingTooltip cleanup now hides QuestKing-owned inserted money/item state locally without invoking Blizzard tooltip helper pipelines.
+
+### Files changed
+- `core/util.lua`
+- `version.txt`
+- `version.new`
+- `REFRACTOR_NOTES.md`
+
+
+## 3.0.8
+
+### Fixed
+- Removed the global `UIWidgetTemplateTextWithStateMixin.Setup` replacement added in 3.0.5.
+- Stopped QuestKing from tainting Blizzard's default `GameTooltip` world-map hover flow before `EmbeddedItemTooltip_UpdateSize` runs.
+- Fixes the reported world-quest reward hover error where Blizzard's embedded reward tooltip attempted arithmetic on secret width/height values while execution was tainted by QuestKing.
+
+### Changed
+- `QuestKing.InstallTextWithStateWidgetGuard` is now a no-op compatibility stub.
+- QuestKing continues to sanitize values and reset state only for QuestKing-owned tooltip and tracker UI paths.
+- Blizzard's `GameTooltip`, UIWidget setup mixins, and embedded item-tooltip sizing functions are no longer monkey-patched by QuestKing.
+
+### Files changed
+- `core/util.lua`
+- `version.txt`
+- `REFRACTOR_NOTES.md`
+
+
 ## 3.0.5
 
 ### Fixed

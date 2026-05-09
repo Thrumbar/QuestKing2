@@ -15,6 +15,7 @@ local tonumber = tonumber
 local tostring = tostring
 local type = type
 local pairs = pairs
+local strfind = string.find
 
 local options = QuestKing.options or {}
 local colors = (options and options.colors) or {
@@ -33,6 +34,48 @@ local trackerUpdatePending = false
 local trackerUpdatePendingForceBuild = false
 local trackerUpdatePendingPostCombat = false
 local trackerUpdateFlushQueued = false
+
+local issecretvalue = _G.issecretvalue
+
+local function IsSecretValue(value)
+    if type(issecretvalue) == "function" then
+        local ok, result = pcall(issecretvalue, value)
+        if ok then
+            return result and true or false
+        end
+    end
+
+    return false
+end
+
+local function IsExpectedSecretValueError(errorValue)
+    if IsSecretValue(errorValue) then
+        return true
+    end
+
+    if type(errorValue) ~= "string" then
+        return false
+    end
+
+    return strfind(errorValue, "secret ", 1, true) ~= nil
+        or strfind(errorValue, "secret-", 1, true) ~= nil
+        or strfind(errorValue, "secret value", 1, true) ~= nil
+end
+
+local function ReportErrorSafe(errorValue)
+    if IsExpectedSecretValueError(errorValue) then
+        return
+    end
+
+    if type(_G.geterrorhandler) ~= "function" then
+        return
+    end
+
+    local ok, handler = pcall(_G.geterrorhandler)
+    if ok and type(handler) == "function" then
+        pcall(handler, errorValue)
+    end
+end
 
 local function IsInCombatLockdownSafe()
     return type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown() or false
@@ -53,9 +96,7 @@ local function SafeCallMethod(target, method, ...)
         return true, result
     end
 
-    if _G.geterrorhandler then
-        _G.geterrorhandler()(result)
-    end
+    ReportErrorSafe(result)
 
     return true, nil
 end

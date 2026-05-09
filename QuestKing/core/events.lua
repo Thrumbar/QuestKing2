@@ -20,6 +20,7 @@ local pcall = pcall
 local select = select
 local type = type
 local tonumber = tonumber
+local strfind = string.find
 
 local Compat = QuestKing.Compatibility or {}
 local WOW_PROJECT_ID = _G.WOW_PROJECT_ID
@@ -28,6 +29,48 @@ local IS_MAINLINE = WOW_PROJECT_MAINLINE and WOW_PROJECT_ID == WOW_PROJECT_MAINL
 
 local trackerRefreshQueued = false
 local trackerRefreshFollowupQueued = false
+
+local issecretvalue = _G.issecretvalue
+
+local function IsSecretValue(value)
+    if type(issecretvalue) == "function" then
+        local ok, result = pcall(issecretvalue, value)
+        if ok then
+            return result and true or false
+        end
+    end
+
+    return false
+end
+
+local function IsExpectedSecretValueError(errorValue)
+    if IsSecretValue(errorValue) then
+        return true
+    end
+
+    if type(errorValue) ~= "string" then
+        return false
+    end
+
+    return strfind(errorValue, "secret ", 1, true) ~= nil
+        or strfind(errorValue, "secret-", 1, true) ~= nil
+        or strfind(errorValue, "secret value", 1, true) ~= nil
+end
+
+local function ReportErrorSafe(errorValue)
+    if IsExpectedSecretValueError(errorValue) then
+        return
+    end
+
+    if type(_G.geterrorhandler) ~= "function" then
+        return
+    end
+
+    local ok, handler = pcall(_G.geterrorhandler)
+    if ok and type(handler) == "function" then
+        pcall(handler, errorValue)
+    end
+end
 
 local function SafeCall(func, ...)
     if type(func) ~= "function" then
@@ -39,9 +82,7 @@ local function SafeCall(func, ...)
         return true, a, b, c, d
     end
 
-    if _G.geterrorhandler then
-        _G.geterrorhandler()(a)
-    end
+    ReportErrorSafe(a)
 
     return false, nil, nil, nil, nil
 end
@@ -526,8 +567,8 @@ local function DispatchEvent(self, event, ...)
     end
 
     local ok, err = pcall(handler, self, event, ...)
-    if not ok and _G.geterrorhandler then
-        _G.geterrorhandler()(err)
+    if not ok then
+        ReportErrorSafe(err)
     end
 end
 
@@ -553,6 +594,13 @@ QuestKing.HandleEvent = DispatchEvent
 
 Events.CHAT_MSG_LOOT = function(self, event, ...)
     SafeCallMethod(QuestKing, "ParseLoot", ...)
+end
+
+Events.BAG_UPDATE_DELAYED = function()
+    local ok, changed = SafeCallMethod(QuestKing, "ScanQuestStartItemPopups", false)
+    if ok and changed then
+        UpdateTracker(true)
+    end
 end
 
 Events.PLAYER_MONEY = function()

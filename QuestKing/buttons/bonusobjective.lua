@@ -1,5 +1,7 @@
 local addonName, QuestKing = ...
 
+local Compat = QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
+
 local opt = QuestKing.options
 local opt_colors = opt.colors
 
@@ -915,41 +917,16 @@ end
 function mouseHandlerBonusTask:TitleButtonOnClick(mouse, down)
     local button = self.parent
 
-    if IsModifiedClick and IsModifiedClick("CHATLINK") and ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow() then
-        local questLink
-        if button.questIndex and GetQuestLink then
-            questLink = GetQuestLink(button.questIndex)
-        end
-        if questLink then
-            ChatEdit_InsertLink(questLink)
-            return
-        end
-    end
-
-    if IsShiftKeyDown and IsShiftKeyDown() and ClassicQuestLog and button.questIndex then
-        SelectQuestLogEntry(button.questIndex)
-        if ClassicQuestLog:IsVisible() then
-            ClassicQuestLog:OnShow()
-        else
-            ClassicQuestLog:SetShown(true)
-        end
-        return
-    end
-
     if mouse == "RightButton" then
-        if getSuperTrackedQuestIDSafe() == button.questID then
-            QuestKing:SetSuperTrackedQuestID(0)
-        else
-            QuestKing:SetSuperTrackedQuestID(button.questID)
-        end
-        QuestKing:UpdateTracker()
         return
     end
 
-    if QuestObjectiveTracker_OpenQuestMap and button.questIndex then
-        QuestObjectiveTracker_OpenQuestMap(nil, button.questIndex)
-    elseif QuestMapFrame_OpenToQuestDetails and button.questID then
-        QuestMapFrame_OpenToQuestDetails(button.questID)
+    if not button then
+        return
+    end
+
+    if Compat.OpenQuestDetails then
+        Compat.OpenQuestDetails(button.questID, button.questIndex)
     end
 end
 

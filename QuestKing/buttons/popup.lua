@@ -8,6 +8,7 @@ local C_Container = C_Container
 local C_Item = C_Item
 local C_QuestLog = C_QuestLog
 local Enum = Enum
+local issecretvalue = _G and _G.issecretvalue or nil
 
 local find = string.find
 local format = string.format
@@ -99,22 +100,74 @@ local function SafeCall(func, ...)
     return false, nil, nil, nil, nil, nil
 end
 
+local function IsSecretValue(value)
+    if type(issecretvalue) == "function" then
+        local ok, result = pcall(issecretvalue, value)
+        if ok then
+            return result and true or false
+        end
+    end
+
+    return false
+end
+
 local function SafeString(value, fallback)
-    if type(value) == "string" and value ~= "" then
+    if IsSecretValue(value) or type(value) ~= "string" then
+        return fallback
+    end
+
+    local ok, isEmpty = pcall(function()
+        return value == ""
+    end)
+
+    if ok and not isEmpty then
         return value
     end
+
     return fallback
 end
 
 local function SafeNumber(value, fallback)
+    if IsSecretValue(value) then
+        return fallback
+    end
+
     if type(value) == "number" then
         return value
     end
-    local numberValue = tonumber(value)
-    if type(numberValue) == "number" then
+
+    local ok, numberValue = pcall(tonumber, value)
+    if ok and type(numberValue) == "number" and not IsSecretValue(numberValue) then
         return numberValue
     end
+
     return fallback
+end
+
+local function SafeStringMatch(value, pattern)
+    if IsSecretValue(value) or type(value) ~= "string" or type(pattern) ~= "string" then
+        return nil
+    end
+
+    local ok, result = pcall(match, value, pattern)
+    if ok then
+        return result
+    end
+
+    return nil
+end
+
+local function SafeStringFind(value, pattern)
+    if IsSecretValue(value) or type(value) ~= "string" or type(pattern) ~= "string" then
+        return false, nil, nil, nil
+    end
+
+    local ok, startPos, endPos, capture = pcall(find, value, pattern)
+    if ok then
+        return true, startPos, endPos, capture
+    end
+
+    return false, nil, nil, nil
 end
 
 local function QueueTrackerRefresh(forceBuild)
@@ -389,26 +442,82 @@ local function GetItemInfoCompat(itemID)
     if C_Item and C_Item.GetItemNameByID and C_Item.GetItemIconByID then
         local okName, itemName = SafeCall(C_Item.GetItemNameByID, itemID)
         local okIcon, texture = SafeCall(C_Item.GetItemIconByID, itemID)
-        if okName and itemName then
-            return itemName, itemName and ("item:" .. itemID) or nil, okIcon and texture or nil
+        itemName = okName and SafeString(itemName, nil) or nil
+        texture = okIcon and SafeNumber(texture, nil) or nil
+        if itemName then
+            return itemName, "item:" .. itemID, texture
         end
     end
 
     if type(GetItemInfo) == "function" then
         local ok, itemName, itemLink, _, _, _, _, _, _, texture = SafeCall(GetItemInfo, itemID)
-        if ok and itemName then
+        itemName = ok and SafeString(itemName, nil) or nil
+        itemLink = ok and SafeString(itemLink, nil) or nil
+        texture = ok and SafeNumber(texture, nil) or nil
+        if itemName then
             return itemName, itemLink, texture
         end
     end
 
     if type(GetItemInfoInstant) == "function" then
         local ok, _, _, _, _, _, _, _, _, texture = SafeCall(GetItemInfoInstant, itemID)
-        if ok then
+        texture = ok and SafeNumber(texture, nil) or nil
+        if texture then
             return nil, nil, texture
         end
     end
 
     return nil, nil, nil
+end
+
+local function TrackQuestStartItem(itemID, itemName, playAlert)
+    itemID = SafeNumber(itemID, nil)
+    if not itemID or not BuildQuestStartItemSet()[itemID] then
+        return false
+    end
+
+    local wasTracked = itemPopups[itemID] ~= nil
+    local resolvedName, itemLink, itemTexture = GetItemInfoCompat(itemID)
+
+    itemPopups[itemID] = {
+        name = SafeString(itemName, nil) or SafeString(resolvedName, ITEM or "Item"),
+        link = SafeString(itemLink, nil),
+        texture = SafeNumber(itemTexture, nil),
+    }
+
+    if playAlert and not wasTracked then
+        PlaySoundCompat(SOUNDKIT and SOUNDKIT.PVP_WARNING_HORDE, 9375)
+    end
+
+    return not wasTracked
+end
+
+function QuestKing:ScanQuestStartItemPopups(playAlert)
+    if opt.enableItemPopups ~= true then
+        return false
+    end
+
+    BuildQuestStartItemSet()
+
+    local changed = false
+
+    IteratePlayerBags(function(bagID)
+        local numSlots = GetContainerNumSlotsCompat(bagID)
+        for slotID = 1, numSlots do
+            local itemID = GetContainerItemIDCompat(bagID, slotID)
+            if itemID and questStartItemSet[itemID] then
+                if TrackQuestStartItem(itemID, nil, playAlert) then
+                    changed = true
+                end
+            end
+        end
+    end)
+
+    if changed then
+        QueueTrackerRefresh(true)
+    end
+
+    return changed
 end
 
 local function GetQuestPopupTitle(questID, questLogIndex)
@@ -587,45 +696,53 @@ local function OpenQuestPopupTooltip(owner, questID, popupType, questLogIndex)
 end
 
 function QuestKing:ParseLoot(msg)
-    if not opt.enableItemPopups or type(msg) ~= "string" or msg == "" then
-        return
+    if opt.enableItemPopups ~= true then
+        return false
     end
 
-    local itemID = SafeNumber(msg:match("|Hitem:(%d+)"), nil)
-    local itemName = SafeString(msg:match("|h%[(.-)%]|h"), nil)
+    -- Retail/Midnight can deliver protected chat payloads as secret strings.
+    -- Do not compare, concatenate, or call string methods on such values.
+    if IsSecretValue(msg) then
+        return self:ScanQuestStartItemPopups(true)
+    end
+
+    if type(msg) ~= "string" then
+        return false
+    end
+
+    local itemID = SafeNumber(SafeStringMatch(msg, "|Hitem:(%d+)"), nil)
+    local itemName = SafeString(SafeStringMatch(msg, "|h%[(.-)%]|h"), nil)
 
     if not itemID and LOOT_SELF_REGEX then
-        local _, _, link = find(msg, LOOT_SELF_REGEX)
-        if link then
-            itemID = SafeNumber(link:match("item:(%d+)"), nil)
-            itemName = itemName or SafeString(link:match("|h%[(.-)%]|h"), nil)
+        local ok, _, _, link = SafeStringFind(msg, LOOT_SELF_REGEX)
+        if ok and link then
+            itemID = SafeNumber(SafeStringMatch(link, "item:(%d+)"), nil)
+            itemName = itemName or SafeString(SafeStringMatch(link, "|h%[(.-)%]|h"), nil)
         end
     end
 
     if not itemID then
-        return
+        return self:ScanQuestStartItemPopups(false)
     end
 
-    if BuildQuestStartItemSet()[itemID] then
-        local resolvedName, itemLink, itemTexture = GetItemInfoCompat(itemID)
-        itemPopups[itemID] = {
-            name = itemName or resolvedName,
-            link = itemLink,
-            texture = itemTexture,
-        }
-        PlaySoundCompat(SOUNDKIT and SOUNDKIT.PVP_WARNING_HORDE, 9375)
+    if TrackQuestStartItem(itemID, itemName, true) then
         QueueTrackerRefresh(true)
+        return true
     end
+
+    return false
 end
 
 function QuestKing:InitLoot()
     if opt.enableItemPopups then
         BuildQuestStartItemSet()
+        self:ScanQuestStartItemPopups(false)
         return
     end
 
     if self.EventsFrame then
         self.EventsFrame:UnregisterEvent("CHAT_MSG_LOOT")
+        self.EventsFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
     end
 end
 

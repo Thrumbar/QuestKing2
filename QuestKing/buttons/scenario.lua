@@ -1,5 +1,7 @@
 local addonName, QuestKing = ...
 
+local Compat = QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
+
 local opt = QuestKing.options
 local opt_colors = opt.colors
 local opt_showCompletedObjectives = opt.showCompletedObjectives
@@ -1121,13 +1123,8 @@ function mouseHandlerScenario:TitleButtonOnClick(mouse, down)
     local rewardQuestID = GetScenarioRewardQuestID(stepIndex, rewardQuestIDFromStep)
     local rewardQuestLogIndex = rewardQuestID and GetQuestLogIndexByIDCompat(rewardQuestID) or nil
 
-    if rewardQuestID and QuestMapFrame_OpenToQuestDetails then
-        QuestMapFrame_OpenToQuestDetails(rewardQuestID)
+    if rewardQuestID and Compat.OpenQuestDetails and Compat.OpenQuestDetails(rewardQuestID, rewardQuestLogIndex) then
         return
-    end
-
-    if rewardQuestLogIndex and QuestObjectiveTracker_OpenQuestMap then
-        QuestObjectiveTracker_OpenQuestMap(nil, rewardQuestLogIndex)
     end
 end
 

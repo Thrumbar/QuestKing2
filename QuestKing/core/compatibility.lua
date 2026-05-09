@@ -49,17 +49,56 @@ local function SafeCall(func, ...)
     return false, nil, nil, nil, nil, nil
 end
 
+local function IsSecretValue(value)
+    if QuestKing and type(QuestKing.IsSecretValue) == "function" then
+        local ok, result = pcall(QuestKing.IsSecretValue, value)
+        if ok then
+            return result and true or false
+        end
+    end
+
+    if type(_G.issecretvalue) == "function" then
+        local ok, result = pcall(_G.issecretvalue, value)
+        if ok then
+            return result and true or false
+        end
+    end
+
+    return false
+end
+
 local function SafeNumber(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
     if type(value) == "number" then
         return value
     end
 
-    local converted = tonumber(value)
-    if type(converted) == "number" then
+    local ok, converted = pcall(tonumber, value)
+    if ok and type(converted) == "number" and not IsSecretValue(converted) then
         return converted
     end
 
     return fallback
+end
+
+local function SafeBoolean(value, fallback)
+    if value == nil or IsSecretValue(value) then
+        return fallback
+    end
+
+    return value and true or false
+end
+
+local function IsInCombatLockdownSafe()
+    if type(_G.InCombatLockdown) ~= "function" then
+        return false
+    end
+
+    local ok, inCombat = SafeCall(_G.InCombatLockdown)
+    return ok and SafeBoolean(inCombat, false) or false
 end
 
 local function GetProjectFlags()
@@ -94,6 +133,116 @@ end
 
 function Compat.IsClassicFamily()
     return GetProjectFlags().isClassicFamily
+end
+
+local function OpenQuestPopupDetails(questID)
+    local questUtil = _G.QuestUtil
+    if questUtil and type(questUtil.OpenQuestDetails) == "function" then
+        local ok = SafeCall(questUtil.OpenQuestDetails, questID)
+        if ok then
+            return true
+        end
+    end
+
+    if type(_G.QuestLogPopupDetailFrame_Show) == "function" then
+        local ok = SafeCall(_G.QuestLogPopupDetailFrame_Show, questID)
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function OpenLegacyQuestMapDetails(questID, questLogIndex)
+    if questLogIndex and type(_G.QuestObjectiveTracker_OpenQuestMap) == "function" then
+        local ok = SafeCall(_G.QuestObjectiveTracker_OpenQuestMap, nil, questLogIndex)
+        if ok then
+            return true
+        end
+    end
+
+    if type(_G.QuestMapFrame_OpenToQuestDetails) == "function" then
+        local ok = SafeCall(_G.QuestMapFrame_OpenToQuestDetails, questID)
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function OpenClassicQuestLogFallback(questLogIndex)
+    if questLogIndex and type(_G.SelectQuestLogEntry) == "function" then
+        SafeCall(_G.SelectQuestLogEntry, questLogIndex)
+    end
+
+    local classicQuestLog = _G.ClassicQuestLog or _G.QuestLogFrame
+    if classicQuestLog and type(classicQuestLog.IsVisible) == "function" and type(classicQuestLog.SetShown) == "function" then
+        local ok, isVisible = SafeCall(classicQuestLog.IsVisible, classicQuestLog)
+        if ok and isVisible and type(classicQuestLog.OnShow) == "function" then
+            SafeCall(classicQuestLog.OnShow, classicQuestLog)
+            return true
+        end
+
+        if ok and not isVisible then
+            SafeCall(classicQuestLog.SetShown, classicQuestLog, true)
+            return true
+        end
+
+        if ok then
+            return true
+        end
+    end
+
+    if type(_G.ToggleQuestLog) == "function" then
+        local ok = SafeCall(_G.ToggleQuestLog)
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+function Compat.OpenQuestDetails(questID, questLogIndex)
+    local safeQuestID = SafeNumber(questID, nil)
+    local safeQuestLogIndex = SafeNumber(questLogIndex, nil)
+
+    if not safeQuestID then
+        return false
+    end
+
+    local flags = GetProjectFlags()
+
+    -- Retail / Midnight safety rule:
+    -- Do not call QuestMapFrame_OpenToQuestDetails from QuestKing-owned clicks.
+    -- That path calls WorldMapFrame:SetMapID(), refreshes Blizzard map pins, and
+    -- causes MapCanvasPinMixin:CheckMouseButtonPassthrough() to call the protected
+    -- SetPassThroughButtons() while the stack is addon-tainted. Use Blizzard's
+    -- popup detail frame instead; it preserves quest detail access without forcing
+    -- map-pin acquisition from an insecure click path.
+    if flags.isMainline then
+        if OpenQuestPopupDetails(safeQuestID) then
+            return true
+        end
+
+        return OpenClassicQuestLogFallback(safeQuestLogIndex)
+    end
+
+    if IsInCombatLockdownSafe() then
+        return OpenClassicQuestLogFallback(safeQuestLogIndex)
+    end
+
+    if OpenLegacyQuestMapDetails(safeQuestID, safeQuestLogIndex) then
+        return true
+    end
+
+    if OpenQuestPopupDetails(safeQuestID) then
+        return true
+    end
+
+    return OpenClassicQuestLogFallback(safeQuestLogIndex)
 end
 
 function AddOnCompat.IsAddOnLoaded(name)
