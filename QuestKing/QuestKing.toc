@@ -10,6 +10,7 @@
 
 options.lua
 options_override.lua
+ui\optionspanel.lua
 ## options_override_custom.lua
 
 core\util.lua

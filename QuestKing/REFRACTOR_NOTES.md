@@ -94,7 +94,78 @@ The standalone sound addon still followed an older narrow event model and older 
 
 After this merge, the old standalone `QuestKingSounds` addon should be removed or disabled. Keeping both active can cause duplicate sound playback.
 
+## Native AddOns settings UI integration
+
+### Summary
+
+QuestKing now includes a native Blizzard AddOns settings panel through:
+- `ui/optionspanel.lua`
+
+The panel exposes the existing QuestKing options in the default Blizzard settings UI instead of requiring users to edit the options files directly.
+
+### What the panel adds
+
+- Registers a QuestKing category under Blizzard's AddOns settings list on modern clients.
+- Falls back to the legacy Interface Options category path when the modern `Settings` API is not available.
+- Uses existing QuestKing option storage instead of introducing a new saved-variable format.
+- Keeps the options UI dependency-free; Ace3 is not required.
+- Adds `/qk options`, `/qk config`, `/qk settings`, `/qkoptions`, and `/questkingoptions` access paths.
+
+### UI controls added
+
+- Blizzard Objective Tracker visibility
+- QuestKing tracker dragging behavior
+- Tracker scale
+- Tracker alpha
+- Item-start quest popups
+- Completed objective display mode
+- Superseded objective hiding
+- Scenario, dungeon, and raid objective behavior
+- Tracker button width
+- Line height
+- Title height
+- Font size
+- Quest item button scale
+- Item and reward anchor side
+- Advanced background
+- Simple backdrop
+- PetTracker compatibility helpers
+
+### Compatibility notes
+
+- Retail / Midnight clients use the modern `Settings.RegisterCanvasLayoutCategory` and `Settings.RegisterAddOnCategory` path when available.
+- Classic-family clients fall back to `InterfaceOptions_AddCategory` when the modern settings system is unavailable.
+- The options panel avoids protected-frame manipulation and only writes QuestKing-owned options, then requests a QuestKing tracker refresh.
+- The panel is loaded after `options_override.lua` so override defaults are visible in the GUI at startup.
+
 ## Changelog
+
+## 3.0.10
+
+### Added
+- Added `ui/optionspanel.lua` as a native Blizzard AddOns settings panel for QuestKing.
+- Added modern Settings API registration for Retail / Midnight clients with a Classic-safe `InterfaceOptions_AddCategory` fallback.
+- Added settings controls for tracker visibility, dragging, scale, alpha, quest popup behavior, objective display, sizing, font layout, item button scale, reward anchoring, backgrounds, and PetTracker compatibility helpers.
+- Added `/qk options`, `/qk config`, `/qk settings`, `/qkoptions`, and `/questkingoptions` access paths.
+
+### Changed
+- Updated `QuestKing.toc` to load `ui/optionspanel.lua` after `options_override.lua` so the panel reads the active configured defaults.
+- Updated `core/slashcommand.lua` to route settings slash commands into the new options panel when available.
+- Documented the new UI panel in the refactor notes, bundle notes, and version files.
+
+### Compatibility
+- Keeps the settings UI dependency-free and Lua 5.1 compatible.
+- Keeps Retail / Midnight, MoP Classic, Cataclysm Classic, TBC Anniversary, and Classic Era compatibility by checking Blizzard settings APIs before use.
+- Avoids new secure hooks or protected-frame manipulation; the panel only updates QuestKing-owned options and requests QuestKing-owned refresh behavior.
+
+### Files changed
+- `QuestKing.toc`
+- `core/slashcommand.lua`
+- `ui/optionspanel.lua`
+- `REFRACTOR_BUNDLE_NOTES.md`
+- `REFRACTOR_NOTES.md`
+- `version.txt`
+- `version.new`
 
 ## 3.0.9
 

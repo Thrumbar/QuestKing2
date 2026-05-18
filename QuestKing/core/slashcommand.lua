@@ -204,6 +204,7 @@ local function PrintHelp()
     Print("Valid commands:")
     Print("  help - show this help")
     Print("  status - show current tracker settings")
+    Print("  options - open Blizzard AddOns settings")
     Print("  q / r / a / c - switch tracker mode")
     Print("  mode <q|r|a|c> - switch tracker mode directly")
     Print("  lock - lock tracker dragging")
@@ -222,6 +223,23 @@ local Command = {}
 Command.help = function()
     PrintHelp()
 end
+
+Command.options = function()
+    if QuestKing and type(QuestKing.OpenOptions) == "function" then
+        QuestKing:OpenOptions()
+        return
+    end
+
+    if type(_G.QuestKing_OpenOptions) == "function" then
+        _G.QuestKing_OpenOptions()
+        return
+    end
+
+    Print("QuestKing options panel is not available yet.")
+end
+
+Command.config = Command.options
+Command.settings = Command.options
 
 Command.status = function()
     local lines = GetStatusStrings()

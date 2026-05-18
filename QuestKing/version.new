@@ -1,3 +1,11 @@
+3.0.10
+- Added ui/optionspanel.lua as a native Blizzard AddOns settings panel for QuestKing.
+- Registers through the modern Settings API on Retail / Midnight clients and falls back to InterfaceOptions_AddCategory on Classic-family clients.
+- Adds graphical controls for tracker visibility, dragging, scale, alpha, quest popups, completed objective display, objective filtering, tracker sizing, font sizing, item button scale, reward anchoring, backgrounds, and PetTracker compatibility helpers.
+- Adds /qk options, /qk config, /qk settings, /qkoptions, and /questkingoptions commands to open the settings panel.
+- Updates QuestKing.toc to load ui/optionspanel.lua after options_override.lua so the panel reflects override defaults at startup.
+- Keeps the settings UI dependency-free, Lua 5.1 compatible, and isolated to QuestKing-owned option writes and refresh requests.
+
 3.0.9
 - Further reduced Retail/Midnight world-map reward tooltip taint by stopping QuestKing from installing Mainline hooks on Blizzard ObjectiveTracker Show/Update/Manager methods.
 - Keeps Blizzard tracker suppression on Retail/Midnight to a QuestKing-owned event refresh and a single alpha write on managed tracker roots.
