@@ -138,7 +138,63 @@ The panel exposes the existing QuestKing options in the default Blizzard setting
 - The options panel avoids protected-frame manipulation and only writes QuestKing-owned options, then requests a QuestKing tracker refresh.
 - The panel is loaded after `options_override.lua` so override defaults are visible in the GUI at startup.
 
+## Quest watch click handling and pooled-button hardening
+
+### Summary
+
+QuestKing now restores expected quest-watch interaction behavior from the custom tracker.
+
+Left-clicking a quest in the QuestKing watch tracker now opens the selected quest instead of failing silently, opening the wrong behavior path, or showing only non-open options. The fix applies to both the quest title row and the quest objective/body area.
+
+### What changed
+
+- Added shared quest-watch click handling for title and body clicks.
+- Restored left-click quest opening from the QuestKing tracker.
+- Added auto-complete quest handling so completed auto-complete quests attempt to open the completion dialog before falling back to quest details.
+- Preserved right-click behavior by routing to QuestKing's existing quest menu when available.
+- Added a super-track fallback when no QuestKing quest menu handler is registered.
+- Fixed the mouse-handler dispatch path so the watch button frame is not treated as the handler table.
+- Replaced bad/missing quest ID fallback lookup with the compatibility-safe quest log index resolver.
+- Hardened pooled watch button handling so missing `EnableMouse`, `RegisterForClicks`, title objects, or pooled button factories do not crash tracker rebuilds.
+
+### Files changed
+
+- `buttons/quest.lua`
+
+### Operational note
+
+This update focuses on tracker interaction and runtime hardening. No saved-variable format changes are required.
+
 ## Changelog
+
+## 3.0.11
+
+### Fixed
+- Restored left-click quest opening from the QuestKing watch tracker.
+- Fixed quest title clicks and quest body/objective clicks so both route through the same quest-open behavior.
+- Fixed completed auto-complete quests so left-click attempts to open the completion dialog before falling back to quest details or the quest log.
+- Fixed the mouse-handler dispatch bug that caused `attempt to call a nil value` when clicking tracked quests.
+- Fixed repeated tracker rebuild errors caused by pooled watch rows that did not expose expected frame methods.
+- Hardened `EnableMouse`, `RegisterForClicks`, header title access, and watch button factory lookups with defensive guards.
+- Fixed quest ID fallback resolution by using the compatibility-safe quest log index lookup path.
+
+### Changed
+- Right-click now preserves existing QuestKing quest menu behavior when a menu handler is available.
+- Right-click falls back to super-tracking the quest when no QuestKing quest menu handler is registered.
+- Quest opening now follows a safer fallback order:
+  1. Shift-click inserts a quest link into chat when possible.
+  2. Completed auto-complete quests attempt to open completion.
+  3. QuestKing compatibility quest detail opening is attempted.
+  4. Blizzard quest detail/map fallback is attempted.
+  5. Classic quest log fallback is attempted.
+
+### Compatibility
+- Keeps Lua 5.1 compatibility.
+- Keeps Retail / Midnight, Classic Era, and Classic progression compatibility by checking frame methods and Blizzard quest APIs before use.
+- Avoids protected-frame manipulation and only touches QuestKing-owned watch rows.
+
+### Files changed
+- `buttons/quest.lua`
 
 ## 3.0.10
 

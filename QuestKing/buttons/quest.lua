@@ -5,21 +5,19 @@ local C_TaskQuest = C_TaskQuest
 local C_SuperTrack = C_SuperTrack
 local C_CampaignInfo = C_CampaignInfo
 
-local WatchButton = QuestKing.WatchButton
-local Compat = QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
-local opt = QuestKing.options or {}
+local WatchButton = QuestKing and QuestKing.WatchButton
+local Compat = QuestKing and QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
+local opt = QuestKing and QuestKing.options or {}
 local opt_colors = opt.colors or {}
 local opt_showCompletedObjectives = opt.showCompletedObjectives
 
 local floor = math.floor
-local format = string.format
 local match = string.match
 local sort = table.sort
 local tonumber_raw = tonumber
 local tostring = tostring
 local type = type
 local wipe = wipe
-local pairs = pairs
 
 local UNKNOWN = UNKNOWN or "Unknown"
 local NORMAL_QUEST_HEADER = TRACKER_HEADER_QUESTS or QUESTS_LABEL or "Quests"
@@ -140,6 +138,13 @@ local function GetQuestInfoByLogIndex(questLogIndex)
         return nil
     end
 
+    if Compat and type(Compat.GetQuestInfo) == "function" then
+        local info = Compat.GetQuestInfo(questLogIndex)
+        if type(info) == "table" then
+            return info
+        end
+    end
+
     if C_QuestLog and C_QuestLog.GetInfo then
         local ok, info = SafeCall(C_QuestLog.GetInfo, questLogIndex)
         if ok and type(info) == "table" then
@@ -178,6 +183,13 @@ local function GetQuestLogIndexByIDCompat(questID)
         return nil
     end
 
+    if Compat and type(Compat.GetQuestLogIndexByQuestID) == "function" then
+        local index = Compat.GetQuestLogIndexByQuestID(questID)
+        if type(index) == "number" and index > 0 then
+            return index
+        end
+    end
+
     if C_QuestLog and C_QuestLog.GetLogIndexForQuestID then
         local ok, index = SafeCall(C_QuestLog.GetLogIndexForQuestID, questID)
         if ok and type(index) == "number" and index > 0 then
@@ -196,6 +208,13 @@ local function GetQuestLogIndexByIDCompat(questID)
 end
 
 local function GetQuestIDForQuestLogIndex(questLogIndex)
+    if Compat and type(Compat.GetQuestIDByLogIndex) == "function" then
+        local questID = Compat.GetQuestIDByLogIndex(questLogIndex)
+        if type(questID) == "number" and questID > 0 then
+            return questID
+        end
+    end
+
     local info = GetQuestInfoByLogIndex(questLogIndex)
     if info and type(info.questID) == "number" and info.questID > 0 then
         return info.questID
@@ -207,6 +226,13 @@ end
 local function GetQuestIDForWatchIndex(watchIndex)
     if type(watchIndex) ~= "number" or watchIndex <= 0 then
         return nil
+    end
+
+    if Compat and type(Compat.GetQuestIDForWatchIndex) == "function" then
+        local questID = Compat.GetQuestIDForWatchIndex(watchIndex)
+        if type(questID) == "number" and questID > 0 then
+            return questID
+        end
     end
 
     if C_QuestLog and C_QuestLog.GetQuestIDForQuestWatchIndex then
@@ -229,6 +255,10 @@ end
 local function IsQuestWatchedCompat(questID)
     if type(questID) ~= "number" or questID <= 0 then
         return false
+    end
+
+    if Compat and type(Compat.IsQuestWatched) == "function" then
+        return Compat.IsQuestWatched(questID) and true or false
     end
 
     if C_QuestLog and C_QuestLog.IsQuestWatched then
@@ -254,12 +284,17 @@ local function AddQuestWatchByID(questID)
         return false
     end
 
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+
+    if Compat and type(Compat.AddQuestWatch) == "function" then
+        return Compat.AddQuestWatch(questID, questLogIndex) and true or false
+    end
+
     if C_QuestLog and C_QuestLog.AddQuestWatch then
         local ok = SafeCall(C_QuestLog.AddQuestWatch, questID)
         return ok and true or false
     end
 
-    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
     if questLogIndex and _G.AddQuestWatch then
         local ok = SafeCall(_G.AddQuestWatch, questLogIndex)
         return ok and true or false
@@ -273,12 +308,17 @@ local function RemoveQuestWatchByID(questID)
         return false
     end
 
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+
+    if Compat and type(Compat.RemoveQuestWatch) == "function" then
+        return Compat.RemoveQuestWatch(questID, questLogIndex) and true or false
+    end
+
     if C_QuestLog and C_QuestLog.RemoveQuestWatch then
         local ok = SafeCall(C_QuestLog.RemoveQuestWatch, questID)
         return ok and true or false
     end
 
-    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
     if questLogIndex and _G.RemoveQuestWatch then
         local ok = SafeCall(_G.RemoveQuestWatch, questLogIndex)
         return ok and true or false
@@ -304,6 +344,13 @@ local function IsQuestCompleteCompat(questID)
         local ok, isComplete = SafeCall(_G.GetQuestLogIsComplete, questLogIndex)
         if ok then
             return isComplete and true or false
+        end
+    end
+
+    if questLogIndex and _G.GetQuestLogTitle then
+        local ok, _, _, _, _, _, isComplete = SafeCall(_G.GetQuestLogTitle, questLogIndex)
+        if ok then
+            return isComplete == true or isComplete == 1
         end
     end
 
@@ -353,6 +400,105 @@ local function ShowQuestCompleteCompat(questID, questLogIndex)
 
     return false
 end
+
+local function TryInsertQuestLink(questID)
+    if not IsShiftKeyDown or not IsShiftKeyDown() then
+        return false
+    end
+
+    if not ChatEdit_GetActiveWindow or not ChatEdit_InsertLink then
+        return false
+    end
+
+    local editBox = ChatEdit_GetActiveWindow()
+    if not editBox then
+        return false
+    end
+
+    local link = nil
+
+    if _G.GetQuestLink then
+        local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+        if questLogIndex then
+            local ok, questLink = SafeCall(_G.GetQuestLink, questLogIndex)
+            if ok and questLink then
+                link = questLink
+            end
+        end
+    end
+
+    if not link and C_QuestLog and C_QuestLog.GetTitleForQuestID then
+        local ok, title = SafeCall(C_QuestLog.GetTitleForQuestID, questID)
+        if ok and title and title ~= "" then
+            link = "|cffffff00|Hquest:" .. tostring(questID) .. "|h[" .. title .. "]|h|r"
+        end
+    end
+
+    if link then
+        local ok, inserted = SafeCall(ChatEdit_InsertLink, link)
+        return ok and inserted and true or false
+    end
+
+    return false
+end
+
+local function OpenQuestFromWatch(questID, questLogIndex)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    questLogIndex = questLogIndex or GetQuestLogIndexByIDCompat(questID)
+
+    if TryInsertQuestLink(questID) then
+        return true
+    end
+
+    if IsQuestCompleteCompat(questID) and IsQuestAutoComplete(questID, questLogIndex) then
+        if ShowQuestCompleteCompat(questID, questLogIndex) then
+            return true
+        end
+    end
+
+    if Compat.OpenQuestDetails and Compat.OpenQuestDetails(questID, questLogIndex) then
+        return true
+    end
+
+    if _G.QuestMapFrame_OpenToQuestDetails then
+        local ok = SafeCall(_G.QuestMapFrame_OpenToQuestDetails, questID)
+        if ok then
+            return true
+        end
+    end
+
+    if questLogIndex and _G.SelectQuestLogEntry then
+        SafeCall(_G.SelectQuestLogEntry, questLogIndex)
+    end
+
+    if _G.OpenQuestLog then
+        local ok = SafeCall(_G.OpenQuestLog)
+        if ok then
+            return true
+        end
+    end
+
+    if _G.ToggleQuestLog then
+        local ok = SafeCall(_G.ToggleQuestLog)
+        if ok then
+            return true
+        end
+    end
+
+    if _G.QuestLogFrame and _G.ShowUIPanel then
+        local ok = SafeCall(_G.ShowUIPanel, _G.QuestLogFrame)
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
+QuestKing.OpenQuestFromWatch = OpenQuestFromWatch
 
 local function GetDifficultyLevel(info)
     if type(info) ~= "table" then
@@ -476,9 +622,8 @@ local function GetQuestObjectives(questID)
                 end
             end
         end
-    elseif _G.GetQuestObjectiveInfo then
-        local questLogIndexCompat = questLogIndex or 0
-        local okNum, numObjectives = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndexCompat)
+    elseif _G.GetQuestObjectiveInfo and _G.GetNumQuestLeaderBoards then
+        local okNum, numObjectives = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndex or 0)
         if okNum then
             for i = 1, SafeNumber(numObjectives, 0) or 0 do
                 local okObj, text, objectiveType, finished = SafeCall(_G.GetQuestObjectiveInfo, questID, i, false)
@@ -671,6 +816,10 @@ local function IsPreyQuest(questID)
 end
 
 local function GetSuperTrackedQuestIDCompat()
+    if Compat and type(Compat.GetSuperTrackedQuestID) == "function" then
+        return Compat.GetSuperTrackedQuestID() or 0
+    end
+
     if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
         local ok, questID = SafeCall(C_SuperTrack.GetSuperTrackedQuestID)
         if ok then
@@ -686,6 +835,31 @@ local function GetSuperTrackedQuestIDCompat()
     end
 
     return 0
+end
+
+local function SetSuperTrackedQuestIDCompat(questID)
+    if Compat and type(Compat.SetSuperTrackedQuestID) == "function" then
+        if Compat.SetSuperTrackedQuestID(questID) then
+            return true
+        end
+    end
+
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
+        local ok = SafeCall(C_SuperTrack.SetSuperTrackedQuestID, questID)
+        return ok and true or false
+    end
+
+    if _G.SetSuperTrackedQuestID then
+        local ok = SafeCall(_G.SetSuperTrackedQuestID, questID)
+        return ok and true or false
+    end
+
+    if _G.QuestSuperTracking_ChooseClosestQuest then
+        local ok = SafeCall(_G.QuestSuperTracking_ChooseClosestQuest)
+        return ok and true or false
+    end
+
+    return false
 end
 
 local function GetKindHeader(kind)
@@ -990,28 +1164,36 @@ local function AddQuestTooltipObjectives(tooltip, questID)
     end
 end
 
+local function OpenQuestContextMenu(button, questID, questLogIndex)
+    if QuestKing.OpenWatchQuestMenu then
+        QuestKing.OpenWatchQuestMenu(button, questID, questLogIndex)
+        return true
+    end
+
+    if QuestKing.ShowWatchQuestMenu then
+        QuestKing.ShowWatchQuestMenu(button, questID, questLogIndex)
+        return true
+    end
+
+    if QuestKing.ShowQuestMenu then
+        QuestKing.ShowQuestMenu(button, questID, questLogIndex)
+        return true
+    end
+
+    return false
+end
+
 local mouseHandlerQuest = {}
 
-function mouseHandlerQuest:TitleButtonOnClick(mouse)
-    local button = self.parent
+local function ResolveQuestClickSource(source)
+    local button = source
 
-    if mouse == "RightButton" then
-        if button.questID then
-            local questID = button.questID
-            local questLogIndex = button.questLogIndex
+    if source and source.parent then
+        button = source.parent
+    end
 
-            if C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID then
-                SafeCall(C_SuperTrack.SetSuperTrackedQuestID, questID)
-            elseif QuestSuperTracking_ChooseClosestQuest then
-                SafeCall(QuestSuperTracking_ChooseClosestQuest)
-            end
-
-            if QuestKing.UpdateTracker then
-                QuestKing:UpdateTracker()
-            end
-        end
-
-        return
+    if not button then
+        return nil, nil, nil
     end
 
     local questID = button.questID
@@ -1019,31 +1201,49 @@ function mouseHandlerQuest:TitleButtonOnClick(mouse)
 
     if not questLogIndex and questID then
         questLogIndex = GetQuestLogIndexByIDCompat(questID)
+        button.questLogIndex = questLogIndex
     end
 
     if not questID and questLogIndex then
-        questID = GetQuestIDFromQuestLogIndexCompat(questLogIndex)
+        questID = GetQuestIDForQuestLogIndex(questLogIndex)
+        button.questID = questID
     end
 
-    if not questID then
+    return button, questID, questLogIndex
+end
+
+function mouseHandlerQuest:HandleQuestClick(mouse)
+    local button, questID, questLogIndex = ResolveQuestClickSource(self)
+
+    if not button or not questID then
         return
     end
 
-    if Compat.OpenQuestDetails and Compat.OpenQuestDetails(questID, questLogIndex) then
+    if mouse == "RightButton" then
+        if OpenQuestContextMenu(button, questID, questLogIndex) then
+            return
+        end
+
+        SetSuperTrackedQuestIDCompat(questID)
+        QueueTrackerRefresh(false)
         return
     end
 
-    if _G.ToggleQuestLog and questLogIndex then
-        SafeCall(_G.ToggleQuestLog)
-    end
+    OpenQuestFromWatch(questID, questLogIndex)
+end
+
+function mouseHandlerQuest:TitleButtonOnClick(mouse)
+    mouseHandlerQuest.HandleQuestClick(self, mouse)
+end
+
+function mouseHandlerQuest:ButtonOnClick(mouse)
+    mouseHandlerQuest.HandleQuestClick(self, mouse)
 end
 
 function mouseHandlerQuest:TitleButtonOnEnter()
-    local button = self.parent
-    local questID = button.questID
-    local questLogIndex = button.questLogIndex
+    local button, questID, questLogIndex = ResolveQuestClickSource(self)
 
-    if not questID then
+    if not button or not questID then
         return
     end
 
@@ -1086,7 +1286,7 @@ function mouseHandlerQuest:TitleButtonOnEnter()
     end
 
     AddTooltipLine(tooltip, "Left-click to open quest", 0.7, 0.7, 0.7)
-    AddTooltipLine(tooltip, "Right-click to toggle super tracking", 0.7, 0.7, 0.7)
+    AddTooltipLine(tooltip, "Right-click for quest options", 0.7, 0.7, 0.7)
 
     AddQuestTooltipObjectives(tooltip, questID)
     tooltip:Show()
@@ -1105,6 +1305,10 @@ function QuestKing:GetQuestDisplayData(questLogIndex)
     end
 
     local questID = SafeNumber(info.questID, nil)
+    if not questID then
+        questID = GetQuestIDForQuestLogIndex(questLogIndex)
+    end
+
     if not questID then
         return nil
     end
@@ -1165,6 +1369,24 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     button.questID = data.questID
     button.questLogIndex = questLogIndex
     button.questKind = data.kind
+
+    if button.EnableMouse then
+        button:EnableMouse(true)
+    end
+
+    if button.RegisterForClicks then
+        button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    end
+
+    if button.titleButton then
+        if button.titleButton.EnableMouse then
+            button.titleButton:EnableMouse(true)
+        end
+
+        if button.titleButton.RegisterForClicks then
+            button.titleButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        end
+    end
 
     local kindPrefix = GetKindPrefix(data.kind)
     local title = SafeString(data.title, UNKNOWN) or UNKNOWN
@@ -1277,10 +1499,28 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
 end
 
 local function AddSectionHeader(headerText)
+    if not WatchButton or type(WatchButton.GetKeyed) ~= "function" then
+        return nil
+    end
+
     local header = WatchButton:GetKeyed("header", "quest_header_" .. tostring(headerText))
-    header.title:SetText(headerText)
-    header.title:SetTextColor(SECTION_HEADER_COLOR.r, SECTION_HEADER_COLOR.g, SECTION_HEADER_COLOR.b)
-    header.titleButton:EnableMouse(false)
+    if not header then
+        return nil
+    end
+
+    if header.title then
+        header.title:SetText(headerText)
+        header.title:SetTextColor(SECTION_HEADER_COLOR.r, SECTION_HEADER_COLOR.g, SECTION_HEADER_COLOR.b)
+    end
+
+    if header.EnableMouse then
+        header:EnableMouse(false)
+    end
+
+    if header.titleButton and header.titleButton.EnableMouse then
+        header.titleButton:EnableMouse(false)
+    end
+
     return header
 end
 
@@ -1385,6 +1625,10 @@ function QuestKing:ShouldSkipBonusTask(questID)
 end
 
 function QuestKing:UpdateTrackerQuests()
+    if not WatchButton or type(WatchButton.GetKeyed) ~= "function" then
+        return
+    end
+
     local rows = self:BuildQuestSortTable()
     if not rows or #rows == 0 then
         return
@@ -1402,16 +1646,18 @@ function QuestKing:UpdateTrackerQuests()
             end
 
             local button = WatchButton:GetKeyed("quest", row.questID)
-            button._previousHeader = currentHeader
-            self:SetButtonToQuest(button, row.questLogIndex)
+            if button then
+                button._previousHeader = currentHeader
+                self:SetButtonToQuest(button, row.questLogIndex)
 
-            if button.fresh and self.newlyAddedQuests and self.newlyAddedQuests[row.questID] then
-                if button.Pulse and opt_colors.ObjectiveAlertGlow then
-                    button:Pulse(
-                        opt_colors.ObjectiveAlertGlow[1],
-                        opt_colors.ObjectiveAlertGlow[2],
-                        opt_colors.ObjectiveAlertGlow[3]
-                    )
+                if button.fresh and self.newlyAddedQuests and self.newlyAddedQuests[row.questID] then
+                    if button.Pulse and opt_colors.ObjectiveAlertGlow then
+                        button:Pulse(
+                            opt_colors.ObjectiveAlertGlow[1],
+                            opt_colors.ObjectiveAlertGlow[2],
+                            opt_colors.ObjectiveAlertGlow[3]
+                        )
+                    end
                 end
             end
         end

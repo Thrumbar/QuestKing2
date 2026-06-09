@@ -36,3 +36,4 @@ core\supertracking.lua
 core\core.lua
 core\slashcommand.lua
 core\events.lua
+core\autocomplete.lua
