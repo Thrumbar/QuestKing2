@@ -1,3 +1,13 @@
+3.0.12
+- Fixed Classic-family quest rows not appearing in the QuestKing watch window when QuestKing used legacy quest-log fallbacks.
+- Fixed safe-call wrappers that discarded later GetQuestLogTitle() return values, including the Classic quest ID return value.
+- Added Compat.GetQuestIDForLogIndex() as the compatibility alias required by event-side fallback code.
+- Fixed the legacy GetQuestLogTitle() field order in SafeGetQuestInfoByIndex() so isHeader, isCollapsed, isComplete, frequency, questID, and startEvent are preserved correctly.
+- Expanded safe-call return preservation in core/compatibility.lua, core/events.lua, core/supertracking.lua, and buttons/quest.lua for legacy multi-return Blizzard APIs.
+- Keeps Retail / Midnight on the existing C_QuestLog.GetInfo() path while correcting Classic Era, TBC Classic, Cataclysm Classic, and Mists Classic fallback behavior.
+- Changed files: core/compatibility.lua, core/events.lua, core/supertracking.lua, core/util.lua, buttons/quest.lua.
+
+
 3.0.11
 - Restored left-click quest opening from the QuestKing watch tracker.
 - Quest title clicks and quest body/objective clicks now share the same quest-open handler.

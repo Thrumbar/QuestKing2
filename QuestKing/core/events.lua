@@ -74,27 +74,27 @@ end
 
 local function SafeCall(func, ...)
     if type(func) ~= "function" then
-        return false, nil, nil, nil, nil
+        return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
     end
 
-    local ok, a, b, c, d = pcall(func, ...)
+    local ok, a, b, c, d, e, f, g, h, i, j = pcall(func, ...)
     if ok then
-        return true, a, b, c, d
+        return true, a, b, c, d, e, f, g, h, i, j
     end
 
     ReportErrorSafe(a)
 
-    return false, nil, nil, nil, nil
+    return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
 end
 
 local function SafeCallMethod(target, method, ...)
     if type(target) ~= "table" then
-        return false, nil, nil, nil, nil
+        return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
     end
 
     local func = target[method]
     if type(func) ~= "function" then
-        return false, nil, nil, nil, nil
+        return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
     end
 
     return SafeCall(func, target, ...)
@@ -275,7 +275,7 @@ end
 
 local function AddQuestWatchCompat(questLogIndex, questID)
     if type(Compat.AddQuestWatch) == "function" and questID then
-        return Compat.AddQuestWatch(questID) and true or false
+        return Compat.AddQuestWatch(questID, questLogIndex, "Automatic") and true or false
     end
 
     if type(questID) ~= "number" or questID <= 0 then
@@ -283,8 +283,18 @@ local function AddQuestWatchCompat(questLogIndex, questID)
     end
 
     if type(questID) == "number" and C_QuestLog and C_QuestLog.AddQuestWatch then
-        local ok = SafeCall(C_QuestLog.AddQuestWatch, questID)
-        return ok and true or false
+        local watchType = _G.Enum and _G.Enum.QuestWatchType and _G.Enum.QuestWatchType.Automatic or nil
+        if watchType ~= nil then
+            local ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID, watchType)
+            if ok then
+                return wasWatched ~= false
+            end
+        end
+
+        local ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID)
+        if ok then
+            return wasWatched ~= false
+        end
     end
 
     if type(questLogIndex) == "number" and questLogIndex > 0 and type(_G.AddQuestWatch) == "function" then

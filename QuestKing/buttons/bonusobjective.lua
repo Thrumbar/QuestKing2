@@ -17,6 +17,7 @@ local pairs = pairs
 local UNKNOWN = UNKNOWN or "Unknown"
 local C_Scenario = C_Scenario
 local C_QuestLog = C_QuestLog
+local C_QuestInfoSystem = C_QuestInfoSystem
 local C_SuperTrack = C_SuperTrack
 
 local addHeader
@@ -197,7 +198,34 @@ local function getRewardMoneyCompat(questID)
     return 0
 end
 
+local function GetRewardCurrencyTable(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return nil
+    end
+
+    if C_QuestLog and type(C_QuestLog.GetQuestRewardCurrencies) == "function" then
+        local ok, data = pcall(C_QuestLog.GetQuestRewardCurrencies, questID)
+        if ok and type(data) == "table" then
+            return data
+        end
+    end
+
+    if C_QuestInfoSystem and type(C_QuestInfoSystem.GetQuestRewardCurrencies) == "function" then
+        local ok, data = pcall(C_QuestInfoSystem.GetQuestRewardCurrencies, questID)
+        if ok and type(data) == "table" then
+            return data
+        end
+    end
+
+    return nil
+end
+
 local function getNumRewardCurrenciesCompat(questID)
+    local rewards = GetRewardCurrencyTable(questID)
+    if rewards then
+        return #rewards
+    end
+
     if C_QuestLog and C_QuestLog.GetNumQuestLogRewardCurrencies then
         return SafeNumber(C_QuestLog.GetNumQuestLogRewardCurrencies(questID), 0) or 0
     end
@@ -208,16 +236,45 @@ local function getNumRewardCurrenciesCompat(questID)
 end
 
 local function getRewardCurrencyInfoCompat(index, questID)
+    local rewards = GetRewardCurrencyTable(questID)
+    local reward = rewards and rewards[index]
+    if type(reward) == "table" then
+        return SafeString(reward.name, nil),
+            SafeNumber(reward.texture, nil),
+            SafeNumber(reward.totalRewardAmount, nil)
+                or SafeNumber(reward.numItems, nil)
+                or SafeNumber(reward.quantity, nil)
+                or SafeNumber(reward.baseRewardAmount, 0)
+                or 0,
+            SafeNumber(reward.quality, nil)
+                or SafeNumber(reward.rarity, nil)
+    end
+
+    if C_QuestLog and C_QuestLog.GetQuestRewardCurrencyInfo then
+        local ok, info = pcall(C_QuestLog.GetQuestRewardCurrencyInfo, questID, index, false)
+        if ok and type(info) == "table" then
+            return SafeString(info.name, nil),
+                SafeNumber(info.texture, nil),
+                SafeNumber(info.totalRewardAmount, nil)
+                    or SafeNumber(info.numItems, nil)
+                    or SafeNumber(info.quantity, nil)
+                    or SafeNumber(info.baseRewardAmount, 0)
+                    or 0,
+                SafeNumber(info.quality, nil)
+                    or SafeNumber(info.rarity, nil)
+        end
+    end
+
     if C_QuestLog and C_QuestLog.GetQuestLogRewardCurrencyInfo then
         local info = C_QuestLog.GetQuestLogRewardCurrencyInfo(index, questID)
         if info then
-            return SafeString(info.name, nil), SafeNumber(info.texture, nil), SafeNumber(info.numItems, nil)
+            return SafeString(info.name, nil), SafeNumber(info.texture, nil), SafeNumber(info.numItems, nil), SafeNumber(info.quality, nil)
         end
     end
     if GetQuestLogRewardCurrencyInfo then
         return GetQuestLogRewardCurrencyInfo(index, questID)
     end
-    return nil, nil, nil
+    return nil, nil, nil, nil
 end
 
 local function getNumRewardsCompat(questID)

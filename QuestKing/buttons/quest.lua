@@ -90,15 +90,15 @@ end
 
 local function SafeCall(func, ...)
     if type(func) ~= "function" then
-        return false, nil, nil, nil, nil, nil, nil, nil, nil
+        return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
     end
 
-    local ok, a, b, c, d, e, f, g, h = pcall(func, ...)
+    local ok, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o = pcall(func, ...)
     if ok then
-        return true, a, b, c, d, e, f, g, h
+        return true, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o
     end
 
-    return false, nil, nil, nil, nil, nil, nil, nil, nil
+    return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
 end
 
 local function QueueTrackerRefresh(forceBuild)
@@ -287,12 +287,23 @@ local function AddQuestWatchByID(questID)
     local questLogIndex = GetQuestLogIndexByIDCompat(questID)
 
     if Compat and type(Compat.AddQuestWatch) == "function" then
-        return Compat.AddQuestWatch(questID, questLogIndex) and true or false
+        return Compat.AddQuestWatch(questID, questLogIndex, "Manual") and true or false
     end
 
     if C_QuestLog and C_QuestLog.AddQuestWatch then
-        local ok = SafeCall(C_QuestLog.AddQuestWatch, questID)
-        return ok and true or false
+        local watchType = _G.Enum and _G.Enum.QuestWatchType and _G.Enum.QuestWatchType.Manual or nil
+        local ok, wasWatched = false, nil
+        if watchType ~= nil then
+            ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID, watchType)
+            if ok then
+                return wasWatched ~= false
+            end
+        end
+
+        ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID)
+        if ok then
+            return wasWatched ~= false
+        end
     end
 
     if questLogIndex and _G.AddQuestWatch then
@@ -1524,6 +1535,94 @@ local function AddSectionHeader(headerText)
     return header
 end
 
+local function IsClassicFamilyCompat()
+    if Compat and type(Compat.IsClassicFamily) == "function" then
+        return Compat.IsClassicFamily() and true or false
+    end
+
+    local projectID = _G.WOW_PROJECT_ID
+    return projectID ~= nil and projectID ~= _G.WOW_PROJECT_MAINLINE
+end
+
+local function GetNumQuestWatchesCompat()
+    if Compat and type(Compat.GetNumQuestWatches) == "function" then
+        return SafeNumber(Compat.GetNumQuestWatches(), 0) or 0
+    end
+
+    if C_QuestLog and C_QuestLog.GetNumQuestWatches then
+        local ok, count = SafeCall(C_QuestLog.GetNumQuestWatches)
+        if ok then
+            return SafeNumber(count, 0) or 0
+        end
+    end
+
+    if _G.GetNumQuestWatches then
+        local ok, count = SafeCall(_G.GetNumQuestWatches)
+        if ok then
+            return SafeNumber(count, 0) or 0
+        end
+    end
+
+    return 0
+end
+
+local function GetNumQuestLogEntriesCompat()
+    if C_QuestLog and C_QuestLog.GetNumQuestLogEntries then
+        local ok, count = SafeCall(C_QuestLog.GetNumQuestLogEntries)
+        if ok then
+            return SafeNumber(count, 0) or 0
+        end
+    end
+
+    if _G.GetNumQuestLogEntries then
+        local ok, count = SafeCall(_G.GetNumQuestLogEntries)
+        if ok then
+            return SafeNumber(count, 0) or 0
+        end
+    end
+
+    return 0
+end
+
+local function AddQuestSortRow(rows, seenQuestIDs, self, questID, questLogIndex, info)
+    if type(questID) ~= "number" or questID <= 0 or seenQuestIDs[questID] then
+        return
+    end
+
+    if not questLogIndex then
+        questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    end
+
+    if not info and questLogIndex then
+        info = GetQuestInfoByLogIndex(questLogIndex)
+    end
+
+    if info and not info.isHeader and not info.isHidden then
+        seenQuestIDs[questID] = true
+        rows[#rows + 1] = {
+            questID = questID,
+            questLogIndex = questLogIndex,
+            kind = self:GetQuestKind(questID, info),
+            sortText = SafeString(info.title, "") or "",
+        }
+    end
+end
+
+local function AddClassicQuestLogRows(rows, seenQuestIDs, self)
+    local numEntries = GetNumQuestLogEntriesCompat()
+    if numEntries <= 0 then
+        return
+    end
+
+    for questLogIndex = 1, numEntries do
+        local info = GetQuestInfoByLogIndex(questLogIndex)
+        if info and not info.isHeader and not info.isHidden then
+            local questID = SafeNumber(info.questID, nil) or GetQuestIDForQuestLogIndex(questLogIndex)
+            AddQuestSortRow(rows, seenQuestIDs, self, questID, questLogIndex, info)
+        end
+    end
+end
+
 function QuestKing:BuildQuestSortTable()
     self.questSortTable = self.questSortTable or {}
     local questSortTable = self.questSortTable
@@ -1532,34 +1631,15 @@ function QuestKing:BuildQuestSortTable()
     local seenQuestIDs = {}
     local rows = {}
 
-    local numWatches = 0
-    if C_QuestLog and C_QuestLog.GetNumQuestWatches then
-        local ok, count = SafeCall(C_QuestLog.GetNumQuestWatches)
-        if ok then
-            numWatches = SafeNumber(count, 0) or 0
-        end
-    elseif _G.GetNumQuestWatches then
-        local ok, count = SafeCall(_G.GetNumQuestWatches)
-        if ok then
-            numWatches = SafeNumber(count, 0) or 0
-        end
-    end
+    local numWatches = GetNumQuestWatchesCompat()
 
     for i = 1, numWatches do
         local questID = GetQuestIDForWatchIndex(i)
-        if questID and not seenQuestIDs[questID] then
-            local questLogIndex = GetQuestLogIndexByIDCompat(questID)
-            local info = questLogIndex and GetQuestInfoByLogIndex(questLogIndex) or nil
-            if info and not info.isHeader and not info.isHidden then
-                seenQuestIDs[questID] = true
-                rows[#rows + 1] = {
-                    questID = questID,
-                    questLogIndex = questLogIndex,
-                    kind = self:GetQuestKind(questID, info),
-                    sortText = SafeString(info.title, "") or "",
-                }
-            end
-        end
+        AddQuestSortRow(rows, seenQuestIDs, self, questID, nil, nil)
+    end
+
+    if IsClassicFamilyCompat() then
+        AddClassicQuestLogRows(rows, seenQuestIDs, self)
     end
 
     local preyQuestID = GetActivePreyQuest()
@@ -1684,17 +1764,7 @@ function QuestKing:IterateWatched()
     local i = 0
     local n = 0
 
-    if C_QuestLog and C_QuestLog.GetNumQuestWatches then
-        local ok, count = SafeCall(C_QuestLog.GetNumQuestWatches)
-        if ok then
-            n = SafeNumber(count, 0) or 0
-        end
-    elseif _G.GetNumQuestWatches then
-        local ok, count = SafeCall(_G.GetNumQuestWatches)
-        if ok then
-            n = SafeNumber(count, 0) or 0
-        end
-    end
+    n = GetNumQuestWatchesCompat()
 
     return function()
         i = i + 1

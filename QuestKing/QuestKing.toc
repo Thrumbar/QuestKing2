@@ -1,4 +1,4 @@
-## Interface: 120007, 120005, 120001, 50503, 40402, 20505, 11508
+## Interface: 120007, 120005, 120001, 50504, 50503, 40402, 20505, 11508
 ## Title: QuestKing2 = Reborn
 ## Author: Original: Barjack (up to WotLK) Current: Thrumbar
 ## Version: @project-version@

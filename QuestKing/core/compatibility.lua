@@ -14,7 +14,10 @@ local pcall = pcall
 local WOW_PROJECT_ID = _G.WOW_PROJECT_ID
 local WOW_PROJECT_MAINLINE = _G.WOW_PROJECT_MAINLINE
 local WOW_PROJECT_CLASSIC = _G.WOW_PROJECT_CLASSIC
+local WOW_PROJECT_BURNING_CRUSADE_CLASSIC = _G.WOW_PROJECT_BURNING_CRUSADE_CLASSIC
+local WOW_PROJECT_WRATH_CLASSIC = _G.WOW_PROJECT_WRATH_CLASSIC
 local WOW_PROJECT_CATACLYSM_CLASSIC = _G.WOW_PROJECT_CATACLYSM_CLASSIC
+local WOW_PROJECT_MISTS_CLASSIC = _G.WOW_PROJECT_MISTS_CLASSIC
 
 local opt = (QuestKing and QuestKing.options) or {}
 
@@ -38,15 +41,15 @@ local petTrackerEnabled = false
 
 local function SafeCall(func, ...)
     if type(func) ~= "function" then
-        return false, nil, nil, nil, nil, nil
+        return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
     end
 
-    local ok, a, b, c, d, e = pcall(func, ...)
+    local ok, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t = pcall(func, ...)
     if ok then
-        return true, a, b, c, d, e
+        return true, a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t
     end
 
-    return false, nil, nil, nil, nil, nil
+    return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
 end
 
 local function IsSecretValue(value)
@@ -104,14 +107,21 @@ end
 local function GetProjectFlags()
     local isMainline = WOW_PROJECT_MAINLINE and WOW_PROJECT_ID == WOW_PROJECT_MAINLINE or false
     local isClassicEra = WOW_PROJECT_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_CLASSIC or false
+    local isTBCClassic = WOW_PROJECT_BURNING_CRUSADE_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_BURNING_CRUSADE_CLASSIC or false
+    local isWrathClassic = WOW_PROJECT_WRATH_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_WRATH_CLASSIC or false
     local isCataclysmClassic = WOW_PROJECT_CATACLYSM_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_CATACLYSM_CLASSIC or false
+    local isMistsClassic = WOW_PROJECT_MISTS_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_MISTS_CLASSIC or false
+    local isClassicFamily = isClassicEra or isTBCClassic or isWrathClassic or isCataclysmClassic or isMistsClassic
 
     return {
         projectID = WOW_PROJECT_ID,
         isMainline = isMainline,
         isClassicEra = isClassicEra,
+        isTBCClassic = isTBCClassic,
+        isWrathClassic = isWrathClassic,
         isCataclysmClassic = isCataclysmClassic,
-        isClassicFamily = isClassicEra or isCataclysmClassic,
+        isMistsClassic = isMistsClassic,
+        isClassicFamily = isClassicFamily,
     }
 end
 
@@ -127,8 +137,20 @@ function Compat.IsClassicEra()
     return GetProjectFlags().isClassicEra
 end
 
+function Compat.IsTBCClassic()
+    return GetProjectFlags().isTBCClassic
+end
+
+function Compat.IsWrathClassic()
+    return GetProjectFlags().isWrathClassic
+end
+
 function Compat.IsCataclysmClassic()
     return GetProjectFlags().isCataclysmClassic
+end
+
+function Compat.IsMistsClassic()
+    return GetProjectFlags().isMistsClassic
 end
 
 function Compat.IsClassicFamily()
@@ -350,6 +372,14 @@ function Compat.GetQuestLogIndexByQuestID(questID)
     return nil
 end
 
+function Compat.GetQuestLogIndexByID(questID)
+    return Compat.GetQuestLogIndexByQuestID(questID)
+end
+
+function Compat.GetQuestIDForLogIndex(questLogIndex)
+    return Compat.GetQuestIDByLogIndex(questLogIndex)
+end
+
 function Compat.GetQuestIDByLogIndex(questLogIndex)
     questLogIndex = SafeNumber(questLogIndex, nil)
     if not questLogIndex or questLogIndex <= 0 then
@@ -394,16 +424,31 @@ function Compat.GetQuestInfo(questLogIndex)
     end
 
     if type(_G.GetQuestLogTitle) == "function" then
-        local ok, title, level, suggestedGroup, _, isHeader, _, frequency, questID, startEvent = SafeCall(_G.GetQuestLogTitle, questLogIndex)
+        local ok, title, level, suggestedGroup, isHeader, isCollapsed, isComplete, frequency, questID, startEvent,
+            displayQuestID, isOnMap, hasLocalPOI, isTask, isBounty, isStory, isHidden, isScaling,
+            isLegionInvasion, isSequenced, campaignID = SafeCall(_G.GetQuestLogTitle, questLogIndex)
         if ok and title then
             return {
                 title = title,
                 level = level,
                 suggestedGroup = suggestedGroup,
                 isHeader = isHeader and true or false,
+                isCollapsed = isCollapsed and true or false,
+                isComplete = isComplete,
                 frequency = frequency,
                 questID = questID,
                 startEvent = startEvent and true or false,
+                displayQuestID = displayQuestID,
+                isOnMap = isOnMap and true or false,
+                hasLocalPOI = hasLocalPOI and true or false,
+                isTask = isTask and true or false,
+                isBounty = isBounty and true or false,
+                isStory = isStory and true or false,
+                isHidden = isHidden and true or false,
+                isScaling = isScaling and true or false,
+                isLegionInvasion = isLegionInvasion and true or false,
+                isSequenced = isSequenced and true or false,
+                campaignID = campaignID,
             }
         end
     end
@@ -431,11 +476,37 @@ function Compat.IsQuestWatched(questID, questLogIndex)
     return false
 end
 
-function Compat.AddQuestWatch(questID, questLogIndex)
+local function GetQuestWatchTypeValue(kind)
+    if Enum and Enum.QuestWatchType then
+        local value = Enum.QuestWatchType[kind or "Manual"]
+        if type(value) == "number" then
+            return value
+        end
+    end
+
+    return nil
+end
+
+function Compat.AddQuestWatch(questID, questLogIndex, watchType)
     questID = SafeNumber(questID, nil)
+
     if questID and questID > 0 and C_QuestLog and C_QuestLog.AddQuestWatch then
-        local ok = SafeCall(C_QuestLog.AddQuestWatch, questID)
-        return ok and true or false
+        local normalizedWatchType = watchType
+        if type(normalizedWatchType) == "string" then
+            normalizedWatchType = GetQuestWatchTypeValue(normalizedWatchType)
+        end
+
+        if normalizedWatchType ~= nil then
+            local ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID, normalizedWatchType)
+            if ok then
+                return wasWatched ~= false
+            end
+        end
+
+        local ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID)
+        if ok then
+            return wasWatched ~= false
+        end
     end
 
     questLogIndex = SafeNumber(questLogIndex, nil) or Compat.GetQuestLogIndexByQuestID(questID)
@@ -450,8 +521,10 @@ end
 function Compat.RemoveQuestWatch(questID, questLogIndex)
     questID = SafeNumber(questID, nil)
     if questID and questID > 0 and C_QuestLog and C_QuestLog.RemoveQuestWatch then
-        local ok = SafeCall(C_QuestLog.RemoveQuestWatch, questID)
-        return ok and true or false
+        local ok, wasRemoved = SafeCall(C_QuestLog.RemoveQuestWatch, questID)
+        if ok then
+            return wasRemoved ~= false
+        end
     end
 
     questLogIndex = SafeNumber(questLogIndex, nil) or Compat.GetQuestLogIndexByQuestID(questID)
@@ -461,6 +534,24 @@ function Compat.RemoveQuestWatch(questID, questLogIndex)
     end
 
     return false
+end
+
+function Compat.GetNumQuestWatches()
+    if C_QuestLog and C_QuestLog.GetNumQuestWatches then
+        local ok, count = SafeCall(C_QuestLog.GetNumQuestWatches)
+        if ok then
+            return SafeNumber(count, 0) or 0
+        end
+    end
+
+    if type(_G.GetNumQuestWatches) == "function" then
+        local ok, count = SafeCall(_G.GetNumQuestWatches)
+        if ok then
+            return SafeNumber(count, 0) or 0
+        end
+    end
+
+    return 0
 end
 
 function Compat.GetQuestIDForWatchIndex(watchIndex)
@@ -623,7 +714,10 @@ PetTrackerCompat.LoaderFrame = petTrackerWatcher
 
 QuestKing.IsMainline = Compat.IsMainline
 QuestKing.IsClassicEra = Compat.IsClassicEra
+QuestKing.IsTBCClassic = Compat.IsTBCClassic
+QuestKing.IsWrathClassic = Compat.IsWrathClassic
 QuestKing.IsCataclysmClassic = Compat.IsCataclysmClassic
+QuestKing.IsMistsClassic = Compat.IsMistsClassic
 QuestKing.IsClassicFamily = Compat.IsClassicFamily
 
 QuestKing.GetQuestLogIndexByQuestIDCompat = Compat.GetQuestLogIndexByQuestID

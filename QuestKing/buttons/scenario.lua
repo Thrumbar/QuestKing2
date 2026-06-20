@@ -25,6 +25,7 @@ end
 local C_Scenario = C_Scenario
 local C_ScenarioInfo = C_ScenarioInfo
 local C_QuestLog = C_QuestLog
+local C_QuestInfoSystem = C_QuestInfoSystem
 
 local enteringWorldQueue = {}
 local mouseHandlerScenario = {}
@@ -736,6 +737,112 @@ local function AddTooltipMoneyText(tooltip, money)
     end
 end
 
+
+local function GetRewardCurrencyTable(questID)
+    questID = SafeNumber(questID, nil)
+    if not questID or questID <= 0 then
+        return nil
+    end
+
+    if C_QuestLog and type(C_QuestLog.GetQuestRewardCurrencies) == "function" then
+        local ok, data = pcall(C_QuestLog.GetQuestRewardCurrencies, questID)
+        if ok and type(data) == "table" then
+            return data
+        end
+    end
+
+    if C_QuestInfoSystem and type(C_QuestInfoSystem.GetQuestRewardCurrencies) == "function" then
+        local ok, data = pcall(C_QuestInfoSystem.GetQuestRewardCurrencies, questID)
+        if ok and type(data) == "table" then
+            return data
+        end
+    end
+
+    return nil
+end
+
+local function GetNumRewardCurrenciesCompat(questID)
+    local rewards = GetRewardCurrencyTable(questID)
+    if rewards then
+        return #rewards
+    end
+
+    if type(GetNumQuestLogRewardCurrencies) == "function" then
+        return SafeNumber(GetNumQuestLogRewardCurrencies(questID), 0) or 0
+    end
+
+    return 0
+end
+
+local function GetRewardCurrencyInfoCompat(index, questID)
+    local rewards = GetRewardCurrencyTable(questID)
+    local reward = rewards and rewards[index]
+    if type(reward) == "table" then
+        return SafeString(reward.name, nil),
+            SafeNumber(reward.texture, nil),
+            SafeNumber(reward.totalRewardAmount, nil)
+                or SafeNumber(reward.numItems, nil)
+                or SafeNumber(reward.quantity, nil)
+                or SafeNumber(reward.baseRewardAmount, 0)
+                or 0,
+            SafeNumber(reward.quality, nil)
+                or SafeNumber(reward.rarity, nil)
+    end
+
+    if C_QuestLog and type(C_QuestLog.GetQuestRewardCurrencyInfo) == "function" then
+        local ok, info = pcall(C_QuestLog.GetQuestRewardCurrencyInfo, questID, index, false)
+        if ok and type(info) == "table" then
+            return SafeString(info.name, nil),
+                SafeNumber(info.texture, nil),
+                SafeNumber(info.totalRewardAmount, nil)
+                    or SafeNumber(info.numItems, nil)
+                    or SafeNumber(info.quantity, nil)
+                    or SafeNumber(info.baseRewardAmount, 0)
+                    or 0,
+                SafeNumber(info.quality, nil)
+                    or SafeNumber(info.rarity, nil)
+        end
+    end
+
+    if type(GetQuestLogRewardCurrencyInfo) == "function" then
+        return GetQuestLogRewardCurrencyInfo(index, questID)
+    end
+
+    return nil, nil, nil, nil
+end
+
+local function GetQuestRewardXPCompat(questID)
+    if type(GetQuestLogRewardXP) == "function" then
+        return SafeNumber(GetQuestLogRewardXP(questID), 0) or 0
+    end
+
+    return 0
+end
+
+local function GetNumQuestRewardsCompat(questID)
+    if type(GetNumQuestLogRewards) == "function" then
+        return SafeNumber(GetNumQuestLogRewards(questID), 0) or 0
+    end
+
+    return 0
+end
+
+local function GetQuestRewardInfoCompat(index, questID)
+    if type(GetQuestLogRewardInfo) == "function" then
+        return GetQuestLogRewardInfo(index, questID)
+    end
+
+    return nil, nil, nil, nil
+end
+
+local function GetQuestRewardMoneyCompat(questID)
+    if type(GetQuestLogRewardMoney) == "function" then
+        return SafeNumber(GetQuestLogRewardMoney(questID), 0) or 0
+    end
+
+    return 0
+end
+
 local function AddStageDescriptionFallback(button, stageDescription, stepFinished, stepFailed)
     if not stageDescription or stageDescription == "" then
         return false
@@ -1278,19 +1385,18 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
 
     local blankLine = false
     local rewardQuestID = GetScenarioRewardQuestID(stepIndex, rewardQuestIDFromStep)
-    local rewardQuestLogIndex = rewardQuestID and GetQuestLogIndexByIDCompat(rewardQuestID) or nil
 
-    if rewardQuestLogIndex then
-        local rewardXP = GetQuestLogRewardXP and (GetQuestLogRewardXP(rewardQuestLogIndex) or 0) or 0
+    if rewardQuestID then
+        local rewardXP = GetQuestRewardXPCompat(rewardQuestID)
         if rewardXP > 0 then
             tooltip:AddLine(" ")
             blankLine = true
             AddTooltipRewardText(tooltip, format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, rewardXP), 1, 1, 1)
         end
 
-        local numQuestCurrencies = GetNumQuestLogRewardCurrencies and (GetNumQuestLogRewardCurrencies(rewardQuestLogIndex) or 0) or 0
+        local numQuestCurrencies = GetNumRewardCurrenciesCompat(rewardQuestID)
         for i = 1, numQuestCurrencies do
-            local name, texture, numItems = GetQuestLogRewardCurrencyInfo(i, rewardQuestLogIndex)
+            local name, texture, numItems = GetRewardCurrencyInfoCompat(i, rewardQuestID)
             if name and texture and numItems then
                 local text = format(BONUS_OBJECTIVE_REWARD_WITH_COUNT_FORMAT, texture, numItems, name)
                 if not blankLine then
@@ -1301,9 +1407,9 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
             end
         end
 
-        local numQuestRewards = GetNumQuestLogRewards and (GetNumQuestLogRewards(rewardQuestLogIndex) or 0) or 0
+        local numQuestRewards = GetNumQuestRewardsCompat(rewardQuestID)
         for i = 1, numQuestRewards do
-            local name, texture, numItems, quality = GetQuestLogRewardInfo(i, rewardQuestLogIndex)
+            local name, texture, numItems, quality = GetQuestRewardInfoCompat(i, rewardQuestID)
             local text
 
             if numItems and numItems > 1 and texture and name then
@@ -1322,7 +1428,7 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
             end
         end
 
-        local rewardMoney = GetQuestLogRewardMoney and (GetQuestLogRewardMoney(rewardQuestLogIndex) or 0) or 0
+        local rewardMoney = GetQuestRewardMoneyCompat(rewardQuestID)
         if rewardMoney > 0 then
             if not blankLine then
                 tooltip:AddLine(" ")

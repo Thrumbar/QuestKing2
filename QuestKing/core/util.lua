@@ -32,12 +32,18 @@ local issecretvalue = _G.issecretvalue
 local WOW_PROJECT_ID = _G.WOW_PROJECT_ID
 local WOW_PROJECT_MAINLINE = _G.WOW_PROJECT_MAINLINE
 local WOW_PROJECT_CLASSIC = _G.WOW_PROJECT_CLASSIC
+local WOW_PROJECT_BURNING_CRUSADE_CLASSIC = _G.WOW_PROJECT_BURNING_CRUSADE_CLASSIC
+local WOW_PROJECT_WRATH_CLASSIC = _G.WOW_PROJECT_WRATH_CLASSIC
 local WOW_PROJECT_CATACLYSM_CLASSIC = _G.WOW_PROJECT_CATACLYSM_CLASSIC
+local WOW_PROJECT_MISTS_CLASSIC = _G.WOW_PROJECT_MISTS_CLASSIC
 
 local IS_MAINLINE = WOW_PROJECT_MAINLINE and WOW_PROJECT_ID == WOW_PROJECT_MAINLINE or false
 local IS_CLASSIC_ERA = WOW_PROJECT_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_CLASSIC or false
+local IS_TBC_CLASSIC = WOW_PROJECT_BURNING_CRUSADE_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_BURNING_CRUSADE_CLASSIC or false
+local IS_WRATH_CLASSIC = WOW_PROJECT_WRATH_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_WRATH_CLASSIC or false
 local IS_CATACLYSM_CLASSIC = WOW_PROJECT_CATACLYSM_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_CATACLYSM_CLASSIC or false
-local IS_CLASSIC_FAMILY = IS_CLASSIC_ERA or IS_CATACLYSM_CLASSIC
+local IS_MISTS_CLASSIC = WOW_PROJECT_MISTS_CLASSIC and WOW_PROJECT_ID == WOW_PROJECT_MISTS_CLASSIC or false
+local IS_CLASSIC_FAMILY = IS_CLASSIC_ERA or IS_TBC_CLASSIC or IS_WRATH_CLASSIC or IS_CATACLYSM_CLASSIC or IS_MISTS_CLASSIC
 
 local QUEST_FREQUENCY_DAILY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Daily) or _G.LE_QUEST_FREQUENCY_DAILY
 local QUEST_FREQUENCY_WEEKLY = (Enum and Enum.QuestFrequency and Enum.QuestFrequency.Weekly) or _G.LE_QUEST_FREQUENCY_WEEKLY
@@ -142,7 +148,10 @@ QuestKing.SafeBoolean = SafeBoolean
 QuestKing.SafeString = SafeString
 QuestKing.IsMainline = IS_MAINLINE
 QuestKing.IsClassicEra = IS_CLASSIC_ERA
+QuestKing.IsTBCClassic = IS_TBC_CLASSIC
+QuestKing.IsWrathClassic = IS_WRATH_CLASSIC
 QuestKing.IsCataclysmClassic = IS_CATACLYSM_CLASSIC
+QuestKing.IsMistsClassic = IS_MISTS_CLASSIC
 QuestKing.IsClassicFamily = IS_CLASSIC_FAMILY
 
 
@@ -260,7 +269,7 @@ local function SafeGetQuestInfoByIndex(questLogIndex)
     end
 
     if type(_G.GetQuestLogTitle) == "function" then
-        local ok, title, level, suggestedGroup, _, isHeader, _, frequency, questID, startEvent =
+        local ok, title, level, suggestedGroup, isHeader, isCollapsed, isComplete, frequency, questID, startEvent =
             pcall(_G.GetQuestLogTitle, questLogIndex)
         if ok then
             return {
@@ -270,6 +279,8 @@ local function SafeGetQuestInfoByIndex(questLogIndex)
                 frequency = SafeNumber(frequency, nil),
                 questID = SafeNumber(questID, nil),
                 isHeader = SafeBoolean(isHeader, false),
+                isCollapsed = SafeBoolean(isCollapsed, false),
+                isComplete = isComplete,
                 isHidden = false,
                 isTask = false,
                 campaignID = 0,

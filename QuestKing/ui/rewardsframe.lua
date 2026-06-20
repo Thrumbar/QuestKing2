@@ -187,27 +187,43 @@ local function GetQuestRewardCurrenciesCompat(questID)
         return rewards
     end
 
+    local currencyData = nil
+
     if C_QuestLog and type(C_QuestLog.GetQuestRewardCurrencies) == "function" then
         local ok, data = SafeCall(C_QuestLog.GetQuestRewardCurrencies, questID)
         if ok and type(data) == "table" then
-            for index = 1, #data do
-                local reward = data[index]
-                if type(reward) == "table" then
-                    rewards[#rewards + 1] = {
-                        label = SafeString(reward.name, nil),
-                        texture = reward.texture,
-                        count = SafeNumber(reward.totalRewardAmount, nil)
-                            or SafeNumber(reward.baseRewardAmount, nil)
-                            or SafeNumber(reward.bonusRewardAmount, 0)
-                            or 0,
-                        fontObject = "GameFontHighlightSmall",
-                        quality = SafeNumber(reward.quality, nil),
-                    }
-                end
-            end
-
-            return rewards
+            currencyData = data
         end
+    end
+
+    if not currencyData and C_QuestInfoSystem and type(C_QuestInfoSystem.GetQuestRewardCurrencies) == "function" then
+        local ok, data = SafeCall(C_QuestInfoSystem.GetQuestRewardCurrencies, questID)
+        if ok and type(data) == "table" then
+            currencyData = data
+        end
+    end
+
+    if currencyData then
+        for index = 1, #currencyData do
+            local reward = currencyData[index]
+            if type(reward) == "table" then
+                rewards[#rewards + 1] = {
+                    label = SafeString(reward.name, nil),
+                    texture = reward.texture,
+                    count = SafeNumber(reward.totalRewardAmount, nil)
+                        or SafeNumber(reward.numItems, nil)
+                        or SafeNumber(reward.quantity, nil)
+                        or SafeNumber(reward.baseRewardAmount, nil)
+                        or SafeNumber(reward.bonusRewardAmount, 0)
+                        or 0,
+                    fontObject = "GameFontHighlightSmall",
+                    quality = SafeNumber(reward.quality, nil)
+                        or SafeNumber(reward.rarity, nil),
+                }
+            end
+        end
+
+        return rewards
     end
 
     if type(GetNumQuestLogRewardCurrencies) == "function" and type(GetQuestLogRewardCurrencyInfo) == "function" then

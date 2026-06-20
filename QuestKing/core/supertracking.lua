@@ -25,15 +25,15 @@ end
 
 local function SafePCall(func, ...)
     if type(func) ~= "function" then
-        return false, nil
+        return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
     end
 
-    local ok, a, b, c, d = pcall(func, ...)
+    local ok, a, b, c, d, e, f, g, h, i, j = pcall(func, ...)
     if ok then
-        return true, a, b, c, d
+        return true, a, b, c, d, e, f, g, h, i, j
     end
 
-    return false, nil, nil, nil, nil
+    return false, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
 end
 
 local function QueueTrackerRefresh(forceBuild)
