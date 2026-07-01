@@ -9,7 +9,7 @@ local TRACKER_BOTTOM_PADDING = 6
 local TITLEBAR_LEFT_PADDING = 2
 local TITLEBAR_RIGHT_PADDING = 2
 local TITLEBAR_TEXT_GAP = 4
-local DEFAULT_TITLEBAR_TEXT = "Unlocked - Drag me!"
+local DEFAULT_TITLEBAR_TEXT = "Unlocked - Drag titlebar"
 local BUTTON_SIZE = 15
 local BUTTON_ART_SIZE = 22
 
@@ -174,11 +174,52 @@ local function GetDefaultDragOffsets(point)
     return -12, -160
 end
 
+local VALID_ANCHOR_POINTS = {
+    TOPLEFT = true,
+    TOP = true,
+    TOPRIGHT = true,
+    LEFT = true,
+    CENTER = true,
+    RIGHT = true,
+    BOTTOMLEFT = true,
+    BOTTOM = true,
+    BOTTOMRIGHT = true,
+}
+
+local function NormalizeAnchorPoint(point, fallback)
+    if type(point) == "string" and VALID_ANCHOR_POINTS[point] then
+        return point
+    end
+
+    return fallback or "TOPRIGHT"
+end
+
+local function ResolveRelativeFrame(relativeTo)
+    if type(relativeTo) == "table" then
+        return relativeTo
+    end
+
+    if type(relativeTo) == "string" and type(_G[relativeTo]) == "table" then
+        return _G[relativeTo]
+    end
+
+    return UIParent
+end
+
+local function IsTrackerDragAllowed()
+    return GetOptions().allowDrag == true
+end
+
+local function IsTrackerDragUnlocked()
+    EnsureSavedVariables()
+    return IsTrackerDragAllowed() and QuestKingDB.dragLocked == false
+end
+
 local function GetSavedDragPoint()
     EnsureSavedVariables()
 
-    local point = QuestKingDB.dragOrigin or "TOPRIGHT"
-    local relativePoint = QuestKingDB.dragRelativePoint or point
+    local point = NormalizeAnchorPoint(QuestKingDB.dragOrigin, "TOPRIGHT")
+    local relativePoint = NormalizeAnchorPoint(QuestKingDB.dragRelativePoint, point)
     local x = tonumber(QuestKingDB.dragX)
     local y = tonumber(QuestKingDB.dragY)
 
@@ -271,7 +312,7 @@ function Tracker:ApplyTitlebarState()
     end
 
     local displayMode = QuestKingDBPerChar and QuestKingDBPerChar.displayMode or "combined"
-    local dragLocked = not (QuestKingDB and QuestKingDB.dragLocked == false)
+    local dragUnlocked = IsTrackerDragUnlocked()
 
     local titleColor = (opt.colors or {}).TrackerTitlebarText
     local dimColor = (opt.colors or {}).TrackerTitlebarTextDimmed
@@ -289,7 +330,7 @@ function Tracker:ApplyTitlebarState()
     if self.titlebarText2 then
         SetFontStringStyle(self.titlebarText2, 0.7, 0.5, 0.9)
         self.titlebarText2:SetText(DEFAULT_TITLEBAR_TEXT)
-        self.titlebarText2:SetShown(not dragLocked)
+        self.titlebarText2:SetShown(dragUnlocked)
     end
 
     if self.minimizeButton and self.minimizeButton.label then
@@ -303,14 +344,12 @@ function Tracker:ApplyTitlebarState()
         self.modeButton.label:SetText(GetModeLabel(displayMode))
     end
 
-    if dragLocked then
-        if not SafeSetBackdropColor(titlebar, 0, 0, 0, 0) then
-            SetFlatBackgroundColor(titlebar, 0, 0, 0, 0)
-        end
-    else
+    if dragUnlocked then
         if not SafeSetBackdropColor(titlebar, 0.6, 0, 0.6, 1) then
             SetFlatBackgroundColor(titlebar, 0.6, 0, 0.6, 1)
         end
+    elseif not SafeSetBackdropColor(titlebar, 0, 0, 0, 0) then
+        SetFlatBackgroundColor(titlebar, 0, 0, 0, 0)
     end
 end
 
@@ -422,12 +461,9 @@ function Tracker:Init()
     self:ApplyTitlebarState()
     self:RefreshLayoutMetrics()
 
-    if opt.allowDrag then
-        self:InitDrag()
-    else
-        self:SetPresetPosition()
-        self:CheckDrag()
-    end
+    self:ApplyInitialPosition()
+    QuestKingDB.dragLocked = not opt.allowDrag
+    self:CheckDrag()
 
     self:SetCustomAlpha()
     self:SetCustomScale()
@@ -545,8 +581,10 @@ function Tracker:Resize(lastShown)
 end
 
 function Tracker:SetPresetPosition()
+    EnsureSavedVariables()
+
     local opt = GetOptions()
-    local presetIndex = (QuestKingDBPerChar and QuestKingDBPerChar.trackerPositionPreset) or 1
+    local presetIndex = QuestKingDBPerChar.trackerPositionPreset or 1
     local preset = opt.positionPresets and opt.positionPresets[presetIndex]
 
     if not preset then
@@ -556,11 +594,72 @@ function Tracker:SetPresetPosition()
     end
 
     if not preset then
-        return
+        return false
+    end
+
+    local point = NormalizeAnchorPoint(preset[1], "TOPRIGHT")
+    local relativeTo = ResolveRelativeFrame(preset[2])
+    local relativePoint = NormalizeAnchorPoint(preset[3], point)
+    local xOfs = tonumber(preset[4])
+    local yOfs = tonumber(preset[5])
+
+    if xOfs == nil or yOfs == nil then
+        xOfs, yOfs = GetDefaultDragOffsets(point)
     end
 
     self:ClearAllPoints()
-    self:SetPoint(unpack(preset))
+    self:SetPoint(point, relativeTo, relativePoint, xOfs, yOfs)
+    return true
+end
+
+function Tracker:CaptureCurrentPosition()
+    EnsureSavedVariables()
+
+    if not self.GetPoint then
+        return false
+    end
+
+    local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint(1)
+    if not point then
+        return false
+    end
+
+    point = NormalizeAnchorPoint(point, QuestKingDB.dragOrigin or "TOPRIGHT")
+    relativePoint = NormalizeAnchorPoint(relativePoint, point)
+    xOfs = tonumber(xOfs)
+    yOfs = tonumber(yOfs)
+
+    if xOfs == nil or yOfs == nil then
+        xOfs, yOfs = GetDefaultDragOffsets(point)
+    end
+
+    -- The tracker is restored against UIParent for cross-client stability.
+    -- Only the anchor names and offsets are persisted here; this function does
+    -- not call ClearAllPoints() or SetPoint(), so changing the option cannot
+    -- move the tracker on screen.
+    QuestKingDB.dragOrigin = point
+    QuestKingDB.dragRelativePoint = relativePoint
+    QuestKingDB.dragX = xOfs
+    QuestKingDB.dragY = yOfs
+    return true
+end
+
+function Tracker:ApplyInitialPosition()
+    EnsureSavedVariables()
+
+    if QuestKingDB.dragX ~= nil and QuestKingDB.dragY ~= nil then
+        local point, relativePoint, xOfs, yOfs = GetSavedDragPoint()
+        self:ClearAllPoints()
+        self:SetPoint(point, UIParent, relativePoint, xOfs, yOfs)
+        return true
+    end
+
+    if self:SetPresetPosition() then
+        self:CaptureCurrentPosition()
+        return true
+    end
+
+    return false
 end
 
 function Tracker:CyclePresetPosition()
@@ -576,6 +675,10 @@ function Tracker:CyclePresetPosition()
 end
 
 function Tracker:StartDragging()
+    if self.isMoving or not IsTrackerDragUnlocked() then
+        return
+    end
+
     self.isMoving = true
     self:StartMoving()
 end
@@ -592,8 +695,8 @@ function Tracker:StopDragging()
 
     local point, _, relativePoint, xOfs, yOfs = self:GetPoint(1)
 
-    point = point or QuestKingDB.dragOrigin or "TOPRIGHT"
-    relativePoint = relativePoint or QuestKingDB.dragRelativePoint or point
+    point = NormalizeAnchorPoint(point or QuestKingDB.dragOrigin, "TOPRIGHT")
+    relativePoint = NormalizeAnchorPoint(relativePoint or QuestKingDB.dragRelativePoint, point)
     xOfs = tonumber(xOfs)
     yOfs = tonumber(yOfs)
 
@@ -617,16 +720,20 @@ function Tracker:StopDragging()
 end
 
 function Tracker:InitDrag()
-    local point, relativePoint, xOfs, yOfs = GetSavedDragPoint()
+    EnsureSavedVariables()
 
-    self:ClearAllPoints()
-    self:SetPoint(point, UIParent, relativePoint, xOfs, yOfs)
-
+    self:ApplyInitialPosition()
     self:CheckDrag()
 end
 
 function Tracker:ToggleDrag()
     EnsureSavedVariables()
+
+    if not IsTrackerDragAllowed() then
+        QuestKingDB.dragLocked = true
+        self:CheckDrag()
+        return true
+    end
 
     QuestKingDB.dragLocked = not QuestKingDB.dragLocked
     self:CheckDrag()
@@ -636,14 +743,35 @@ end
 function Tracker:CheckDrag()
     EnsureSavedVariables()
 
-    local dragLocked = QuestKingDB.dragLocked
+    local dragAllowed = IsTrackerDragAllowed()
+    if not dragAllowed then
+        QuestKingDB.dragLocked = true
+    end
 
-    if dragLocked == false then
-        self:EnableMouse(true)
+    local dragUnlocked = dragAllowed and QuestKingDB.dragLocked == false
+    local titlebar = self.titlebar
+
+    if dragUnlocked then
         self:SetMovable(true)
-        self:RegisterForDrag("LeftButton")
-        self:SetScript("OnDragStart", self.StartDragging)
-        self:SetScript("OnDragStop", self.StopDragging)
+        self:EnableMouse(false)
+        self:RegisterForDrag()
+        self:SetScript("OnDragStart", nil)
+        self:SetScript("OnDragStop", nil)
+
+        if titlebar then
+            titlebar:EnableMouse(true)
+            titlebar:RegisterForDrag("LeftButton")
+            titlebar:SetScript("OnDragStart", function(frame)
+                if frame.parent and type(frame.parent.StartDragging) == "function" then
+                    frame.parent:StartDragging()
+                end
+            end)
+            titlebar:SetScript("OnDragStop", function(frame)
+                if frame.parent and type(frame.parent.StopDragging) == "function" then
+                    frame.parent:StopDragging()
+                end
+            end)
+        end
     else
         if self.isMoving then
             self:StopDragging()
@@ -654,6 +782,13 @@ function Tracker:CheckDrag()
         self:RegisterForDrag()
         self:SetScript("OnDragStart", nil)
         self:SetScript("OnDragStop", nil)
+
+        if titlebar then
+            titlebar:EnableMouse(false)
+            titlebar:RegisterForDrag()
+            titlebar:SetScript("OnDragStart", nil)
+            titlebar:SetScript("OnDragStop", nil)
+        end
     end
 
     self:ApplyTitlebarState()

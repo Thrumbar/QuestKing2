@@ -1,3 +1,40 @@
+# QuestKing Config / Tracker Drag Fix
+
+## Changed
+
+- Fixed the **Allow QuestKing tracker dragging** AddOns setting so enabling it also unlocks the tracker drag state.
+- Fixed the tracker drag gate so both conditions are now required before dragging works:
+  - `QuestKing.options.allowDrag == true`
+  - `QuestKingDB.dragLocked == false`
+- Fixed disabling tracker dragging so it forces the tracker locked and moves it back to the configured preset position.
+- Fixed reset defaults so the drag lock state is restored consistently from the default `allowDrag` value.
+- Added safe anchor normalization for saved tracker points and preset points.
+- Resolved preset relative frame names such as `"UIParent"` to the actual global frame before calling `SetPoint`.
+- Updated the unlocked titlebar hint to say `Unlocked - Drag titlebar`, matching the actual drag target.
+- Added the missing `Tooltip Anchor` AddOns setting. The key was already managed by the options system but had no visible control in the panel.
+
+## Files changed
+
+- `QuestKing/ui/optionspanel.lua`
+- `QuestKing/ui/tracker.lua`
+
+## Install
+
+Copy the `QuestKing/ui/optionspanel.lua` and `QuestKing/ui/tracker.lua` files over the matching files in the addon.
+
+## Config Drag Fix v2
+
+### Fixed
+- Enabling **Allow QuestKing tracker dragging** no longer calls `InitDrag()` and no longer re-anchors the tracker.
+- The tracker now keeps its exact current screen position when the option is checked or unchecked.
+- `allowDrag` is now authoritative during saved-option load, so a stale `QuestKingDB.dragLocked = true` value cannot keep the tracker locked while the option is enabled.
+- Dragging is now bound directly to the titlebar frame, matching the UI text and avoiding reliance on the parent frame receiving drag events through a child titlebar.
+- The current tracker anchor is captured before changing lock state, so the next reload restores the same position instead of falling back to an older/default drag point.
+
+### Notes
+- Dragging is intentionally limited to the tracker titlebar. Quest rows remain clickable and are not used as drag handles.
+
+
 # QuestKing Refactor Package
 
 ## Package status

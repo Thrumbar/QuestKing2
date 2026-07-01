@@ -224,6 +224,11 @@ local function QueueTrackerRefresh(forceBuild)
     end
 end
 
+local function SyncDragLockWithAllowDrag()
+    local db = EnsureSavedVariables()
+    db.dragLocked = GetOptions().allowDrag ~= true
+end
+
 local function ApplyBlizzardTrackerSetting()
     if type(QuestKing.RefreshBlizzardTrackerSuppression) == "function" then
         SafeCallMethod(QuestKing, "RefreshBlizzardTrackerSuppression")
@@ -251,13 +256,14 @@ local function ApplySetting(key, value, forceBuild)
     if key == "disableBlizzard" then
         ApplyBlizzardTrackerSetting()
     elseif key == "allowDrag" and type(QuestKing.Tracker) == "table" then
-        if value and type(QuestKing.Tracker.InitDrag) == "function" then
-            QuestKing.Tracker:InitDrag()
-        elseif not value then
-            _G.QuestKingDB.dragLocked = true
-            if type(QuestKing.Tracker.SetPresetPosition) == "function" then
-                QuestKing.Tracker:SetPresetPosition()
-            end
+        db.dragLocked = value ~= true
+
+        if type(QuestKing.Tracker.CaptureCurrentPosition) == "function" then
+            QuestKing.Tracker:CaptureCurrentPosition()
+        end
+
+        if type(QuestKing.Tracker.CheckDrag) == "function" then
+            QuestKing.Tracker:CheckDrag()
         end
     end
 
@@ -284,6 +290,8 @@ local function ApplySavedOptions()
     if db.dbTrackerScale ~= nil then
         db.dbTrackerScale = ClampNumber(db.dbTrackerScale, baselineOptions.trackerScale or 1, 0.25, 3)
     end
+
+    SyncDragLockWithAllowDrag()
 end
 
 local function RestoreBaselineOptions()
@@ -291,9 +299,12 @@ local function RestoreBaselineOptions()
     ClearManagedOptions()
 
     local options = GetOptions()
+    local db = EnsureSavedVariables()
     for key, value in pairs(baselineOptions) do
         options[key] = value
     end
+
+    SyncDragLockWithAllowDrag()
 
     ApplyBlizzardTrackerSetting()
     ApplyTrackerPresentation()
@@ -578,7 +589,7 @@ local function BuildPanel()
 
     y = AddSection("Tracker", y)
     y = AddCheck("disableBlizzard", "Hide Blizzard Objective Tracker", "Uses QuestKing's conservative Blizzard tracker suppression path.", y)
-    y = AddCheck("allowDrag", "Allow QuestKing tracker dragging", "When enabled, the QuestKing tracker can be moved with the mouse.", y)
+    y = AddCheck("allowDrag", "Allow QuestKing tracker dragging", "When enabled, the tracker keeps its current position and can be moved by dragging the titlebar.", y)
     y = AddCheck("hideToggleButtonBorder", "Hide tracker toggle button border", "Keeps the tracker titlebar cleaner by hiding the toggle button border.", y)
     y = AddSlider("trackerScale", "Tracker Scale", "Changes the QuestKing tracker scale.", 0.70, 1.50, 0.05, 2, "%.2f", y - 6)
     y = AddSlider("trackerAlpha", "Tracker Alpha", "Changes the QuestKing tracker transparency.", 0.35, 1.00, 0.05, 2, "%.2f", y)
@@ -614,6 +625,13 @@ local function BuildPanel()
         { label = "Right", value = "right" },
         { label = "Left", value = "left" },
     }, "right", y)
+    y = AddChoice("tooltipAnchor", "Tooltip Anchor", "Controls where tracker tooltips are anchored.", {
+        { label = "Right", value = "ANCHOR_RIGHT" },
+        { label = "Left", value = "ANCHOR_LEFT" },
+        { label = "Cursor", value = "ANCHOR_CURSOR" },
+        { label = "Top", value = "ANCHOR_TOP" },
+        { label = "Bottom", value = "ANCHOR_BOTTOM" },
+    }, "ANCHOR_RIGHT", y)
 
     y = AddSection("Background", y - 8)
     y = AddCheck("enableAdvancedBackground", "Enable advanced background", "Uses QuestKing's framed background panel behind the tracker.", y)

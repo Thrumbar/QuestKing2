@@ -1,3 +1,16 @@
+3.0.13
+- Fixed the **Allow QuestKing tracker dragging** AddOns setting so enabling it also unlocks the tracker drag state.
+- Fixed the tracker drag gate so both conditions are now required before dragging works:
+  - `QuestKing.options.allowDrag == true`
+  - `QuestKingDB.dragLocked == false`
+- Fixed disabling tracker dragging so it forces the tracker locked and moves it back to the configured preset position.
+- Fixed reset defaults so the drag lock state is restored consistently from the default `allowDrag` value.
+- Added safe anchor normalization for saved tracker points and preset points.
+- Resolved preset relative frame names such as `"UIParent"` to the actual global frame before calling `SetPoint`.
+- Updated the unlocked titlebar hint to say `Unlocked - Drag titlebar`, matching the actual drag target.
+- Added the missing `Tooltip Anchor` AddOns setting. The key was already managed by the options system but had no visible control in the panel.
+
+
 3.0.12
 - Fixed Classic-family quest rows not appearing in the QuestKing watch window when QuestKing used legacy quest-log fallbacks.
 - Fixed safe-call wrappers that discarded later GetQuestLogTitle() return values, including the Classic quest ID return value.
