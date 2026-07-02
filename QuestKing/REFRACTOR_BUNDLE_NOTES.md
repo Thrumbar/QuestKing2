@@ -1,3 +1,25 @@
+# QuestKing Click-to-Turn-In Tracker Fix
+
+## Fixed
+- Quest tracker rows now recognize click-to-turn-in quests using the full autocomplete detection path:
+  - `C_QuestLog.IsAutoComplete(questID)`
+  - legacy `GetQuestLogIsAutoComplete(questLogIndex)`
+  - `C_QuestLog.GetInfo(questLogIndex).isAutoComplete`
+  - active Blizzard auto quest popup entries with popup type `COMPLETE`
+- Completed clickable quests now show `Click to turn in` instead of falling through to the generic ready turn-in text.
+- Completed clickable quests keep the ready-check icon marker in the tracker title.
+- Left-clicking a completed clickable quest now calls QuestKing's safer completion opener first, then falls back to the direct `ShowQuestComplete` compatibility path.
+- The `QUEST_AUTOCOMPLETE` event now accepts ReadyForTurnIn-only autocomplete payloads so Blizzard's native auto quest popup can still be added when the older autocomplete boolean is false.
+- Kept the previous `popup.lua` reserved-key syntax fix: `and = true` remains corrected to `["and"] = true`.
+- Added lowercase `core/autocomplete.lua` in the patch bundle so it matches the TOC path exactly.
+
+## Files changed
+- `QuestKing/buttons/quest.lua`
+- `QuestKing/core/events.lua`
+- `QuestKing/buttons/popup.lua`
+- `QuestKing/core/autocomplete.lua`
+- `QuestKing/QuestKing.toc` included for path context only.
+
 # QuestKing Config / Tracker Drag Fix
 
 ## Changed

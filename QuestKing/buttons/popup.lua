@@ -13,8 +13,12 @@ local issecretvalue = _G and _G.issecretvalue or nil
 local find = string.find
 local format = string.format
 local gsub = string.gsub
+local lower = string.lower
 local match = string.match
+local gmatch = string.gmatch
 local pairs = pairs
+local ipairs = ipairs
+local tinsert = table.insert
 local tonumber = tonumber
 local type = type
 
@@ -78,10 +82,42 @@ local QUEST_START_ITEMS_CSV = [[
 ]]
 
 local itemPopups = QuestKing.itemPopups or {}
+local acceptedQuestStartItemIDs = QuestKing.acceptedQuestStartItemIDs or {}
 local questStartItemSet = nil
+local activeQuestTextCache = nil
+local activeQuestSpecialItemCache = nil
+local pendingQuestStartItemID = nil
 local mouseHandlerPopup = {}
+local GetItemInfoCompat
+local GetQuestPopupTitle
+
+-- Known quest-start items that can remain in the player's bags after the
+-- associated quest is accepted.  Without this link, QuestKing can keep showing
+-- the item-start popup after the quest is already in the log.
+local QUEST_ID_BY_START_ITEM_ID = {
+    [23179] = 9324,   -- Flame of Orgrimmar -> Stealing Orgrimmar's Flame
+    [23180] = 9325,   -- Flame of Thunder Bluff -> Stealing Thunder Bluff's Flame
+    [23181] = 9326,   -- Flame of the Undercity -> Stealing the Undercity's Flame
+    [23182] = 9330,   -- Flame of Stormwind -> Stealing Stormwind's Flame
+    [23183] = 9331,   -- Flame of Ironforge -> Stealing Ironforge's Flame
+    [23184] = 9332,   -- Flame of Darnassus -> Stealing Darnassus's Flame
+    [35568] = 11935,  -- Flame of Silvermoon -> Stealing Silvermoon's Flame
+    [35569] = 11933,  -- Flame of the Exodar -> Stealing the Exodar's Flame
+}
+
+local START_ITEM_ID_BY_AUTO_QUEST_ID = {
+    [9324] = 23179,
+    [9325] = 23180,
+    [9326] = 23181,
+    [9330] = 23182,
+    [9331] = 23183,
+    [9332] = 23184,
+    [11935] = 35568,
+    [11933] = 35569,
+}
 
 QuestKing.itemPopups = itemPopups
+QuestKing.acceptedQuestStartItemIDs = acceptedQuestStartItemIDs
 
 local function GetColor(name)
     return opt_colors[name] or DEFAULT_COLORS[name] or { 1, 1, 1, 1 }
@@ -344,6 +380,315 @@ local function GetQuestLogIndexByIDCompat(questID)
     return nil
 end
 
+local function IsQuestFlaggedCompletedCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted then
+        local ok, completed = SafeCall(C_QuestLog.IsQuestFlaggedCompleted, questID)
+        if ok then
+            return completed and true or false
+        end
+    end
+
+    if type(IsQuestFlaggedCompleted) == "function" then
+        local ok, completed = SafeCall(IsQuestFlaggedCompleted, questID)
+        if ok then
+            return completed and true or false
+        end
+    end
+
+    return false
+end
+
+local function ResetQuestPopupCaches()
+    activeQuestTextCache = nil
+    activeQuestSpecialItemCache = nil
+end
+
+local function ExtractItemIDFromLink(itemLink)
+    return SafeNumber(SafeStringMatch(itemLink, "item:(%d+)"), nil)
+end
+
+local function GetNumQuestLogEntriesCompat()
+    if C_QuestLog and C_QuestLog.GetNumQuestLogEntries then
+        local ok, numEntries = SafeCall(C_QuestLog.GetNumQuestLogEntries)
+        if ok then
+            return SafeNumber(numEntries, 0) or 0
+        end
+    end
+
+    if type(GetNumQuestLogEntries) == "function" then
+        local ok, numEntries = SafeCall(GetNumQuestLogEntries)
+        if ok then
+            return SafeNumber(numEntries, 0) or 0
+        end
+    end
+
+    return 0
+end
+
+local function GetQuestInfoByLogIndexCompat(questLogIndex)
+    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
+        return nil, nil, true
+    end
+
+    if C_QuestLog and C_QuestLog.GetInfo then
+        local ok, info = SafeCall(C_QuestLog.GetInfo, questLogIndex)
+        if ok and type(info) == "table" then
+            local title = SafeString(info.title, nil)
+            local questID = SafeNumber(info.questID, nil)
+            local isHeader = info.isHeader and true or false
+            return title, questID, isHeader
+        end
+    end
+
+    if type(GetQuestLogTitle) == "function" then
+        local ok, title, _, _, _, isHeader, _, _, questID = SafeCall(GetQuestLogTitle, questLogIndex)
+        if ok then
+            return SafeString(title, nil), SafeNumber(questID, nil), isHeader and true or false
+        end
+    end
+
+    return nil, nil, true
+end
+
+local function GetQuestLogSpecialItemInfoCompat(questLogIndex)
+    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
+        return nil, nil, nil, nil
+    end
+
+    if type(GetQuestLogSpecialItemInfo) == "function" then
+        local ok, itemLink, itemTexture, charges, itemShowWhenComplete = SafeCall(GetQuestLogSpecialItemInfo, questLogIndex)
+        if ok then
+            return SafeString(itemLink, nil), SafeNumber(itemTexture, nil), SafeNumber(charges, nil), itemShowWhenComplete
+        end
+    end
+
+    return nil, nil, nil, nil
+end
+
+local function GetQuestObjectiveTextsCompat(questID, questLogIndex)
+    local objectiveTexts = {}
+
+    if C_QuestLog and C_QuestLog.GetQuestObjectives and type(questID) == "number" and questID > 0 then
+        local ok, objectives = SafeCall(C_QuestLog.GetQuestObjectives, questID)
+        if ok and type(objectives) == "table" then
+            for _, objective in ipairs(objectives) do
+                if type(objective) == "table" then
+                    local text = SafeString(objective.text, nil)
+                    if text then
+                        tinsert(objectiveTexts, text)
+                    end
+                end
+            end
+        end
+    end
+
+    if #objectiveTexts == 0 and type(GetNumQuestLeaderBoards) == "function" and type(GetQuestLogLeaderBoard) == "function" then
+        local okCount, count = SafeCall(GetNumQuestLeaderBoards, questLogIndex)
+        count = okCount and (SafeNumber(count, 0) or 0) or 0
+        for objectiveIndex = 1, count do
+            local okText, text = SafeCall(GetQuestLogLeaderBoard, objectiveIndex, questLogIndex)
+            text = okText and SafeString(text, nil) or nil
+            if text then
+                tinsert(objectiveTexts, text)
+            end
+        end
+    end
+
+    return objectiveTexts
+end
+
+local function NormalizeMatchText(text)
+    text = SafeString(text, nil)
+    if not text then
+        return nil
+    end
+
+    local ok, normalized = pcall(lower, text)
+    if not ok or type(normalized) ~= "string" then
+        return nil
+    end
+
+    normalized = gsub(normalized, "[%p%c]", " ")
+    normalized = gsub(normalized, "%s+", " ")
+    return " " .. normalized .. " "
+end
+
+local STOP_WORDS = {
+    a = true,
+    an = true,
+    ["and"] = true,
+    of = true,
+    the = true,
+    to = true,
+}
+
+local function GetMeaningfulTokens(text)
+    local normalized = NormalizeMatchText(text)
+    local tokens = {}
+
+    if not normalized then
+        return tokens
+    end
+
+    for token in gmatch(normalized, "%S+") do
+        if #token > 1 and not STOP_WORDS[token] then
+            tinsert(tokens, token)
+        end
+    end
+
+    return tokens
+end
+
+local function TextHasAllItemTokens(text, itemName)
+    local normalizedText = NormalizeMatchText(text)
+    local itemTokens = GetMeaningfulTokens(itemName)
+
+    if not normalizedText or #itemTokens < 2 then
+        return false
+    end
+
+    for _, token in ipairs(itemTokens) do
+        if not find(normalizedText, " " .. token .. " ", 1, true) then
+            return false
+        end
+    end
+
+    return true
+end
+
+local function BuildActiveQuestTextCache()
+    if activeQuestTextCache then
+        return activeQuestTextCache
+    end
+
+    local texts = {}
+    local numEntries = GetNumQuestLogEntriesCompat()
+
+    for questLogIndex = 1, numEntries do
+        local title, questID, isHeader = GetQuestInfoByLogIndexCompat(questLogIndex)
+        if not isHeader then
+            if title then
+                tinsert(texts, title)
+            end
+
+            local objectiveTexts = GetQuestObjectiveTextsCompat(questID, questLogIndex)
+            for _, objectiveText in ipairs(objectiveTexts) do
+                tinsert(texts, objectiveText)
+            end
+        end
+    end
+
+    activeQuestTextCache = texts
+    return texts
+end
+
+local function BuildActiveQuestSpecialItemSet()
+    if activeQuestSpecialItemCache then
+        return activeQuestSpecialItemCache
+    end
+
+    local activeItems = {}
+    local numEntries = GetNumQuestLogEntriesCompat()
+
+    for questLogIndex = 1, numEntries do
+        local _, _, isHeader = GetQuestInfoByLogIndexCompat(questLogIndex)
+        if not isHeader then
+            local itemLink = GetQuestLogSpecialItemInfoCompat(questLogIndex)
+            local itemID = ExtractItemIDFromLink(itemLink)
+            if itemID then
+                activeItems[itemID] = true
+            end
+        end
+    end
+
+    activeQuestSpecialItemCache = activeItems
+    return activeItems
+end
+
+local function IsQuestStartItemMentionedByActiveQuest(itemID, itemName)
+    itemName = SafeString(itemName, nil)
+
+    if not itemName then
+        local resolvedName = GetItemInfoCompat(itemID)
+        itemName = SafeString(resolvedName, nil)
+    end
+
+    if not itemName then
+        return false
+    end
+
+    local activeTexts = BuildActiveQuestTextCache()
+    for _, text in ipairs(activeTexts) do
+        if TextHasAllItemTokens(text, itemName) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function RemoveAcceptedQuestStartItemForQuest(questID)
+    local changed = false
+
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    for itemID, acceptedQuestID in pairs(acceptedQuestStartItemIDs) do
+        if acceptedQuestID == questID then
+            acceptedQuestStartItemIDs[itemID] = nil
+            changed = true
+        end
+    end
+
+    return changed
+end
+
+local function ShouldHideQuestStartItemPopup(itemID, itemName)
+    local activeSpecialItems = BuildActiveQuestSpecialItemSet()
+    if activeSpecialItems[itemID] then
+        return true
+    end
+
+    if acceptedQuestStartItemIDs[itemID] ~= nil then
+        return true
+    end
+
+    local questID = QUEST_ID_BY_START_ITEM_ID[itemID]
+    if questID and (GetQuestLogIndexByIDCompat(questID) ~= nil or IsQuestFlaggedCompletedCompat(questID)) then
+        return true
+    end
+
+    return IsQuestStartItemMentionedByActiveQuest(itemID, itemName)
+end
+
+local function ShouldSuppressAutoQuestPopup(questID, popupType)
+    if popupType ~= "OFFER" then
+        return false
+    end
+
+    local itemID = START_ITEM_ID_BY_AUTO_QUEST_ID[questID]
+    if itemID and itemPopups[itemID] ~= nil and FindContainerItemByID(itemID) then
+        return true
+    end
+
+    local questTitle = GetQuestPopupTitle(questID, GetQuestLogIndexByIDCompat(questID))
+    for popupItemID, popupInfo in pairs(itemPopups) do
+        if FindContainerItemByID(popupItemID) then
+            local itemName = popupInfo and popupInfo.name or nil
+            if TextHasAllItemTokens(questTitle, itemName) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 local function RemoveAutoQuestPopUpCompat(questID)
     if type(RemoveAutoQuestPopUp) == "function" and type(questID) == "number" and questID > 0 then
         SafeCall(RemoveAutoQuestPopUp, questID)
@@ -434,7 +779,7 @@ local function BuildQuestStartItemSet()
     return questStartItemSet
 end
 
-local function GetItemInfoCompat(itemID)
+GetItemInfoCompat = function(itemID)
     if type(itemID) ~= "number" or itemID <= 0 then
         return nil, nil, nil
     end
@@ -476,6 +821,14 @@ local function TrackQuestStartItem(itemID, itemName, playAlert)
         return false
     end
 
+    if ShouldHideQuestStartItemPopup(itemID, itemName) then
+        if itemPopups[itemID] ~= nil then
+            itemPopups[itemID] = nil
+            return true
+        end
+        return false
+    end
+
     local wasTracked = itemPopups[itemID] ~= nil
     local resolvedName, itemLink, itemTexture = GetItemInfoCompat(itemID)
 
@@ -493,6 +846,8 @@ local function TrackQuestStartItem(itemID, itemName, playAlert)
 end
 
 function QuestKing:ScanQuestStartItemPopups(playAlert)
+    ResetQuestPopupCaches()
+
     if opt.enableItemPopups ~= true then
         return false
     end
@@ -520,7 +875,7 @@ function QuestKing:ScanQuestStartItemPopups(playAlert)
     return changed
 end
 
-local function GetQuestPopupTitle(questID, questLogIndex)
+GetQuestPopupTitle = function(questID, questLogIndex)
     if type(questLogIndex) == "number" and questLogIndex > 0 and type(QuestKing.GetQuestTaggedTitle) == "function" then
         local ok, taggedTitle = SafeCall(QuestKing.GetQuestTaggedTitle, questLogIndex)
         if ok and taggedTitle and taggedTitle ~= "" then
@@ -621,8 +976,10 @@ local function SetButtonToQuestPopup(button, questID, popupType)
 end
 
 local function CleanupStaleItemPopups()
-    for itemID in pairs(itemPopups) do
-        if not FindContainerItemByID(itemID) then
+    ResetQuestPopupCaches()
+
+    for itemID, popupInfo in pairs(itemPopups) do
+        if not FindContainerItemByID(itemID) or ShouldHideQuestStartItemPopup(itemID, popupInfo and popupInfo.name or nil) then
             itemPopups[itemID] = nil
         end
     end
@@ -693,6 +1050,36 @@ local function OpenQuestPopupTooltip(owner, questID, popupType, questLogIndex)
     tooltip:AddLine("Left-click to open the popup", 0.7, 0.7, 0.7)
     tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
     tooltip:Show()
+end
+
+
+function QuestKing:OnQuestStartItemQuestAccepted(questID)
+    if not pendingQuestStartItemID then
+        return false
+    end
+
+    local itemID = pendingQuestStartItemID
+    local acceptedQuestID = SafeNumber(questID, nil)
+
+    pendingQuestStartItemID = nil
+    acceptedQuestStartItemIDs[itemID] = acceptedQuestID or true
+    itemPopups[itemID] = nil
+    ResetQuestPopupCaches()
+    QueueTrackerRefresh(true)
+    return true
+end
+
+function QuestKing:OnQuestStartItemQuestRemoved(questID)
+    local acceptedQuestID = SafeNumber(questID, nil)
+    local changed = acceptedQuestID and RemoveAcceptedQuestStartItemForQuest(acceptedQuestID) or false
+
+    ResetQuestPopupCaches()
+
+    if changed then
+        QueueTrackerRefresh(true)
+    end
+
+    return changed
 end
 
 function QuestKing:ParseLoot(msg)
@@ -766,7 +1153,7 @@ function QuestKing:UpdateTrackerPopups()
         questID = okPopup and (SafeNumber(questID, nil)) or nil
         popupType = okPopup and SafeString(popupType, nil) or nil
 
-        if questID and popupType then
+        if questID and popupType and not ShouldSuppressAutoQuestPopup(questID, popupType) then
             local button = WatchButton:GetKeyed("popup", "quest:" .. tostring(questID) .. ":" .. popupType)
             SetButtonToQuestPopup(button, questID, popupType)
         end
@@ -789,12 +1176,15 @@ function mouseHandlerPopup:ButtonOnClick(mouse)
             return
         end
 
+        pendingQuestStartItemID = itemID
         if UseContainerItemByID(itemID) then
             itemPopups[itemID] = nil
             QueueTrackerRefresh(true)
         elseif not FindContainerItemByID(itemID) then
             itemPopups[itemID] = nil
             QueueTrackerRefresh(true)
+        else
+            pendingQuestStartItemID = nil
         end
         return
     end

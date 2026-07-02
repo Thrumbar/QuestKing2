@@ -413,6 +413,35 @@ local function IsAutoCompleteQuestCompat(questID, questLogIndex)
         end
     end
 
+    if type(questLogIndex) == "number" and C_QuestLog and C_QuestLog.GetInfo then
+        local ok, info = SafeCall(C_QuestLog.GetInfo, questLogIndex)
+        if ok and type(info) == "table" and info.isAutoComplete then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function IsQuestReadyForTurnInCompat(questID, questLogIndex)
+    if type(questID) == "number" and questID > 0 and C_QuestLog and C_QuestLog.ReadyForTurnIn then
+        local ok, ready = SafeCall(C_QuestLog.ReadyForTurnIn, questID)
+        if ok and ready then
+            return true
+        end
+    end
+
+    if (type(questLogIndex) ~= "number" or questLogIndex <= 0) and type(questID) == "number" then
+        questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    end
+
+    if type(questLogIndex) == "number" and type(_G.GetQuestLogIsComplete) == "function" then
+        local ok, complete = SafeCall(_G.GetQuestLogIsComplete, questLogIndex)
+        if ok and (complete == true or complete == 1) then
+            return true
+        end
+    end
+
     return false
 end
 
@@ -665,6 +694,7 @@ Events.QUEST_ACCEPTED = function(self, event, ...)
     local isTaskQuest = IsTaskQuestCompat(questID)
 
     TryAutoWatchQuest(questLogIndex, questID, false)
+    SafeCallMethod(QuestKing, "OnQuestStartItemQuestAccepted", questID)
 
     if isTaskQuest then
         PlaySoundSafe(SOUNDKIT and SOUNDKIT.UI_SCENARIO_STAGE_END, nil)
@@ -679,13 +709,15 @@ end
 
 Events.QUEST_REMOVED = function(self, event, questID)
     SafeCallMethod(QuestKing, "ClearDummyTask", questID)
+    SafeCallMethod(QuestKing, "OnQuestStartItemQuestRemoved", questID)
     UpdateTrackerAndQueueQuestStateRefresh()
 end
 
 Events.QUEST_AUTOCOMPLETE = function(self, event, questID)
     local questLogIndex = GetQuestLogIndexByIDCompat(questID)
 
-    if IsAutoCompleteQuestCompat(questID, questLogIndex) and type(_G.AddAutoQuestPopUp) == "function" then
+    if (IsAutoCompleteQuestCompat(questID, questLogIndex) or IsQuestReadyForTurnInCompat(questID, questLogIndex))
+        and type(_G.AddAutoQuestPopUp) == "function" then
         local ok, shown = SafeCall(_G.AddAutoQuestPopUp, questID, "COMPLETE")
         if ok and shown then
             PlaySoundSafe(SOUNDKIT and SOUNDKIT.UI_AUTO_QUEST_COMPLETE, nil)
@@ -696,6 +728,8 @@ Events.QUEST_AUTOCOMPLETE = function(self, event, questID)
 end
 
 Events.QUEST_TURNED_IN = function(self, event, questID, xp, money)
+    SafeCallMethod(QuestKing, "OnQuestStartItemQuestRemoved", questID)
+
     if IsTaskQuestCompat(questID) or IsPreyQuestCompat(questID) then
         SafeCallMethod(QuestKing, "OnTaskTurnedIn", questID, xp, money)
     end

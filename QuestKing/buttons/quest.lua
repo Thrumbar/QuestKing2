@@ -387,6 +387,53 @@ local function IsQuestAutoComplete(questID, questLogIndex)
         end
     end
 
+    if questLogIndex and C_QuestLog and C_QuestLog.GetInfo then
+        local ok, info = SafeCall(C_QuestLog.GetInfo, questLogIndex)
+        if ok and type(info) == "table" and info.isAutoComplete then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function HasCompleteAutoQuestPopup(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if type(_G.GetNumAutoQuestPopUps) ~= "function" or type(_G.GetAutoQuestPopUp) ~= "function" then
+        return false
+    end
+
+    local okCount, count = SafeCall(_G.GetNumAutoQuestPopUps)
+    if not okCount or type(count) ~= "number" or count <= 0 then
+        return false
+    end
+
+    for index = 1, count do
+        local okPopup, popupQuestID, popupType = SafeCall(_G.GetAutoQuestPopUp, index)
+        if okPopup and popupQuestID == questID and popupType == "COMPLETE" then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function IsQuestClickToTurnIn(questID, questLogIndex)
+    if type(_G.ShowQuestComplete) ~= "function" then
+        return false
+    end
+
+    if IsQuestAutoComplete(questID, questLogIndex) then
+        return true
+    end
+
+    if HasCompleteAutoQuestPopup(questID) then
+        return true
+    end
+
     return false
 end
 
@@ -464,7 +511,11 @@ local function OpenQuestFromWatch(questID, questLogIndex)
         return true
     end
 
-    if IsQuestCompleteCompat(questID) and IsQuestAutoComplete(questID, questLogIndex) then
+    if IsQuestCompleteCompat(questID) and IsQuestClickToTurnIn(questID, questLogIndex) then
+        if type(QuestKing.ShowQuestCompleteSafe) == "function" and QuestKing.ShowQuestCompleteSafe(questID, questLogIndex) then
+            return true
+        end
+
         if ShowQuestCompleteCompat(questID, questLogIndex) then
             return true
         end
@@ -1054,22 +1105,15 @@ local function ShouldShowQuestObjective(row, isQuestComplete)
     return opt_showCompletedObjectives and true or false
 end
 
-local function GetQuestCompletionLineText(questID, isAutoComplete)
-    if isAutoComplete then
+local function GetQuestCompletionLineText(questID, isClickToTurnIn)
+    if isClickToTurnIn then
         if questID and IsTaskQuest(questID) then
             return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE_TASK
                 or QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
-                or QUEST_WATCH_QUEST_READY
-                or QUEST_WATCH_QUEST_COMPLETE
-                or COMPLETE
-                or "Complete"
+                or "Click to complete"
         end
 
-        return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
-            or QUEST_WATCH_QUEST_READY
-            or QUEST_WATCH_QUEST_COMPLETE
-            or COMPLETE
-            or "Complete"
+        return "Click to turn in"
     end
 
     return QUEST_WATCH_QUEST_READY
@@ -1355,7 +1399,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         return
     end
 
-    local isAutoCompleteQuest = IsQuestAutoComplete(data.questID, questLogIndex)
+    local isClickToTurnInQuest = IsQuestClickToTurnIn(data.questID, questLogIndex)
 
     local itemLink, itemTexture, itemCharges, itemShowWhenComplete = GetQuestLogSpecialItemInfoCompat(questLogIndex)
     if itemShowWhenComplete == false and data.isComplete then
@@ -1423,7 +1467,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     end
 
     if button.title then
-        if data.isComplete and isAutoCompleteQuest then
+        if data.isComplete and isClickToTurnInQuest then
             button.title:SetText("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t " .. displayTitle)
             button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
         else
@@ -1488,7 +1532,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
 
     if data.isComplete then
         local line = button:AddLine(
-            ("  %s"):format(GetQuestCompletionLineText(data.questID, isAutoCompleteQuest)),
+            ("  %s"):format(GetQuestCompletionLineText(data.questID, isClickToTurnInQuest)),
             nil,
             FINISHED_COLOR.r,
             FINISHED_COLOR.g,
