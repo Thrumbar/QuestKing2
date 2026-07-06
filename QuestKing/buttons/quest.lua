@@ -4,6 +4,10 @@ local C_QuestLog = C_QuestLog
 local C_TaskQuest = C_TaskQuest
 local C_SuperTrack = C_SuperTrack
 local C_CampaignInfo = C_CampaignInfo
+local C_QuestInfoSystem = C_QuestInfoSystem
+local C_QuestLine = C_QuestLine
+local C_Map = C_Map
+local Enum = Enum
 
 local WatchButton = QuestKing and QuestKing.WatchButton
 local Compat = QuestKing and QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
@@ -13,7 +17,9 @@ local opt_showCompletedObjectives = opt.showCompletedObjectives
 
 local floor = math.floor
 local match = string.match
+local strfind = string.find
 local sort = table.sort
+local ipairs = ipairs
 local tonumber_raw = tonumber
 local tostring = tostring
 local type = type
@@ -35,6 +41,7 @@ local COMPLETED_ALPHA = 0.65
 local QUEST_KIND = {
     NORMAL = "normal",
     CAMPAIGN = "campaign",
+    CAMPAIGN_REQUIREMENT = "campaign_requirement",
     TASK = "task",
     WORLD_QUEST = "world_quest",
     SPECIAL_ASSIGNMENT = "special_assignment",
@@ -387,53 +394,6 @@ local function IsQuestAutoComplete(questID, questLogIndex)
         end
     end
 
-    if questLogIndex and C_QuestLog and C_QuestLog.GetInfo then
-        local ok, info = SafeCall(C_QuestLog.GetInfo, questLogIndex)
-        if ok and type(info) == "table" and info.isAutoComplete then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function HasCompleteAutoQuestPopup(questID)
-    if type(questID) ~= "number" or questID <= 0 then
-        return false
-    end
-
-    if type(_G.GetNumAutoQuestPopUps) ~= "function" or type(_G.GetAutoQuestPopUp) ~= "function" then
-        return false
-    end
-
-    local okCount, count = SafeCall(_G.GetNumAutoQuestPopUps)
-    if not okCount or type(count) ~= "number" or count <= 0 then
-        return false
-    end
-
-    for index = 1, count do
-        local okPopup, popupQuestID, popupType = SafeCall(_G.GetAutoQuestPopUp, index)
-        if okPopup and popupQuestID == questID and popupType == "COMPLETE" then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function IsQuestClickToTurnIn(questID, questLogIndex)
-    if type(_G.ShowQuestComplete) ~= "function" then
-        return false
-    end
-
-    if IsQuestAutoComplete(questID, questLogIndex) then
-        return true
-    end
-
-    if HasCompleteAutoQuestPopup(questID) then
-        return true
-    end
-
     return false
 end
 
@@ -511,11 +471,7 @@ local function OpenQuestFromWatch(questID, questLogIndex)
         return true
     end
 
-    if IsQuestCompleteCompat(questID) and IsQuestClickToTurnIn(questID, questLogIndex) then
-        if type(QuestKing.ShowQuestCompleteSafe) == "function" and QuestKing.ShowQuestCompleteSafe(questID, questLogIndex) then
-            return true
-        end
-
+    if IsQuestCompleteCompat(questID) and IsQuestAutoComplete(questID, questLogIndex) then
         if ShowQuestCompleteCompat(questID, questLogIndex) then
             return true
         end
@@ -766,6 +722,18 @@ local function GetActivePreyQuest()
     return nil
 end
 
+local function IsCampaignClassification(classification)
+    return Enum
+        and Enum.QuestClassification
+        and classification == Enum.QuestClassification.Campaign
+end
+
+local function IsCampaignStateStalled(state)
+    return Enum
+        and Enum.CampaignState
+        and state == Enum.CampaignState.Stalled
+end
+
 local function IsCampaignQuest(questID, info)
     if type(questID) ~= "number" or questID <= 0 then
         return false
@@ -774,6 +742,10 @@ local function IsCampaignQuest(questID, info)
     if type(info) == "table" then
         if info.isCampaign ~= nil then
             return info.isCampaign and true or false
+        end
+
+        if IsCampaignClassification(info.questClassification) then
+            return true
         end
 
         local campaignID = SafeNumber(info.campaignID, 0) or 0
@@ -790,6 +762,10 @@ local function IsCampaignQuest(questID, info)
                 return liveInfo.isCampaign and true or false
             end
 
+            if IsCampaignClassification(liveInfo.questClassification) then
+                return true
+            end
+
             local campaignID = SafeNumber(liveInfo.campaignID, 0) or 0
             if campaignID > 0 then
                 return true
@@ -801,6 +777,13 @@ local function IsCampaignQuest(questID, info)
         local ok, isCampaign = SafeCall(C_CampaignInfo.IsCampaignQuest, questID)
         if ok then
             return isCampaign and true or false
+        end
+    end
+
+    if C_QuestInfoSystem and C_QuestInfoSystem.GetQuestClassification then
+        local ok, classification = SafeCall(C_QuestInfoSystem.GetQuestClassification, questID)
+        if ok and IsCampaignClassification(classification) then
+            return true
         end
     end
 
@@ -924,8 +907,85 @@ local function SetSuperTrackedQuestIDCompat(questID)
     return false
 end
 
+local function GetSuperTrackedQuestOfferIDCompat()
+    if not (C_SuperTrack and C_SuperTrack.GetSuperTrackedMapPin) then
+        return nil
+    end
+
+    local ok, pinType, pinID = SafeCall(C_SuperTrack.GetSuperTrackedMapPin)
+    if not ok then
+        return nil
+    end
+
+    if Enum and Enum.SuperTrackingMapPinType and pinType == Enum.SuperTrackingMapPinType.QuestOffer then
+        return SafeNumber(pinID, nil)
+    end
+
+    return nil
+end
+
+local function SetSuperTrackedQuestOfferCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if not (C_SuperTrack and C_SuperTrack.SetSuperTrackedMapPin and Enum and Enum.SuperTrackingMapPinType) then
+        return false
+    end
+
+    local ok = SafeCall(C_SuperTrack.SetSuperTrackedMapPin, Enum.SuperTrackingMapPinType.QuestOffer, questID)
+    return ok and true or false
+end
+
+local function ClearSuperTrackedQuestOfferCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if GetSuperTrackedQuestOfferIDCompat() ~= questID then
+        return false
+    end
+
+    if C_SuperTrack and C_SuperTrack.ClearSuperTrackedMapPin then
+        local ok = SafeCall(C_SuperTrack.ClearSuperTrackedMapPin)
+        return ok and true or false
+    end
+
+    return false
+end
+
+local function OpenWorldMapToMapIDCompat(mapID)
+    mapID = SafeNumber(mapID, nil)
+    if not mapID then
+        return false
+    end
+
+    if _G.WorldMapFrame_OpenToMapID then
+        local ok = SafeCall(_G.WorldMapFrame_OpenToMapID, mapID)
+        if ok then
+            return true
+        end
+    end
+
+    if _G.OpenWorldMap then
+        local ok = SafeCall(_G.OpenWorldMap, mapID)
+        if ok then
+            return true
+        end
+    end
+
+    if _G.ToggleWorldMap then
+        local ok = SafeCall(_G.ToggleWorldMap)
+        if ok then
+            return true
+        end
+    end
+
+    return false
+end
+
 local function GetKindHeader(kind)
-    if kind == QUEST_KIND.CAMPAIGN then
+    if kind == QUEST_KIND.CAMPAIGN or kind == QUEST_KIND.CAMPAIGN_REQUIREMENT then
         return CAMPAIGN_HEADER
     elseif kind == QUEST_KIND.WORLD_QUEST then
         return WORLD_QUEST_HEADER
@@ -943,6 +1003,8 @@ end
 local function GetKindOrder(kind)
     if kind == QUEST_KIND.CAMPAIGN then
         return 10
+    elseif kind == QUEST_KIND.CAMPAIGN_REQUIREMENT then
+        return 11
     elseif kind == QUEST_KIND.PREY then
         return 20
     elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
@@ -958,6 +1020,8 @@ end
 
 local function GetKindPrefix(kind)
     if kind == QUEST_KIND.CAMPAIGN then
+        return "[Campaign]"
+    elseif kind == QUEST_KIND.CAMPAIGN_REQUIREMENT then
         return "[Campaign]"
     elseif kind == QUEST_KIND.WORLD_QUEST then
         return "[World]"
@@ -1105,15 +1169,22 @@ local function ShouldShowQuestObjective(row, isQuestComplete)
     return opt_showCompletedObjectives and true or false
 end
 
-local function GetQuestCompletionLineText(questID, isClickToTurnIn)
-    if isClickToTurnIn then
+local function GetQuestCompletionLineText(questID, isAutoComplete)
+    if isAutoComplete then
         if questID and IsTaskQuest(questID) then
             return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE_TASK
                 or QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
-                or "Click to complete"
+                or QUEST_WATCH_QUEST_READY
+                or QUEST_WATCH_QUEST_COMPLETE
+                or COMPLETE
+                or "Complete"
         end
 
-        return "Click to turn in"
+        return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
+            or QUEST_WATCH_QUEST_READY
+            or QUEST_WATCH_QUEST_COMPLETE
+            or COMPLETE
+            or "Complete"
     end
 
     return QUEST_WATCH_QUEST_READY
@@ -1353,6 +1424,115 @@ function mouseHandlerQuest:TitleButtonOnLeave()
     end
 end
 
+local IsQuestInLogCompat
+
+local mouseHandlerCampaignRequirement = {}
+
+local function ResolveCampaignRequirementSource(source)
+    local button = source
+
+    if source and source.parent then
+        button = source.parent
+    end
+
+    if not button then
+        return nil, nil
+    end
+
+    return button, button._campaignRequirement
+end
+
+local function TrackCampaignRequirementPickup(row, mouse)
+    if type(row) ~= "table" then
+        return
+    end
+
+    local questID = SafeNumber(row.questOfferQuestID or row.questID, nil)
+
+    if questID and IsQuestInLogCompat(questID) then
+        local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+        SetSuperTrackedQuestIDCompat(questID)
+        OpenQuestFromWatch(questID, questLogIndex)
+        return
+    end
+
+    if mouse == "RightButton" then
+        if OpenWorldMapToMapIDCompat(row.mapID) then
+            return
+        end
+    end
+
+    if questID then
+        if GetSuperTrackedQuestOfferIDCompat() == questID then
+            ClearSuperTrackedQuestOfferCompat(questID)
+        else
+            SetSuperTrackedQuestOfferCompat(questID)
+        end
+
+        QueueTrackerRefresh(false)
+        return
+    end
+
+    OpenWorldMapToMapIDCompat(row.mapID)
+end
+
+function mouseHandlerCampaignRequirement:TitleButtonOnClick(mouse)
+    local _, row = ResolveCampaignRequirementSource(self)
+    TrackCampaignRequirementPickup(row, mouse)
+end
+
+function mouseHandlerCampaignRequirement:ButtonOnClick(mouse)
+    local _, row = ResolveCampaignRequirementSource(self)
+    TrackCampaignRequirementPickup(row, mouse)
+end
+
+function mouseHandlerCampaignRequirement:TitleButtonOnEnter()
+    local button, row = ResolveCampaignRequirementSource(self)
+    if not button or type(row) ~= "table" then
+        return
+    end
+
+    local tooltip = QuestKing.PrepareTooltip and QuestKing:PrepareTooltip(self, opt.tooltipAnchor or "ANCHOR_RIGHT")
+    if not tooltip then
+        return
+    end
+
+    local title = SafeString(row.requiredQuestTitle, nil) or SafeString(row.title, CAMPAIGN_HEADER) or CAMPAIGN_HEADER
+    tooltip:SetText(title, 1, 0.82, 0)
+
+    AddTooltipLine(tooltip, "Campaign pickup", 0.8, 0.9, 1)
+
+    if row.questLineName and row.questLineName ~= "" and row.questLineName ~= title then
+        AddTooltipLine(tooltip, row.questLineName, 0.85, 0.85, 0.85)
+    end
+
+    if row.failureText and row.failureText ~= "" and row.failureText ~= row.text then
+        AddTooltipLine(tooltip, row.failureText, 1, 1, 1)
+    elseif row.text and row.text ~= "" then
+        AddTooltipLine(tooltip, row.text, 1, 1, 1)
+    end
+
+    if row.questOfferQuestID and GetSuperTrackedQuestOfferIDCompat() == row.questOfferQuestID then
+        AddTooltipLine(tooltip, "Pickup is being tracked", 1, 0.82, 0.2)
+    end
+
+    if row.questOfferQuestID then
+        AddTooltipLine(tooltip, "Left-click to track pickup", 0.7, 0.7, 0.7)
+    end
+
+    if row.mapID then
+        AddTooltipLine(tooltip, "Right-click to view location", 0.7, 0.7, 0.7)
+    end
+
+    tooltip:Show()
+end
+
+function mouseHandlerCampaignRequirement:TitleButtonOnLeave()
+    if QuestKing.HideTooltip then
+        QuestKing:HideTooltip()
+    end
+end
+
 function QuestKing:GetQuestDisplayData(questLogIndex)
     local info = GetQuestInfoByLogIndex(questLogIndex)
     if not info or info.isHeader then
@@ -1399,7 +1579,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
         return
     end
 
-    local isClickToTurnInQuest = IsQuestClickToTurnIn(data.questID, questLogIndex)
+    local isAutoCompleteQuest = IsQuestAutoComplete(data.questID, questLogIndex)
 
     local itemLink, itemTexture, itemCharges, itemShowWhenComplete = GetQuestLogSpecialItemInfoCompat(questLogIndex)
     if itemShowWhenComplete == false and data.isComplete then
@@ -1467,7 +1647,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
     end
 
     if button.title then
-        if data.isComplete and isClickToTurnInQuest then
+        if data.isComplete and isAutoCompleteQuest then
             button.title:SetText("|TInterface\\RAIDFRAME\\ReadyCheck-Ready:0:0:1:1|t " .. displayTitle)
             button.title:SetTextColor(TITLE_COMPLETE_COLOR.r, TITLE_COMPLETE_COLOR.g, TITLE_COMPLETE_COLOR.b)
         else
@@ -1532,7 +1712,7 @@ function QuestKing:SetButtonToQuest(button, questLogIndex)
 
     if data.isComplete then
         local line = button:AddLine(
-            ("  %s"):format(GetQuestCompletionLineText(data.questID, isClickToTurnInQuest)),
+            ("  %s"):format(GetQuestCompletionLineText(data.questID, isAutoCompleteQuest)),
             nil,
             FINISHED_COLOR.r,
             FINISHED_COLOR.g,
@@ -1628,7 +1808,7 @@ local function GetNumQuestLogEntriesCompat()
     return 0
 end
 
-local function AddQuestSortRow(rows, seenQuestIDs, self, questID, questLogIndex, info)
+local function AddQuestSortRow(rows, seenQuestIDs, self, questID, questLogIndex, info, forcedKind)
     if type(questID) ~= "number" or questID <= 0 or seenQuestIDs[questID] then
         return
     end
@@ -1646,7 +1826,7 @@ local function AddQuestSortRow(rows, seenQuestIDs, self, questID, questLogIndex,
         rows[#rows + 1] = {
             questID = questID,
             questLogIndex = questLogIndex,
-            kind = self:GetQuestKind(questID, info),
+            kind = forcedKind or self:GetQuestKind(questID, info),
             sortText = SafeString(info.title, "") or "",
         }
     end
@@ -1663,6 +1843,405 @@ local function AddClassicQuestLogRows(rows, seenQuestIDs, self)
         if info and not info.isHeader and not info.isHidden then
             local questID = SafeNumber(info.questID, nil) or GetQuestIDForQuestLogIndex(questLogIndex)
             AddQuestSortRow(rows, seenQuestIDs, self, questID, questLogIndex, info)
+        end
+    end
+end
+
+local function IsQuestDisabledForSessionCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if C_QuestLog and C_QuestLog.IsQuestDisabledForSession then
+        local ok, disabled = SafeCall(C_QuestLog.IsQuestDisabledForSession, questID)
+        if ok then
+            return disabled and true or false
+        end
+    end
+
+    return false
+end
+
+local function ShouldShowCampaignQuestLogRow(info, questID)
+    if type(info) ~= "table" or type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if info.isHeader or info.isHidden or info.isTask then
+        return false
+    end
+
+    if info.isBounty and not IsQuestCompleteCompat(questID) then
+        return false
+    end
+
+    if IsQuestDisabledForSessionCompat(questID) then
+        return false
+    end
+
+    return true
+end
+
+local function IsCampaignQuestLogHeader(info)
+    if type(info) ~= "table" then
+        return false
+    end
+
+    if IsCampaignClassification(info.questClassification) then
+        return true
+    end
+
+    local campaignID = SafeNumber(info.campaignID, 0) or 0
+    return campaignID > 0
+end
+
+local function AddRetailCampaignQuestLogRows(rows, seenQuestIDs, self)
+    if IsClassicFamilyCompat() then
+        return
+    end
+
+    local numEntries = GetNumQuestLogEntriesCompat()
+    if numEntries <= 0 then
+        return
+    end
+
+    local currentHeaderIsCampaign = false
+
+    for questLogIndex = 1, numEntries do
+        local info = GetQuestInfoByLogIndex(questLogIndex)
+        if info and info.isHeader then
+            currentHeaderIsCampaign = IsCampaignQuestLogHeader(info)
+        elseif info then
+            local questID = SafeNumber(info.questID, nil) or GetQuestIDForQuestLogIndex(questLogIndex)
+            if ShouldShowCampaignQuestLogRow(info, questID) then
+                if currentHeaderIsCampaign or IsCampaignQuest(questID, info) then
+                    AddQuestSortRow(rows, seenQuestIDs, self, questID, questLogIndex, info, QUEST_KIND.CAMPAIGN)
+                end
+            end
+        end
+    end
+end
+
+local function GetCampaignRequirementQuestTitle(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return nil
+    end
+
+    if C_QuestLog and C_QuestLog.GetTitleForQuestID then
+        local ok, title = SafeCall(C_QuestLog.GetTitleForQuestID, questID)
+        if ok and type(title) == "string" and title ~= "" then
+            return title
+        end
+    end
+
+    if _G.QuestUtils_GetQuestName then
+        local ok, title = SafeCall(_G.QuestUtils_GetQuestName, questID)
+        if ok and type(title) == "string" and title ~= "" then
+            return title
+        end
+    end
+
+    return nil
+end
+
+IsQuestInLogCompat = function(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if GetQuestLogIndexByIDCompat(questID) then
+        return true
+    end
+
+    if C_QuestLog and C_QuestLog.IsOnQuest then
+        local ok, isOnQuest = SafeCall(C_QuestLog.IsOnQuest, questID)
+        if ok then
+            return isOnQuest and true or false
+        end
+    end
+
+    return false
+end
+
+local function IsQuestFlaggedCompletedCompat(questID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return false
+    end
+
+    if C_QuestLog and C_QuestLog.IsQuestFlaggedCompleted then
+        local ok, isCompleted = SafeCall(C_QuestLog.IsQuestFlaggedCompleted, questID)
+        if ok then
+            return isCompleted and true or false
+        end
+    end
+
+    if _G.IsQuestFlaggedCompleted then
+        local ok, isCompleted = SafeCall(_G.IsQuestFlaggedCompleted, questID)
+        if ok then
+            return isCompleted and true or false
+        end
+    end
+
+    return false
+end
+
+local function GetCurrentPlayerMapIDCompat()
+    if C_Map and C_Map.GetBestMapForUnit then
+        local ok, mapID = SafeCall(C_Map.GetBestMapForUnit, "player")
+        mapID = ok and SafeNumber(mapID, nil) or nil
+        if mapID then
+            return mapID
+        end
+    end
+
+    if _G.WorldMapFrame and _G.WorldMapFrame.GetMapID then
+        local ok, mapID = SafeCall(_G.WorldMapFrame.GetMapID, _G.WorldMapFrame)
+        mapID = ok and SafeNumber(mapID, nil) or nil
+        if mapID then
+            return mapID
+        end
+    end
+
+    return nil
+end
+
+local function RequestQuestLinesForMapCompat(mapID)
+    mapID = SafeNumber(mapID, nil)
+    if not mapID or not (C_QuestLine and C_QuestLine.RequestQuestLinesForMap) then
+        return
+    end
+
+    SafeCall(C_QuestLine.RequestQuestLinesForMap, mapID)
+end
+
+local function IsCampaignQuestLineInfo(info, expectedQuestID)
+    if type(info) ~= "table" then
+        return false
+    end
+
+    local questID = SafeNumber(info.questID, nil)
+    if expectedQuestID and questID ~= expectedQuestID then
+        return false
+    end
+
+    if questID and (IsQuestInLogCompat(questID) or IsQuestFlaggedCompletedCompat(questID)) then
+        return false
+    end
+
+    if info.inProgress then
+        return false
+    end
+
+    if info.isHidden then
+        return false
+    end
+
+    if info.isCampaign then
+        return true
+    end
+
+    if expectedQuestID then
+        return true
+    end
+
+    return questID and IsCampaignQuest(questID) or false
+end
+
+local function GetQuestLineInfoCompat(questID, mapID)
+    if type(questID) ~= "number" or questID <= 0 then
+        return nil
+    end
+
+    if not (C_QuestLine and C_QuestLine.GetQuestLineInfo) then
+        return nil
+    end
+
+    local ok, info
+
+    if mapID then
+        RequestQuestLinesForMapCompat(mapID)
+        ok, info = SafeCall(C_QuestLine.GetQuestLineInfo, questID, mapID, false)
+        if ok and type(info) == "table" then
+            return info
+        end
+    end
+
+    ok, info = SafeCall(C_QuestLine.GetQuestLineInfo, questID, nil, false)
+    if ok and type(info) == "table" then
+        return info
+    end
+
+    return nil
+end
+
+local function GetCampaignQuestLineOffer(questID, mapID)
+    if not C_QuestLine then
+        return nil
+    end
+
+    questID = SafeNumber(questID, nil)
+    mapID = SafeNumber(mapID, nil)
+
+    local info = questID and GetQuestLineInfoCompat(questID, mapID) or nil
+    if IsCampaignQuestLineInfo(info, questID) then
+        return info
+    end
+
+    if not mapID then
+        mapID = GetCurrentPlayerMapIDCompat()
+    end
+
+    if not mapID then
+        return nil
+    end
+
+    RequestQuestLinesForMapCompat(mapID)
+
+    if C_QuestLine.GetAvailableQuestLines then
+        local okLines, questLines = SafeCall(C_QuestLine.GetAvailableQuestLines, mapID)
+        if okLines and type(questLines) == "table" then
+            for _, questLineInfo in ipairs(questLines) do
+                if IsCampaignQuestLineInfo(questLineInfo, questID) then
+                    return questLineInfo
+                end
+            end
+        end
+    end
+
+    if C_QuestLine.GetForceVisibleQuests and C_QuestLine.GetQuestLineInfo then
+        local okForced, questIDs = SafeCall(C_QuestLine.GetForceVisibleQuests, mapID)
+        if okForced and type(questIDs) == "table" then
+            for _, forcedQuestID in ipairs(questIDs) do
+                forcedQuestID = SafeNumber(forcedQuestID, nil)
+                if forcedQuestID and (not questID or forcedQuestID == questID) then
+                    info = GetQuestLineInfoCompat(forcedQuestID, mapID)
+                    if IsCampaignQuestLineInfo(info, questID) then
+                        return info
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+local function GetCampaignRequirementSortKey(campaignID, questID)
+    if questID then
+        return questID
+    end
+
+    return "campaign_requirement_" .. tostring(campaignID or 0)
+end
+
+local function GetCampaignPickupText(failureText, questTitle)
+    local text = SafeString(failureText, nil)
+
+    if questTitle and questTitle ~= "" then
+        if not text or text == "" then
+            return "Pick up: " .. questTitle
+        end
+
+        if not strfind(text, questTitle, 1, true) then
+            return "Pick up: " .. questTitle
+        end
+    end
+
+    return text
+end
+
+local function AddCampaignRequirementRows(rows, seenQuestIDs)
+    if not (C_CampaignInfo and C_CampaignInfo.GetAvailableCampaigns and C_CampaignInfo.GetFailureReason) then
+        return
+    end
+
+    local okCampaigns, campaignIDs = SafeCall(C_CampaignInfo.GetAvailableCampaigns)
+    if not okCampaigns or type(campaignIDs) ~= "table" then
+        return
+    end
+
+    for _, campaignID in ipairs(campaignIDs) do
+        campaignID = SafeNumber(campaignID, nil)
+        if campaignID then
+            local shouldAdd = true
+            local state = nil
+
+            if C_CampaignInfo.GetState then
+                local okState, stateValue = SafeCall(C_CampaignInfo.GetState, campaignID)
+                state = okState and stateValue or nil
+                shouldAdd = IsCampaignStateStalled(state)
+            end
+
+            if shouldAdd then
+                local okReason, failureReason = SafeCall(C_CampaignInfo.GetFailureReason, campaignID)
+                if okReason and type(failureReason) == "table" then
+                    local requirementQuestID = SafeNumber(failureReason.questID, nil)
+                    local requirementKey = GetCampaignRequirementSortKey(campaignID, requirementQuestID)
+
+                    if not seenQuestIDs[requirementKey] then
+                        local campaignName = CAMPAIGN_HEADER
+
+                        if C_CampaignInfo.GetCampaignInfo then
+                            local okInfo, campaignInfo = SafeCall(C_CampaignInfo.GetCampaignInfo, campaignID)
+                            if okInfo and type(campaignInfo) == "table" then
+                                campaignName = SafeString(campaignInfo.name, campaignName) or campaignName
+                            end
+                        end
+
+                        local mapID = SafeNumber(failureReason.mapID, nil)
+                        local questLineInfo = GetCampaignQuestLineOffer(requirementQuestID, mapID)
+                        local questLineQuestID = questLineInfo and SafeNumber(questLineInfo.questID, nil) or nil
+
+                        if questLineQuestID and not requirementQuestID then
+                            requirementQuestID = questLineQuestID
+                            requirementKey = GetCampaignRequirementSortKey(campaignID, requirementQuestID)
+                        end
+
+                        local inQuestLog = requirementQuestID and IsQuestInLogCompat(requirementQuestID)
+                        local completed = requirementQuestID and IsQuestFlaggedCompletedCompat(requirementQuestID)
+
+                        if not completed and not inQuestLog and not seenQuestIDs[requirementKey] then
+                            local requiredQuestTitle = nil
+
+                            if questLineInfo then
+                                requiredQuestTitle = SafeString(questLineInfo.questName, nil)
+                                    or SafeString(questLineInfo.questLineName, nil)
+                            end
+
+                            requiredQuestTitle = requiredQuestTitle or GetCampaignRequirementQuestTitle(requirementQuestID)
+
+                            mapID = mapID
+                                or (questLineInfo and SafeNumber(questLineInfo.mapID, nil))
+                                or (questLineInfo and SafeNumber(questLineInfo.startMapID, nil))
+
+                            local failureText = SafeString(failureReason.text, nil)
+                            local text = GetCampaignPickupText(failureText, requiredQuestTitle)
+
+                            if text and text ~= "" then
+                                seenQuestIDs[requirementKey] = true
+
+                                rows[#rows + 1] = {
+                                    rowType = "campaign_requirement",
+                                    kind = QUEST_KIND.CAMPAIGN_REQUIREMENT,
+                                    sortText = campaignName,
+                                    campaignID = campaignID,
+                                    questID = requirementQuestID,
+                                    questOfferQuestID = requirementQuestID,
+                                    mapID = mapID,
+                                    x = questLineInfo and SafeNumber(questLineInfo.x, nil) or nil,
+                                    y = questLineInfo and SafeNumber(questLineInfo.y, nil) or nil,
+                                    title = campaignName,
+                                    text = text,
+                                    failureText = failureText,
+                                    requiredQuestTitle = requiredQuestTitle,
+                                    questLineName = questLineInfo and SafeString(questLineInfo.questLineName, nil) or nil,
+                                    isPickup = requirementQuestID ~= nil,
+                                }
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
 end
@@ -1684,6 +2263,9 @@ function QuestKing:BuildQuestSortTable()
 
     if IsClassicFamilyCompat() then
         AddClassicQuestLogRows(rows, seenQuestIDs, self)
+    else
+        AddRetailCampaignQuestLogRows(rows, seenQuestIDs, self)
+        AddCampaignRequirementRows(rows, seenQuestIDs)
     end
 
     local preyQuestID = GetActivePreyQuest()
@@ -1722,6 +2304,51 @@ function QuestKing:BuildQuestSortTable()
     end
 
     return questSortTable
+end
+
+function QuestKing:SetButtonToCampaignRequirement(button, row)
+    if not button or type(row) ~= "table" then
+        return
+    end
+
+    button.currentLine = 0
+    button.mouseHandler = mouseHandlerCampaignRequirement
+    button._campaignRequirement = row
+    button.questID = row.questID
+    button.questLogIndex = nil
+    button.questKind = row.kind
+
+    if button.EnableMouse then
+        button:EnableMouse(true)
+    end
+
+    if button.titleButton and button.titleButton.EnableMouse then
+        button.titleButton:EnableMouse(true)
+    end
+
+    if button.SetIcon and row.questOfferQuestID then
+        button:SetIcon(QUEST_ICON_EXCLAMATION)
+    end
+
+    if button.title then
+        local title = SafeString(row.title, CAMPAIGN_HEADER) or CAMPAIGN_HEADER
+        button.title:SetText("[Campaign] " .. title)
+        button.title:SetTextColor(TITLE_COLOR.r, TITLE_COLOR.g, TITLE_COLOR.b)
+        button.title:ClearAllPoints()
+        button.title:SetPoint("TOPLEFT", button, "TOPLEFT", LINE_LEFT_PADDING, -4)
+        button.title:SetPoint("RIGHT", button, "RIGHT", -LINE_RIGHT_PADDING, 0)
+        button.title:SetJustifyH("LEFT")
+    end
+
+    local text = SafeString(row.text, nil)
+    if text and text ~= "" then
+        button:AddLine("  " .. text, nil, UNFINISHED_COLOR.r, UNFINISHED_COLOR.g, UNFINISHED_COLOR.b)
+    end
+
+    local title = SafeString(row.requiredQuestTitle, nil)
+    if title and title ~= "" and text and not strfind(text, title, 1, true) then
+        button:AddLine("  " .. title, nil, 0.80, 0.90, 1.00)
+    end
 end
 
 function QuestKing:ShouldSkipBonusTask(questID)
@@ -1763,24 +2390,33 @@ function QuestKing:UpdateTrackerQuests()
 
     for i = 1, #rows do
         local row = rows[i]
-        if row and row.questLogIndex then
+        if row then
             if row.kind ~= lastKind then
                 currentHeader = AddSectionHeader(GetKindHeader(row.kind))
                 lastKind = row.kind
             end
 
-            local button = WatchButton:GetKeyed("quest", row.questID)
-            if button then
-                button._previousHeader = currentHeader
-                self:SetButtonToQuest(button, row.questLogIndex)
+            if row.rowType == "campaign_requirement" then
+                local uniqueID = row.campaignID or row.questID or i
+                local button = WatchButton:GetKeyed("campaign_requirement", uniqueID)
+                if button then
+                    button._previousHeader = currentHeader
+                    self:SetButtonToCampaignRequirement(button, row)
+                end
+            elseif row.questLogIndex then
+                local button = WatchButton:GetKeyed("quest", row.questID)
+                if button then
+                    button._previousHeader = currentHeader
+                    self:SetButtonToQuest(button, row.questLogIndex)
 
-                if button.fresh and self.newlyAddedQuests and self.newlyAddedQuests[row.questID] then
-                    if button.Pulse and opt_colors.ObjectiveAlertGlow then
-                        button:Pulse(
-                            opt_colors.ObjectiveAlertGlow[1],
-                            opt_colors.ObjectiveAlertGlow[2],
-                            opt_colors.ObjectiveAlertGlow[3]
-                        )
+                    if button.fresh and self.newlyAddedQuests and self.newlyAddedQuests[row.questID] then
+                        if button.Pulse and opt_colors.ObjectiveAlertGlow then
+                            button:Pulse(
+                                opt_colors.ObjectiveAlertGlow[1],
+                                opt_colors.ObjectiveAlertGlow[2],
+                                opt_colors.ObjectiveAlertGlow[3]
+                            )
+                        end
                     end
                 end
             end

@@ -13,6 +13,7 @@ local DEFAULT_TITLEBAR_TEXT = "Unlocked - Drag titlebar"
 local BUTTON_SIZE = 15
 local BUTTON_ART_SIZE = 22
 
+local pairs = pairs
 local tonumber = tonumber
 local tostring = tostring
 local type = type
@@ -101,6 +102,82 @@ local function SafeGetBackdropColor(frame)
     return 0, 0, 0, 0
 end
 
+local function ResolveTrackerBackgroundAlpha(options, backgroundTable)
+    local alpha = nil
+
+    if _G.QuestKingDB and type(_G.QuestKingDB.options) == "table" then
+        alpha = _G.QuestKingDB.options.trackerBackgroundAlpha
+    end
+
+    if alpha == nil and options then
+        alpha = options.trackerBackgroundAlpha
+    end
+
+    if alpha == nil and type(backgroundTable) == "table" then
+        local color = backgroundTable._backdropColor
+        if type(color) == "table" then
+            alpha = color[4]
+        end
+    end
+
+    return ClampAlpha(alpha or 0.55)
+end
+
+local function GetColorWithAlpha(color, alpha, fallbackR, fallbackG, fallbackB)
+    if type(color) ~= "table" then
+        return fallbackR or 0, fallbackG or 0, fallbackB or 0, alpha
+    end
+
+    return color[1] or fallbackR or 0, color[2] or fallbackG or 0, color[3] or fallbackB or 0, alpha
+end
+
+local function SaveTrackerBackgroundAlpha(alpha)
+    _G.QuestKingDB = _G.QuestKingDB or {}
+    _G.QuestKingDB.options = type(_G.QuestKingDB.options) == "table" and _G.QuestKingDB.options or {}
+
+    alpha = ClampAlpha(alpha)
+    _G.QuestKingDB.options.trackerBackgroundAlpha = alpha
+
+    local options = GetOptions()
+    options.trackerBackgroundAlpha = alpha
+    return alpha
+end
+
+local function IsWatchFrameBorderHidden(options)
+    options = options or GetOptions()
+    return options.hideWatchFrameBorder == true
+end
+
+local function GetBackdropForBorderVisibility(backdropTable, hideBorder)
+    if type(backdropTable) ~= "table" or not hideBorder then
+        return backdropTable
+    end
+
+    local borderlessBackdrop = {}
+    for key, value in pairs(backdropTable) do
+        borderlessBackdrop[key] = value
+    end
+
+    borderlessBackdrop.edgeFile = nil
+    borderlessBackdrop.edgeSize = 0
+    return borderlessBackdrop
+end
+
+local function ApplyBackdropBorderColor(frame, borderColor, hideBorder)
+    if not frame or not frame.SetBackdropBorderColor then
+        return
+    end
+
+    if hideBorder then
+        frame:SetBackdropBorderColor(0, 0, 0, 0)
+        return
+    end
+
+    if type(borderColor) == "table" then
+        frame:SetBackdropBorderColor(unpack(borderColor))
+    end
+end
+
 local function EnsureFlatBackground(frame)
     if not frame then
         return
@@ -137,6 +214,7 @@ end
 local function EnsureSavedVariables()
     _G.QuestKingDB = _G.QuestKingDB or {}
     _G.QuestKingDBPerChar = _G.QuestKingDBPerChar or {}
+    _G.QuestKingDB.options = type(_G.QuestKingDB.options) == "table" and _G.QuestKingDB.options or {}
 
     if QuestKingDB.dragLocked == nil then
         QuestKingDB.dragLocked = false
@@ -390,9 +468,7 @@ function Tracker:RefreshLayoutMetrics()
         self.titlebarText:SetPoint("RIGHT", self.modeButton, "LEFT", -TITLEBAR_TEXT_GAP, 0)
     end
 
-    if self.advancedBackground then
-        self:ApplyAdvancedBackground()
-    end
+    self:ApplyTrackerBackground()
 
     return true
 end
@@ -444,19 +520,7 @@ function Tracker:Init()
         self.modeButton = CreateTitlebarButton(self.titlebar, GetModeLabel(QuestKingDBPerChar.displayMode), Tracker.ModeButtonOnClick)
     end
 
-    if opt.enableAdvancedBackground or opt.enableBackdrop then
-        if opt.enableAdvancedBackground then
-            self:ApplyAdvancedBackground()
-        elseif opt.enableBackdrop and opt.backdropTable then
-            SafeSetBackdrop(self, opt.backdropTable, opt.backdropTable._backdropColor)
-        end
-
-        self.minimizeButton:EnableMouseWheel(true)
-        self.minimizeButton:SetScript("OnMouseWheel", Tracker.MinimizeButtonOnMouseWheel)
-    else
-        self.minimizeButton:EnableMouseWheel(false)
-        self.minimizeButton:SetScript("OnMouseWheel", nil)
-    end
+    self:ApplyTrackerBackground()
 
     self:ApplyTitlebarState()
     self:RefreshLayoutMetrics()
@@ -467,6 +531,59 @@ function Tracker:Init()
 
     self:SetCustomAlpha()
     self:SetCustomScale()
+end
+
+function Tracker:GetBackgroundAlpha()
+    local opt = GetOptions()
+    local background = opt.enableAdvancedBackground and opt.advancedBackgroundTable or opt.backdropTable
+    return ResolveTrackerBackgroundAlpha(opt, background)
+end
+
+function Tracker:SetBackgroundAlpha(alpha)
+    if alpha ~= nil then
+        SaveTrackerBackgroundAlpha(alpha)
+    end
+
+    self:ApplyTrackerBackground()
+end
+
+function Tracker:ApplyTrackerBackground()
+    local opt = GetOptions()
+    local hasBackground = opt.enableAdvancedBackground == true or opt.enableBackdrop == true
+
+    if self.minimizeButton then
+        self.minimizeButton:EnableMouseWheel(hasBackground)
+        self.minimizeButton:SetScript("OnMouseWheel", hasBackground and Tracker.MinimizeButtonOnMouseWheel or nil)
+    end
+
+    if opt.enableAdvancedBackground then
+        self:ApplyAdvancedBackground()
+        return
+    end
+
+    if self.advancedBackground then
+        self.advancedBackground:Hide()
+    end
+
+    if opt.enableBackdrop and opt.backdropTable then
+        local hideBorder = IsWatchFrameBorderHidden(opt)
+        local backdrop = GetBackdropForBorderVisibility(opt.backdropTable, hideBorder)
+        local alpha = ResolveTrackerBackgroundAlpha(opt, opt.backdropTable)
+        local r, g, b, a = GetColorWithAlpha(opt.backdropTable._backdropColor, alpha, 0, 0, 0)
+
+        if not SafeSetBackdrop(self, backdrop, { r, g, b, a }) then
+            EnsureFlatBackground(self)
+            SetFlatBackgroundColor(self, r, g, b, a)
+        end
+        ApplyBackdropBorderColor(self, opt.backdropTable._borderColor, hideBorder)
+        return
+    end
+
+    if self.SetBackdrop then
+        self:SetBackdrop(nil)
+    end
+
+    SetFlatBackgroundColor(self, 0, 0, 0, 0)
 end
 
 function Tracker:ApplyAdvancedBackground()
@@ -483,25 +600,28 @@ function Tracker:ApplyAdvancedBackground()
         self.advancedBackground = frame
     end
 
+    local anchorPoints = type(background._anchorPoints) == "table" and background._anchorPoints or {}
     frame:ClearAllPoints()
-    frame:SetPoint("TOPLEFT", self, "TOPLEFT", background._anchorPoints.topLeftX, background._anchorPoints.topLeftY)
-    frame:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", background._anchorPoints.bottomRightX, background._anchorPoints.bottomRightY)
+    frame:SetPoint("TOPLEFT", self, "TOPLEFT", anchorPoints.topLeftX or -6, anchorPoints.topLeftY or 6)
+    frame:SetPoint("BOTTOMRIGHT", self, "BOTTOMRIGHT", anchorPoints.bottomRightX or 6, anchorPoints.bottomRightY or -6)
 
-    SafeSetBackdrop(frame, background)
+    local hideBorder = IsWatchFrameBorderHidden(opt)
+    local backdrop = GetBackdropForBorderVisibility(background, hideBorder)
+
+    SafeSetBackdrop(frame, backdrop)
     EnsureFlatBackground(frame)
 
-    if frame.SetBackdropColor and background._backdropColor then
-        frame:SetBackdropColor(unpack(background._backdropColor))
+    local alpha = ResolveTrackerBackgroundAlpha(opt, background)
+    local r, g, b, a = GetColorWithAlpha(background._backdropColor, alpha, 0, 0, 0)
+    if frame.SetBackdropColor then
+        frame:SetBackdropColor(r, g, b, a)
     else
-        local color = background._backdropColor or { 0, 0, 0, 0.5 }
-        SetFlatBackgroundColor(frame, color[1], color[2], color[3], color[4] or 1)
+        SetFlatBackgroundColor(frame, r, g, b, a)
     end
 
-    if frame.SetBackdropBorderColor and background._borderColor then
-        frame:SetBackdropBorderColor(unpack(background._borderColor))
-    end
+    ApplyBackdropBorderColor(frame, background._borderColor, hideBorder)
 
-    frame:SetAlpha(background._alpha or 1)
+    frame:SetAlpha(ClampAlpha(background._alpha or 1))
     frame:Show()
 
     self.advancedBackgroundHideWhenEmpty = background._hideWhenEmpty and true or false
@@ -824,29 +944,21 @@ end
 
 function Tracker.MinimizeButtonOnMouseWheel(self, direction)
     local opt = GetOptions()
+    local background = opt.enableAdvancedBackground and opt.advancedBackgroundTable or opt.backdropTable
+    local step = 0.05
 
-    if opt.enableAdvancedBackground and Tracker.advancedBackground then
-        local alpha = Tracker.advancedBackground:GetAlpha() or 1
-
-        if direction > 0 then
-            alpha = alpha + ((opt.advancedBackgroundTable and opt.advancedBackgroundTable._alphaStep) or 0)
-        elseif direction < 0 then
-            alpha = alpha - ((opt.advancedBackgroundTable and opt.advancedBackgroundTable._alphaStep) or 0)
-        end
-
-        Tracker.advancedBackground:SetAlpha(ClampAlpha(alpha))
-    elseif opt.enableBackdrop then
-        local r, g, b, alpha = SafeGetBackdropColor(Tracker)
-        alpha = alpha or 1
-
-        if direction > 0 then
-            alpha = alpha + ((opt.backdropTable and opt.backdropTable._alphaStep) or 0)
-        elseif direction < 0 then
-            alpha = alpha - ((opt.backdropTable and opt.backdropTable._alphaStep) or 0)
-        end
-
-        SafeSetBackdropColor(Tracker, r, g, b, ClampAlpha(alpha))
+    if background then
+        step = tonumber(background._alphaStep) or step
     end
+
+    local alpha = Tracker:GetBackgroundAlpha()
+    if direction > 0 then
+        alpha = alpha + step
+    elseif direction < 0 then
+        alpha = alpha - step
+    end
+
+    Tracker:SetBackgroundAlpha(alpha)
 end
 
 function Tracker.ModeButtonOnClick(self, mouse)

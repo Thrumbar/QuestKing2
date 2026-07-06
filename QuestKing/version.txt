@@ -1,17 +1,3 @@
-3.1.0
-## Fixed
-- Quest tracker rows now recognize click-to-turn-in quests using the full autocomplete detection path:
-  - `C_QuestLog.IsAutoComplete(questID)`
-  - legacy `GetQuestLogIsAutoComplete(questLogIndex)`
-  - `C_QuestLog.GetInfo(questLogIndex).isAutoComplete`
-  - active Blizzard auto quest popup entries with popup type `COMPLETE`
-- Completed clickable quests now show `Click to turn in` instead of falling through to the generic ready turn-in text.
-- Completed clickable quests keep the ready-check icon marker in the tracker title.
-- Left-clicking a completed clickable quest now calls QuestKing's safer completion opener first, then falls back to the direct `ShowQuestComplete` compatibility path.
-- The `QUEST_AUTOCOMPLETE` event now accepts ReadyForTurnIn-only autocomplete payloads so Blizzard's native auto quest popup can still be added when the older autocomplete boolean is false.
-- Kept the previous `popup.lua` reserved-key syntax fix: `and = true` remains corrected to `["and"] = true`.
-- Added lowercase `core/autocomplete.lua` in the patch bundle so it matches the TOC path exactly.
-
 3.0.13
 - Fixed the **Allow QuestKing tracker dragging** AddOns setting so enabling it also unlocks the tracker drag state.
 - Fixed the tracker drag gate so both conditions are now required before dragging works:
@@ -190,3 +176,17 @@
 - Updated Classic-era compatibility metadata to include 11508.
 - Updated Classic progression metadata to include MoP Classic 50503, Cataclysm Classic 40402, and TBC Anniversary 20505.
 - No Lua runtime logic was changed in this update.
+- Added an option to hide the outer watch frame border while preserving the background alpha fill.
+## 3.0.7 - Options panel layout cleanup
+
+- Reorganized the QuestKing options panel into intuitive display groups: Main Tracker, Frame Appearance, Quest Text & Rows, Item Buttons / Rewards / Tooltips, Quest Behavior, Scenario Content, and Compatibility.
+- Moved background alpha and watch frame border controls into the Frame Appearance group.
+- Added section descriptions and divider lines for easier scanning.
+- Kept all existing saved variable keys unchanged for compatibility with current user settings.
+
+## 3.0.8 - Classic slider display fix
+
+- Replaced the options panel's dependency on Blizzard's deprecated `OptionsSliderTemplate` with QuestKing-owned slider artwork.
+- Fixed slider bars and thumbs not displaying consistently on Classic client branches.
+- Kept Retail and Retail PTR behavior intact by using basic Slider, Texture, and FontString APIs shared across Classic and Retail.
+- Added slider mousewheel support and value snapping for branches that do not obey step values during drag.

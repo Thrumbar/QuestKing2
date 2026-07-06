@@ -37,6 +37,10 @@ opt.dbAllowTrackerScale = true          -- allow persisting scale in SVs
 opt.trackerAlpha        = 0.95
 opt.dbAllowTrackerAlpha = true          -- allow persisting alpha in SVs
 
+-- Background alpha is separate from tracker alpha. Tracker alpha fades all
+-- tracker text/buttons; background alpha only controls the quest frame fill.
+opt.trackerBackgroundAlpha = 0.55
+
 
 ----------------------------------------------------------------------
 -- Behavior toggles
@@ -120,6 +124,7 @@ opt.showScenarioSpellsInTooltip = true
 -- If false, the tracker uses preset points & you can cycle them with Shift+Click on the minimize button
 opt.allowDrag              = true
 opt.hideToggleButtonBorder = false
+opt.hideWatchFrameBorder   = false
 
 -- Preset position list used when allowDrag=false or when cycling with Shift+Click
 -- Format: { point, relativeTo, relativePoint, x, y }
@@ -136,6 +141,7 @@ opt.positionPresets = {
 -- Choose ONE of these by enabling the matching flag.
 --  • Advanced background gives a framed panel with its own alpha and border.
 --  • Simple backdrop uses a plain backdrop on the tracker frame.
+--  • hideWatchFrameBorder hides only the watch frame border, not row text/buttons.
 ----------------------------------------------------------------------
 
 -- Advanced background (panel behind the whole tracker)

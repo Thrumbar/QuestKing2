@@ -25,7 +25,7 @@ local type = type
 local PANEL_TITLE = "QuestKing"
 local PANEL_NAME = "QuestKingOptionsPanel"
 local PANEL_WIDTH = 620
-local PANEL_HEIGHT = 1320
+local PANEL_HEIGHT = 1560
 
 local optionDefinitions = {}
 local controls = {}
@@ -50,8 +50,10 @@ local managedOptionKeys = {
     showScenarioSpellsInTooltip = true,
     allowDrag = true,
     hideToggleButtonBorder = true,
+    hideWatchFrameBorder = true,
     enableAdvancedBackground = true,
     enableBackdrop = true,
+    trackerBackgroundAlpha = true,
     buttonWidth = true,
     lineHeight = true,
     titleHeight = true,
@@ -215,6 +217,7 @@ local function ApplyTrackerPresentation()
         SafeCallMethod(tracker, "SetCustomScale")
         SafeCallMethod(tracker, "CheckDrag")
         SafeCallMethod(tracker, "RefreshLayoutMetrics")
+        SafeCallMethod(tracker, "ApplyTrackerBackground")
     end
 end
 
@@ -359,64 +362,161 @@ local function CreateCheck(parent, definition, x, y)
     return check
 end
 
+local function SetTextureColor(texture, r, g, b, a)
+    if not texture then
+        return
+    end
+
+    if type(texture.SetColorTexture) == "function" then
+        texture:SetColorTexture(r, g, b, a)
+    else
+        texture:SetTexture(r, g, b, a)
+    end
+end
+
+local function FormatSliderLimit(value, decimals)
+    value = tonumber(value) or 0
+    decimals = tonumber(decimals) or 0
+
+    if decimals > 0 then
+        return string_format("%." .. tostring(decimals) .. "f", value)
+    end
+
+    return tostring(math.floor(value + 0.5))
+end
+
+local function FormatSliderValue(definition, value)
+    local valueFormat = definition.valueFormat or "%s"
+    return format(valueFormat, value)
+end
+
+local function CreateSliderArtwork(slider, name)
+    local trackBackground = slider:CreateTexture(name .. "TrackBackground", "BACKGROUND")
+    trackBackground:SetPoint("LEFT", slider, "LEFT", 0, 0)
+    trackBackground:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
+    trackBackground:SetHeight(8)
+    SetTextureColor(trackBackground, 0.05, 0.05, 0.05, 0.85)
+
+    local trackTop = slider:CreateTexture(name .. "TrackTop", "BORDER")
+    trackTop:SetPoint("TOPLEFT", trackBackground, "TOPLEFT", 0, 0)
+    trackTop:SetPoint("TOPRIGHT", trackBackground, "TOPRIGHT", 0, 0)
+    trackTop:SetHeight(1)
+    SetTextureColor(trackTop, 0.45, 0.45, 0.45, 0.75)
+
+    local trackBottom = slider:CreateTexture(name .. "TrackBottom", "BORDER")
+    trackBottom:SetPoint("BOTTOMLEFT", trackBackground, "BOTTOMLEFT", 0, 0)
+    trackBottom:SetPoint("BOTTOMRIGHT", trackBackground, "BOTTOMRIGHT", 0, 0)
+    trackBottom:SetHeight(1)
+    SetTextureColor(trackBottom, 0.00, 0.00, 0.00, 0.90)
+
+    local trackLeft = slider:CreateTexture(name .. "TrackLeft", "BORDER")
+    trackLeft:SetPoint("TOPLEFT", trackBackground, "TOPLEFT", 0, 0)
+    trackLeft:SetPoint("BOTTOMLEFT", trackBackground, "BOTTOMLEFT", 0, 0)
+    trackLeft:SetWidth(1)
+    SetTextureColor(trackLeft, 0.35, 0.35, 0.35, 0.75)
+
+    local trackRight = slider:CreateTexture(name .. "TrackRight", "BORDER")
+    trackRight:SetPoint("TOPRIGHT", trackBackground, "TOPRIGHT", 0, 0)
+    trackRight:SetPoint("BOTTOMRIGHT", trackBackground, "BOTTOMRIGHT", 0, 0)
+    trackRight:SetWidth(1)
+    SetTextureColor(trackRight, 0.00, 0.00, 0.00, 0.90)
+
+    if type(slider.SetThumbTexture) == "function" then
+        slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+    end
+
+    local thumb = type(slider.GetThumbTexture) == "function" and slider:GetThumbTexture() or nil
+    if thumb then
+        thumb:SetSize(32, 32)
+    end
+end
+
+local function NormalizeSliderValue(definition, value)
+    local normalized = ClampNumber(value, definition.fallback, definition.min, definition.max)
+    normalized = RoundToStep(normalized, definition.step or 1)
+
+    if definition.decimals then
+        normalized = tonumber(string_format("%." .. tostring(definition.decimals) .. "f", normalized))
+    else
+        normalized = math.floor(normalized + 0.5)
+    end
+
+    return normalized
+end
+
 local function CreateSlider(parent, definition, x, y)
     local name = MakeControlName(definition.key .. "Slider")
-    local slider = CreateFrame("Slider", name, parent, "OptionsSliderTemplate")
-    slider:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    slider:SetWidth(definition.width or 220)
+    local width = definition.width or 260
+
+    local label = CreateText(parent, definition.label, "GameFontNormal", x, y)
+    label:SetWidth(width + 60)
+
+    local slider = CreateFrame("Slider", name, parent)
+    slider:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y - 24)
+    slider:SetSize(width, 18)
     slider:SetMinMaxValues(definition.min, definition.max)
 
-    if slider.SetValueStep then
+    if type(slider.SetOrientation) == "function" then
+        slider:SetOrientation("HORIZONTAL")
+    end
+
+    if type(slider.SetValueStep) == "function" then
         slider:SetValueStep(definition.step or 1)
     end
 
-    if slider.SetObeyStepOnDrag then
+    if type(slider.SetObeyStepOnDrag) == "function" then
         slider:SetObeyStepOnDrag(true)
+    end
+
+    if type(slider.EnableMouseWheel) == "function" then
+        slider:EnableMouseWheel(true)
     end
 
     slider.key = definition.key
     slider.definition = definition
     slider.tooltipText = definition.tooltip or definition.label
+    slider.label = label
 
-    local label = _G[name .. "Text"]
-    local low = _G[name .. "Low"]
-    local high = _G[name .. "High"]
+    CreateSliderArtwork(slider, name)
 
-    if label then
-        label:SetText(definition.label)
-    end
-
-    if low then
-        low:SetText(tostring(definition.min))
-    end
-
-    if high then
-        high:SetText(tostring(definition.max))
-    end
-
-    slider.valueText = CreateText(parent, "", "GameFontHighlightSmall", x + (definition.width or 220) + 28, y + 2)
+    slider.lowText = CreateText(parent, FormatSliderLimit(definition.min, definition.decimals), "GameFontDisableSmall", x, y - 42)
+    slider.highText = CreateText(parent, FormatSliderLimit(definition.max, definition.decimals), "GameFontDisableSmall", x + width - 22, y - 42)
+    slider.highText:SetJustifyH("RIGHT")
+    slider.highText:SetWidth(48)
+    slider.valueText = CreateText(parent, "", "GameFontHighlightSmall", x + width + 36, y - 25)
+    slider.valueText:SetWidth(70)
 
     slider:SetScript("OnValueChanged", function(self, value)
         local def = self.definition
-        local normalized = ClampNumber(value, def.fallback, def.min, def.max)
-        normalized = RoundToStep(normalized, def.step or 1)
-
-        if def.decimals then
-            normalized = tonumber(string_format("%." .. tostring(def.decimals) .. "f", normalized))
-        else
-            normalized = math.floor(normalized + 0.5)
-        end
+        local normalized = NormalizeSliderValue(def, value)
 
         if self.valueText then
-            local valueFormat = def.valueFormat or "%s"
-            self.valueText:SetText(format(valueFormat, normalized))
+            self.valueText:SetText(FormatSliderValue(def, normalized))
         end
 
         if self._questKingRefreshing then
             return
         end
 
+        if math.abs((tonumber(value) or 0) - normalized) > 0.0001 then
+            self._questKingRefreshing = true
+            self:SetValue(normalized)
+            self._questKingRefreshing = false
+        end
+
         ApplySetting(self.key, normalized, true)
+    end)
+
+    slider:SetScript("OnMouseWheel", function(self, delta)
+        local def = self.definition
+        local step = tonumber(def.step) or 1
+        local current = tonumber(self:GetValue()) or tonumber(def.fallback) or tonumber(def.min) or 0
+
+        if delta and delta < 0 then
+            step = -step
+        end
+
+        self:SetValue(NormalizeSliderValue(def, current + step))
     end)
 
     table_insert(controls, slider)
@@ -509,13 +609,40 @@ local function RefreshControls()
     end
 end
 
-local function AddSection(title, y)
-    CreateText(scrollChild, title, "GameFontNormalLarge", 18, y)
-    return y - 34
+local CONTENT_LEFT = 18
+local CONTROL_LEFT = 34
+local SLIDER_LEFT = 42
+local CONTENT_WIDTH = 560
+
+local function CreateDivider(parent, y)
+    local texture = parent:CreateTexture(nil, "BACKGROUND")
+    texture:SetPoint("TOPLEFT", parent, "TOPLEFT", CONTENT_LEFT, y)
+    texture:SetSize(CONTENT_WIDTH, 1)
+
+    if type(texture.SetColorTexture) == "function" then
+        texture:SetColorTexture(0.28, 0.28, 0.32, 0.55)
+    else
+        texture:SetTexture(0.28, 0.28, 0.32, 0.55)
+    end
+
+    return texture
+end
+
+local function AddSection(title, description, y)
+    CreateText(scrollChild, title, "GameFontNormalLarge", CONTENT_LEFT, y)
+    CreateDivider(scrollChild, y - 22)
+    y = y - 34
+
+    if description and description ~= "" then
+        CreateWrappedText(scrollChild, description, "GameFontHighlightSmall", CONTENT_LEFT, y, CONTENT_WIDTH)
+        y = y - 46
+    end
+
+    return y
 end
 
 local function AddDescription(text, y)
-    CreateWrappedText(scrollChild, text, "GameFontHighlightSmall", 18, y, 560)
+    CreateWrappedText(scrollChild, text, "GameFontHighlightSmall", CONTENT_LEFT, y, CONTENT_WIDTH)
     return y - 54
 end
 
@@ -527,7 +654,7 @@ local function AddCheck(key, label, tooltip, y)
         tooltip = tooltip,
     }
 
-    CreateCheck(scrollChild, optionDefinitions[#optionDefinitions], 18, y)
+    CreateCheck(scrollChild, optionDefinitions[#optionDefinitions], CONTROL_LEFT, y)
     return y - 30
 end
 
@@ -545,7 +672,7 @@ local function AddSlider(key, label, tooltip, minValue, maxValue, step, decimals
         fallback = tonumber(GetOptions()[key]) or tonumber(baselineOptions and baselineOptions[key]) or minValue,
     }
 
-    CreateSlider(scrollChild, optionDefinitions[#optionDefinitions], 34, y)
+    CreateSlider(scrollChild, optionDefinitions[#optionDefinitions], SLIDER_LEFT, y)
     return y - 58
 end
 
@@ -559,7 +686,7 @@ local function AddChoice(key, label, tooltip, choices, fallback, y)
         fallback = fallback,
     }
 
-    CreateChoice(scrollChild, optionDefinitions[#optionDefinitions], 18, y)
+    CreateChoice(scrollChild, optionDefinitions[#optionDefinitions], CONTROL_LEFT, y)
     return y - 34
 end
 
@@ -583,39 +710,30 @@ local function BuildPanel()
     scrollFrame:SetScrollChild(scrollChild)
 
     local y = -18
-    CreateText(scrollChild, "QuestKing Settings", "GameFontNormalLarge", 18, y)
+    CreateText(scrollChild, "QuestKing Settings", "GameFontNormalLarge", CONTENT_LEFT, y)
     y = y - 32
-    y = AddDescription("Configure QuestKing's tracker, objective display, popup behavior, and low-resource presentation settings. Changes are saved in QuestKingDB and applied without adding Ace3 or other dependencies.", y)
+    y = AddDescription("Settings are grouped by what they affect: tracker visibility, frame appearance, row layout, quest behavior, scenario content, and compatibility. Changes are saved in QuestKingDB and apply without Ace3 or other helper libraries.", y)
 
-    y = AddSection("Tracker", y)
+    y = AddSection("Main Tracker", "Controls whether QuestKing replaces the default tracker and how the main tracker frame behaves on screen.", y)
     y = AddCheck("disableBlizzard", "Hide Blizzard Objective Tracker", "Uses QuestKing's conservative Blizzard tracker suppression path.", y)
     y = AddCheck("allowDrag", "Allow QuestKing tracker dragging", "When enabled, the tracker keeps its current position and can be moved by dragging the titlebar.", y)
     y = AddCheck("hideToggleButtonBorder", "Hide tracker toggle button border", "Keeps the tracker titlebar cleaner by hiding the toggle button border.", y)
-    y = AddSlider("trackerScale", "Tracker Scale", "Changes the QuestKing tracker scale.", 0.70, 1.50, 0.05, 2, "%.2f", y - 6)
-    y = AddSlider("trackerAlpha", "Tracker Alpha", "Changes the QuestKing tracker transparency.", 0.35, 1.00, 0.05, 2, "%.2f", y)
+    y = AddSlider("trackerScale", "Tracker Scale", "Changes the overall QuestKing tracker scale.", 0.70, 1.50, 0.05, 2, "%.2f", y - 6)
+    y = AddSlider("trackerAlpha", "Tracker Alpha", "Changes the opacity of the whole QuestKing tracker, including text and buttons.", 0.35, 1.00, 0.05, 2, "%.2f", y)
 
-    y = AddSection("Quest Display", y - 8)
-    y = AddCheck("enableItemPopups", "Enable item-start quest popups", "Shows a QuestKing popup when looting an item that starts a quest.", y)
-    y = AddChoice("showCompletedObjectives", "Completed Objectives", "Controls how completed objective lines are shown.", {
-        { label = "Hidden", value = false },
-        { label = "Visible", value = true },
-        { label = "Always", value = "always" },
-    }, true, y)
-    y = AddCheck("hideSupersedingObjectives", "Hide superseded objectives", "Hides old objective tiers when newer objective steps supersede them.", y)
+    y = AddSection("Frame Appearance", "Controls the watch frame background, border, and fill opacity without changing quest row text visibility.", y - 8)
+    y = AddCheck("enableAdvancedBackground", "Enable advanced background", "Uses QuestKing's framed background panel behind the tracker.", y)
+    y = AddCheck("enableBackdrop", "Enable simple backdrop", "Uses QuestKing's simple tracker backdrop path.", y)
+    y = AddCheck("hideWatchFrameBorder", "Hide watch frame border", "Hides only the outer QuestKing watch frame border. Background fill, tracker text, and buttons stay visible.", y)
+    y = AddSlider("trackerBackgroundAlpha", "Quest Frame Background Alpha", "Controls only the QuestKing quest frame background opacity. Tracker text and buttons keep the Tracker Alpha setting.", 0.00, 1.00, 0.05, 2, "%.2f", y)
 
-    y = AddSection("Scenario / Dungeon / Raid", y - 8)
-    y = AddCheck("enableScenarioTracker", "Enable scenario tracker blocks", "Allows scenario, delve, dungeon, and raid-style objective blocks when Blizzard exposes scenario data.", y)
-    y = AddCheck("respectScenarioCriteriaVisibility", "Respect Blizzard criteria visibility", "Hides criteria rows when Blizzard reports they should not be displayed.", y)
-    y = AddCheck("preferRaidScenarioLabel", "Prefer raid label for raid scenario data", "Labels scenario-backed raid content as Raid when applicable.", y)
-    y = AddCheck("showScenarioObjectivesInRaids", "Show scenario objectives in raids", "Allows Blizzard scenario-backed raid objectives to appear in QuestKing.", y)
-    y = AddCheck("allowInstanceScenarioFallback", "Allow instance scenario fallback", "Allows scenario-backed blocks in party and dungeon content even when the simple scenario gate is unavailable.", y)
-    y = AddCheck("showScenarioSpellsInTooltip", "Show scenario spells in tooltip", "Shows spell names from scenario steps in the tooltip when available.", y)
-
-    y = AddSection("Layout", y - 8)
+    y = AddSection("Quest Text & Rows", "Adjusts the size and spacing of quest titles, objective lines, and tracker row width.", y - 8)
     y = AddSlider("buttonWidth", "Button Width", "Width of each QuestKing tracker row.", 180, 360, 5, 0, "%d", y)
     y = AddSlider("lineHeight", "Line Height", "Height of each objective line.", 12, 28, 1, 0, "%d", y)
     y = AddSlider("titleHeight", "Title Height", "Height of the quest title line.", 12, 30, 1, 0, "%d", y)
     y = AddSlider("fontSize", "Font Size", "Base tracker font size.", 8, 20, 1, 0, "%d", y)
+
+    y = AddSection("Item Buttons, Rewards & Tooltips", "Controls the side and scale of tracker extras that attach to quest rows.", y - 8)
     y = AddSlider("itemButtonScale", "Quest Item Button Scale", "Scale multiplier for quest item buttons relative to the tracker.", 0.50, 1.75, 0.05, 2, "%.2f", y)
     y = AddChoice("itemAnchorSide", "Quest Item Anchor", "Controls which side quest item buttons anchor to.", {
         { label = "Right", value = "right" },
@@ -633,11 +751,24 @@ local function BuildPanel()
         { label = "Bottom", value = "ANCHOR_BOTTOM" },
     }, "ANCHOR_RIGHT", y)
 
-    y = AddSection("Background", y - 8)
-    y = AddCheck("enableAdvancedBackground", "Enable advanced background", "Uses QuestKing's framed background panel behind the tracker.", y)
-    y = AddCheck("enableBackdrop", "Enable simple backdrop", "Uses QuestKing's simple tracker backdrop path.", y)
+    y = AddSection("Quest Behavior", "Controls what quest information is shown inside normal quest rows.", y - 8)
+    y = AddCheck("enableItemPopups", "Enable item-start quest popups", "Shows a QuestKing popup when looting an item that starts a quest.", y)
+    y = AddChoice("showCompletedObjectives", "Completed Objectives", "Controls how completed objective lines are shown.", {
+        { label = "Hidden", value = false },
+        { label = "Visible", value = true },
+        { label = "Always", value = "always" },
+    }, true, y)
+    y = AddCheck("hideSupersedingObjectives", "Hide superseded objectives", "Hides old objective tiers when newer objective steps supersede them.", y)
 
-    y = AddSection("Compatibility", y - 8)
+    y = AddSection("Scenario, Dungeon & Raid Content", "Controls objective blocks supplied through Blizzard's scenario APIs for instanced content.", y - 8)
+    y = AddCheck("enableScenarioTracker", "Enable scenario tracker blocks", "Allows scenario, delve, dungeon, and raid-style objective blocks when Blizzard exposes scenario data.", y)
+    y = AddCheck("respectScenarioCriteriaVisibility", "Respect Blizzard criteria visibility", "Hides criteria rows when Blizzard reports they should not be displayed.", y)
+    y = AddCheck("preferRaidScenarioLabel", "Prefer raid label for raid scenario data", "Labels scenario-backed raid content as Raid when applicable.", y)
+    y = AddCheck("showScenarioObjectivesInRaids", "Show scenario objectives in raids", "Allows Blizzard scenario-backed raid objectives to appear in QuestKing.", y)
+    y = AddCheck("allowInstanceScenarioFallback", "Allow instance scenario fallback", "Allows scenario-backed blocks in party and dungeon content even when the simple scenario gate is unavailable.", y)
+    y = AddCheck("showScenarioSpellsInTooltip", "Show scenario spells in tooltip", "Shows spell names from scenario steps in the tooltip when available.", y)
+
+    y = AddSection("Compatibility", "Extra integration settings that are safer kept separate from normal display controls.", y - 8)
     y = AddCheck("enablePetTrackerCompatibility", "Enable PetTracker compatibility helpers", "Disabled by default because third-party frame reparenting can increase taint risk on modern clients.", y)
 
     local resetButton = CreateFrame("Button", PANEL_NAME .. "ResetButton", scrollChild, "UIPanelButtonTemplate")
@@ -659,6 +790,8 @@ local function BuildPanel()
         QueueTrackerRefresh(true)
         Print("Tracker refreshed.")
     end)
+
+    scrollChild:SetHeight(math.max(PANEL_HEIGHT, math.abs(y) + 110))
 
     panel.OnRefresh = RefreshControls
     panel.OnCommit = function() end
