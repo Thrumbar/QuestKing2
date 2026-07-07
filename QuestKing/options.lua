@@ -70,6 +70,12 @@ opt.showCompletedObjectives = true
 -- Hide objectives that are superseded by newer steps (e.g., scenario score tiers, invasion scores)
 opt.hideSupersedingObjectives = true
 
+-- Show Blizzard-style campaign continuation rows such as:
+-- "Continue the campaign by accepting the quest ..."
+-- Retail/Midnight clients expose this through C_CampaignInfo. Classic clients
+-- ignore it safely because the campaign APIs are absent.
+opt.showAvailableCampaignSteps = true
+
 -- Item/Reward anchoring relative to the tracker buttons
 --   "right" (default) places the usable item just to the right of the line stack
 --   "left"  places it to the left

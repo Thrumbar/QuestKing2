@@ -17,6 +17,8 @@ local tremove = table.remove
 local floor = math.floor
 local max = math.max
 local tonumber = tonumber
+local strmatch = string.match
+local strsub = string.sub
 
 local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
 
@@ -27,6 +29,7 @@ local QUEST_ICON_QUESTION_MARK = "QuestIcon-QuestionMark"
 
 local LINE_INDENT_LEFT = 0
 local LINE_RIGHT_PADDING = 4
+local LEADING_SPACE_FALLBACK_WIDTH = 4
 local LINE_GAP = 2
 local TITLE_TO_FIRST_LINE_GAP = 2
 local BAR_VERTICAL_PADDING = 4
@@ -211,6 +214,10 @@ do
 
         self.questID = nil
         self.questIndex = nil
+        self.questLogIndex = nil
+        self.campaignID = nil
+        self.campaignMapID = nil
+        self._availableCampaignRow = nil
 
         self._questCompleted = nil
         self._lastNumObj = nil
@@ -290,6 +297,28 @@ do
         self:SetAlpha(1)
     end
 
+    local function GetLeadingSpaceFallbackIndent(fontString, text)
+        if type(text) ~= "string" or text == "" then
+            return 0, text
+        end
+
+        if fontString and type(fontString.SetIndentedWordWrap) == "function" then
+            return 0, text
+        end
+
+        local spaces = strmatch(text, "^( +)")
+        if not spaces or spaces == "" then
+            return 0, text
+        end
+
+        return (#spaces * LEADING_SPACE_FALLBACK_WIDTH), strsub(text, #spaces + 1)
+    end
+
+    local function lineSetLayoutInsets(self, leftInset, rightInset)
+        self._leftInset = tonumber(leftInset) or 0
+        self._rightInset = tonumber(rightInset) or 0
+    end
+
     local function GetLineAvailableWidth(line)
         local right = line.right
         local rightWidth = 0
@@ -301,7 +330,9 @@ do
             end
         end
 
-        local availableWidth = GetButtonWidth() - LINE_INDENT_LEFT - LINE_RIGHT_PADDING - rightWidth
+        local lineLeftInset = LINE_INDENT_LEFT + (line._autoLeftInset or 0) + (line._leftInset or 0)
+        local lineRightInset = LINE_RIGHT_PADDING + (line._rightInset or 0)
+        local availableWidth = GetButtonWidth() - lineLeftInset - lineRightInset - rightWidth
         if availableWidth < 40 then
             availableWidth = 40
         end
@@ -488,6 +519,10 @@ do
         self.right:ClearAllPoints()
         self:SetWidth(0)
         self:SetHeight(0)
+        self._autoLeftInset = nil
+        self._leftInset = nil
+        self._rightInset = nil
+        self._resolvedLeftInset = nil
     end
 
     local function lineFlash(self)
@@ -525,6 +560,10 @@ do
         line:SetPoint("TOPLEFT", 0, 0)
         line:SetWordWrap(true)
         line:SetNonSpaceWrap(true)
+        if type(line.SetIndentedWordWrap) == "function" then
+            line:SetIndentedWordWrap(true)
+        end
+        line.SetLayoutInsets = lineSetLayoutInsets
         tinsert(self.lines, line)
 
         local right = self:CreateFontString(nil, opt_fontLayer)
@@ -642,7 +681,14 @@ do
 
         line.isTimer = false
 
-        line:SetText(textleft or "")
+        local textLeftValue = textleft or ""
+        local autoLeftInset, displayTextLeft = GetLeadingSpaceFallbackIndent(line, textLeftValue)
+        line._autoLeftInset = autoLeftInset
+        line._leftInset = nil
+        line._rightInset = nil
+        line._resolvedLeftInset = nil
+
+        line:SetText(displayTextLeft or "")
         right:SetText(textright or "")
 
         if r ~= nil then
@@ -719,8 +765,8 @@ do
                 line:ClearAllPoints()
                 right:ClearAllPoints()
 
-                local lineLeftInset = LINE_INDENT_LEFT
-                local lineRightInset = LINE_RIGHT_PADDING
+                local lineLeftInset = LINE_INDENT_LEFT + (line._autoLeftInset or 0) + (line._leftInset or 0)
+                local lineRightInset = LINE_RIGHT_PADDING + (line._rightInset or 0)
 
                 if itemInset > 0 then
                     if itemAnchorSide == "right" then
@@ -734,11 +780,14 @@ do
                     if noTitle then
                         line:SetPoint("TOPLEFT", self, "TOPLEFT", lineLeftInset, 0)
                     else
-                        line:SetPoint("TOPLEFT", self.title, "BOTTOMLEFT", 0, -TITLE_TO_FIRST_LINE_GAP)
+                        line:SetPoint("TOPLEFT", self.titleButton, "BOTTOMLEFT", lineLeftInset, -TITLE_TO_FIRST_LINE_GAP)
                     end
                 else
-                    line:SetPoint("TOPLEFT", lastRegion, "BOTTOMLEFT", 0, -LINE_GAP)
+                    local previousLeftInset = lastRegion._resolvedLeftInset or 0
+                    line:SetPoint("TOPLEFT", lastRegion, "BOTTOMLEFT", lineLeftInset - previousLeftInset, -LINE_GAP)
                 end
+
+                line._resolvedLeftInset = lineLeftInset
 
                 if hasRightText then
                     right:SetPoint("TOPRIGHT", self, "TOPRIGHT", -lineRightInset, 0)

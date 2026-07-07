@@ -52,6 +52,7 @@ opt.rewardAnchorSide = "right"
 opt.enableItemPopups = true
 opt.showCompletedObjectives = false
 opt.hideSupersedingObjectives = true
+opt.showAvailableCampaignSteps = true
 opt.allowDrag = true
 opt.hideWatchFrameBorder = false
 -- Uses QuestKing's safer root-only Blizzard tracker suppression.

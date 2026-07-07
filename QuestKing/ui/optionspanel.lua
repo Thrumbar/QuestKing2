@@ -42,6 +42,7 @@ local managedOptionKeys = {
     enablePetTrackerCompatibility = true,
     showCompletedObjectives = true,
     hideSupersedingObjectives = true,
+    showAvailableCampaignSteps = true,
     enableScenarioTracker = true,
     respectScenarioCriteriaVisibility = true,
     preferRaidScenarioLabel = true,
@@ -759,6 +760,7 @@ local function BuildPanel()
         { label = "Always", value = "always" },
     }, true, y)
     y = AddCheck("hideSupersedingObjectives", "Hide superseded objectives", "Hides old objective tiers when newer objective steps supersede them.", y)
+    y = AddCheck("showAvailableCampaignSteps", "Show campaign continuation hints", "Shows Blizzard-style campaign continuation rows, such as Continue the campaign by accepting the next quest. Turn this off to keep the watch frame less cluttered.", y)
 
     y = AddSection("Scenario, Dungeon & Raid Content", "Controls objective blocks supplied through Blizzard's scenario APIs for instanced content.", y - 8)
     y = AddCheck("enableScenarioTracker", "Enable scenario tracker blocks", "Allows scenario, delve, dungeon, and raid-style objective blocks when Blizzard exposes scenario data.", y)
