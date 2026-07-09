@@ -1,3 +1,12 @@
+3.0.14
+- Fixed QuestKing-attributed `SetRaidTarget()` protected-call taint by removing the addon-owned `SecureActionButtonTemplate` quest item button path.
+- Converted `QuestKingItemButtonTemplate` to a normal button, matching Blizzard's modern Objective Tracker quest item button pattern.
+- Removed secure `type` and `item` attributes from QuestKing quest item buttons and stores quest item state on normal frame fields instead.
+- Added a normal click handler that calls `UseQuestLogSpecialItem(questLogIndex)` for quest item buttons and still supports modified chat-link insertion.
+- Defers QuestKing tracker refresh after quest item clicks so tracker rebuilding does not run inside the click stack.
+- Changed files: ui/itembutton.lua, ui/itembutton.xml.
+
+
 3.0.13
 - Fixed the **Allow QuestKing tracker dragging** AddOns setting so enabling it also unlocks the tracker drag state.
 - Fixed the tracker drag gate so both conditions are now required before dragging works:

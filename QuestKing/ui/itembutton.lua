@@ -219,6 +219,79 @@ local function SafeGetItemIDFromLink(link)
     return nil
 end
 
+local function SafeGetActiveChatWindow()
+    if ChatFrameUtil and type(ChatFrameUtil.GetActiveWindow) == "function" then
+        local ok, activeWindow = pcall(ChatFrameUtil.GetActiveWindow)
+        if ok and activeWindow then
+            return activeWindow
+        end
+    end
+
+    if type(_G.ChatEdit_GetActiveWindow) == "function" then
+        local ok, activeWindow = pcall(_G.ChatEdit_GetActiveWindow)
+        if ok and activeWindow then
+            return activeWindow
+        end
+    end
+
+    return nil
+end
+
+local function SafeInsertChatLink(link)
+    if not link or not SafeGetActiveChatWindow() then
+        return false
+    end
+
+    if ChatFrameUtil and type(ChatFrameUtil.InsertLink) == "function" then
+        local ok, inserted = pcall(ChatFrameUtil.InsertLink, link)
+        if ok and inserted ~= false then
+            return true
+        end
+    end
+
+    if type(_G.ChatEdit_InsertLink) == "function" then
+        local ok, inserted = pcall(_G.ChatEdit_InsertLink, link)
+        if ok and inserted ~= false then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function IsChatLinkModifiedClick()
+    if type(_G.IsModifiedClick) ~= "function" then
+        return false
+    end
+
+    local ok, isModified = pcall(_G.IsModifiedClick, "CHATLINK")
+    return ok and isModified and true or false
+end
+
+local function SafeUseQuestLogSpecialItem(questLogIndex)
+    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
+        return false
+    end
+
+    if type(_G.UseQuestLogSpecialItem) ~= "function" then
+        return false
+    end
+
+    local ok = pcall(_G.UseQuestLogSpecialItem, questLogIndex)
+    return ok and true or false
+end
+
+local function QueuePostClickTrackerRefresh()
+    if C_Timer and type(C_Timer.After) == "function" then
+        C_Timer.After(0, function()
+            QueueTrackerRefresh(true)
+        end)
+        return
+    end
+
+    QueueTrackerRefresh(true)
+end
+
 local function ClearButtonState(itemButton)
     if not itemButton then
         return
@@ -385,7 +458,7 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
 
     if IsInCombatLockdownCompat() then
         local currentQuestLogIndex = itemButton.questLogIndex
-        local currentItemLink = itemButton.GetAttribute and itemButton:GetAttribute("item") or nil
+        local currentItemLink = itemButton.itemLink
 
         if currentQuestLogIndex ~= questLogIndex or currentItemLink ~= link then
             itemButton._pendingQuestLogIndex = questLogIndex
@@ -396,8 +469,6 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
             return itemButton
         end
     else
-        itemButton:SetAttribute("type", "item")
-        itemButton:SetAttribute("item", link)
         itemButton._pendingQuestLogIndex = nil
         itemButton._pendingItemLink = nil
     end
@@ -438,10 +509,6 @@ function QuestKing.WatchButton:RemoveItemButton()
     itemButton:Hide()
     itemButton:ClearAllPoints()
 
-    if itemButton.SetAttribute then
-        itemButton:SetAttribute("item", nil)
-    end
-
     ClearButtonState(itemButton)
     self.itemButton = nil
 
@@ -475,9 +542,6 @@ function QuestKing_QuestObjectiveItem_OnUpdate(self, elapsed)
     if self.itemLink ~= link then
         self.itemLink = link
         self.itemID = SafeGetItemIDFromLink(link)
-        if not IsInCombatLockdownCompat() and self.SetAttribute then
-            self:SetAttribute("item", link)
-        end
     end
 
     UpdateRangeIndicator(self)
@@ -504,6 +568,32 @@ function QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton)
         SafeSetItemButtonTextureVertexColor(itemButton, 0.4, 0.4, 0.4)
     else
         SafeSetItemButtonTextureVertexColor(itemButton, 1, 1, 1)
+    end
+end
+
+function QuestKing_QuestObjectiveItem_OnClick(self, mouseButton)
+    if not self then
+        return
+    end
+
+    local questLogIndex = self.questLogIndex
+    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
+        return
+    end
+
+    if IsChatLinkModifiedClick() then
+        local link = self.itemLink
+        if not link then
+            link = GetQuestLogSpecialItemInfoCompat(questLogIndex)
+        end
+
+        if SafeInsertChatLink(link) then
+            return
+        end
+    end
+
+    if SafeUseQuestLogSpecialItem(questLogIndex) then
+        QueuePostClickTrackerRefresh()
     end
 end
 

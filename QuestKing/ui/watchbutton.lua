@@ -790,8 +790,6 @@ do
                 line._resolvedLeftInset = lineLeftInset
 
                 if hasRightText then
-                    right:SetPoint("TOPRIGHT", self, "TOPRIGHT", -lineRightInset, 0)
-
                     local rightWidth = right:GetStringWidth() or 0
                     if rightWidth < 0 then
                         rightWidth = 0
@@ -803,6 +801,9 @@ do
                     end
 
                     line:SetWidth(availableWidth)
+                    right:SetWidth(rightWidth)
+                    right:SetHeight(GetLineHeight())
+                    right:SetPoint("TOPLEFT", line, "TOPRIGHT", 0, 0)
                 else
                     line:SetWidth(buttonWidth - lineLeftInset - lineRightInset)
                 end
