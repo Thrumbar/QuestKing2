@@ -234,14 +234,26 @@ local function GetTrackedAchievementCount()
 end
 
 local function GetMaxQuests()
-    if C_QuestLog and C_QuestLog.GetMaxNumQuests then
-        local ok, count = pcall(C_QuestLog.GetMaxNumQuests)
+    -- C_QuestLog.GetMaxNumQuests can return Blizzard's broad internal quest cap
+    -- on modern clients. That value includes hidden/system/world quest buckets and
+    -- is not the player's normal accepted quest-log capacity.
+    if C_QuestLog and C_QuestLog.GetMaxNumQuestsCanAccept then
+        local ok, count = pcall(C_QuestLog.GetMaxNumQuestsCanAccept)
         if ok and type(count) == "number" and count > 0 then
             return count
         end
     end
 
-    return _G.MAX_QUESTS or 25
+    -- Older clients may only expose GetMaxNumQuests. Keep it as a fallback, but
+    -- reject modern internal-cap values such as 175 so the title does not lie.
+    if C_QuestLog and C_QuestLog.GetMaxNumQuests then
+        local ok, count = pcall(C_QuestLog.GetMaxNumQuests)
+        if ok and type(count) == "number" and count > 0 and count <= 50 then
+            return count
+        end
+    end
+
+    return _G.MAX_QUESTLOG_QUESTS or _G.MAX_QUESTS or 25
 end
 
 local function GetNumQuestWatches()

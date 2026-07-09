@@ -48,14 +48,23 @@ local function QueueTrackerLayoutRefresh(forceBuild)
 end
 
 local function GetQuestCap()
-    if C_QuestLog and C_QuestLog.GetMaxNumQuests then
-        local ok, count = pcall(C_QuestLog.GetMaxNumQuests)
+    -- Use the accepted quest-log capacity, not Blizzard's broad internal quest
+    -- cap. On modern clients GetMaxNumQuests can report values such as 175.
+    if C_QuestLog and C_QuestLog.GetMaxNumQuestsCanAccept then
+        local ok, count = pcall(C_QuestLog.GetMaxNumQuestsCanAccept)
         if ok and type(count) == "number" and count > 0 then
             return count
         end
     end
 
-    return _G.MAX_QUESTS or 25
+    if C_QuestLog and C_QuestLog.GetMaxNumQuests then
+        local ok, count = pcall(C_QuestLog.GetMaxNumQuests)
+        if ok and type(count) == "number" and count > 0 and count <= 50 then
+            return count
+        end
+    end
+
+    return _G.MAX_QUESTLOG_QUESTS or _G.MAX_QUESTS or 25
 end
 
 local function ClampAlpha(alpha)
