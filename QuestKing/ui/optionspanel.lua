@@ -35,13 +35,19 @@ local scrollChild = nil
 local settingsCategory = nil
 local settingsCategoryID = nil
 local registered = false
+local suppressionWarningShown = false
+
+local IS_MAINLINE = _G.WOW_PROJECT_MAINLINE ~= nil
+    and _G.WOW_PROJECT_ID == _G.WOW_PROJECT_MAINLINE
+    or false
 
 local managedOptionKeys = {
     disableBlizzard = true,
+    attachWorldQuestTracker = true,
     enableItemPopups = true,
-    enablePetTrackerCompatibility = true,
     showCompletedObjectives = true,
     hideSupersedingObjectives = true,
+    trackerPopulationPolicy = true,
     showAvailableCampaignSteps = true,
     enableScenarioTracker = true,
     respectScenarioCriteriaVisibility = true,
@@ -58,11 +64,63 @@ local managedOptionKeys = {
     buttonWidth = true,
     lineHeight = true,
     titleHeight = true,
+    font = true,
+    fontChallengeTimer = true,
     fontSize = true,
+    fontStyle = true,
+    fontLayer = true,
     itemButtonScale = true,
     itemAnchorSide = true,
     rewardAnchorSide = true,
     tooltipAnchor = true,
+}
+
+local structuralRefreshKeys = {
+    trackerPopulationPolicy = true,
+    showAvailableCampaignSteps = true,
+}
+
+local presentationRefreshKeys = {
+    allowDrag = true,
+    hideToggleButtonBorder = true,
+    hideWatchFrameBorder = true,
+    enableAdvancedBackground = true,
+    enableBackdrop = true,
+    trackerBackgroundAlpha = true,
+    trackerAlpha = true,
+    trackerScale = true,
+    buttonWidth = true,
+    titleHeight = true,
+    font = true,
+    fontChallengeTimer = true,
+    fontSize = true,
+    fontStyle = true,
+    fontLayer = true,
+    itemButtonScale = true,
+}
+
+local renderRefreshKeys = {
+    showCompletedObjectives = true,
+    hideSupersedingObjectives = true,
+    trackerPopulationPolicy = true,
+    showAvailableCampaignSteps = true,
+    enableScenarioTracker = true,
+    respectScenarioCriteriaVisibility = true,
+    preferRaidScenarioLabel = true,
+    showScenarioObjectivesInRaids = true,
+    allowInstanceScenarioFallback = true,
+    showScenarioSpellsInTooltip = true,
+    attachWorldQuestTracker = true,
+    buttonWidth = true,
+    lineHeight = true,
+    titleHeight = true,
+    font = true,
+    fontSize = true,
+    fontStyle = true,
+    fontLayer = true,
+    itemButtonScale = true,
+    itemAnchorSide = true,
+    rewardAnchorSide = true,
 }
 
 local function SafeError(err)
@@ -84,7 +142,7 @@ local function SafeCallMethod(target, methodName, ...)
     local ok, result = pcall(method, target, ...)
     if not ok then
         SafeError(result)
-        return true, nil
+        return false, nil
     end
 
     return true, result
@@ -101,6 +159,18 @@ local function Print(message, ...)
     elseif type(_G.print) == "function" then
         _G.print("QuestKing: " .. tostring(message))
     end
+end
+
+local function WarnAboutMainlineTrackerSuppression()
+    if suppressionWarningShown or not IS_MAINLINE then
+        return
+    end
+
+    suppressionWarningShown = true
+    Print(
+        "The saved advanced setting is hiding Blizzard's entire Objective "
+            .. "Tracker. Unsupported Retail tracker content may not be visible."
+    )
 end
 
 local function EnsureSavedVariables()
@@ -214,23 +284,94 @@ local function ApplyTrackerPresentation()
     local tracker = QuestKing.Tracker
 
     if type(tracker) == "table" then
+        if type(tracker.ApplyPresentationSettings) == "function" then
+            SafeCallMethod(tracker, "ApplyPresentationSettings")
+            return
+        end
+
         SafeCallMethod(tracker, "SetCustomAlpha")
         SafeCallMethod(tracker, "SetCustomScale")
         SafeCallMethod(tracker, "CheckDrag")
         SafeCallMethod(tracker, "RefreshLayoutMetrics")
         SafeCallMethod(tracker, "ApplyTrackerBackground")
     end
+
+    local watchButton = QuestKing.WatchButton
+    if type(watchButton) == "table" then
+        SafeCallMethod(watchButton, "RefreshFonts")
+    end
 end
 
-local function QueueTrackerRefresh(forceBuild)
-    if not SafeCallMethod(QuestKing, "QueueTrackerUpdate", forceBuild and true or false, false) then
-        SafeCallMethod(QuestKing, "UpdateTracker", forceBuild and true or false, false)
+local trackerPresentationPending = false
+
+local function FlushTrackerPresentation()
+    trackerPresentationPending = false
+    ApplyTrackerPresentation()
+end
+
+local function QueueTrackerPresentation()
+    if trackerPresentationPending then
+        return
+    end
+
+    trackerPresentationPending = true
+
+    local timer = _G.C_Timer
+    if type(timer) == "table" and type(timer.After) == "function" then
+        timer.After(0, FlushTrackerPresentation)
+    else
+        FlushTrackerPresentation()
+    end
+end
+
+local function RefreshPetTrackerIntegration()
+    local compatibility = QuestKing.Compatibility
+    local petTracker = type(compatibility) == "table" and compatibility.PetTracker or nil
+    if type(petTracker) == "table" then
+        SafeCallMethod(petTracker, "RefreshPetTrackerCompatibility")
+    end
+end
+
+local function RefreshWorldQuestTrackerIntegration()
+    local adapter = QuestKing.WorldQuestTrackerAdapter
+    if type(adapter) == "table" then
+        SafeCallMethod(adapter, "Refresh")
+    end
+end
+
+local function QueueTrackerRefresh(forceBuild, reason)
+    if not SafeCallMethod(
+        QuestKing,
+        "RequestTrackerUpdate",
+        forceBuild and true or false,
+        reason or "options",
+        false
+    ) then
+        if not SafeCallMethod(
+            QuestKing,
+            "QueueTrackerUpdate",
+            forceBuild and true or false,
+            false,
+            reason or "options"
+        ) then
+            SafeCallMethod(
+                QuestKing,
+                "UpdateTracker",
+                forceBuild and true or false,
+                false,
+                reason or "options"
+            )
+        end
     end
 end
 
 local function SyncDragLockWithAllowDrag()
     local db = EnsureSavedVariables()
-    db.dragLocked = GetOptions().allowDrag ~= true
+    if GetOptions().allowDrag ~= true then
+        db.dragLocked = true
+    elseif type(db.dragLocked) ~= "boolean" then
+        db.dragLocked = false
+    end
 end
 
 local function ApplyBlizzardTrackerSetting()
@@ -259,6 +400,13 @@ local function ApplySetting(key, value, forceBuild)
 
     if key == "disableBlizzard" then
         ApplyBlizzardTrackerSetting()
+        if value == true then
+            WarnAboutMainlineTrackerSuppression()
+        end
+    elseif key == "attachWorldQuestTracker" then
+        RefreshWorldQuestTrackerIntegration()
+    elseif key == "enableItemPopups" then
+        SafeCallMethod(QuestKing, "InitLoot")
     elseif key == "allowDrag" and type(QuestKing.Tracker) == "table" then
         db.dragLocked = value ~= true
 
@@ -266,13 +414,16 @@ local function ApplySetting(key, value, forceBuild)
             QuestKing.Tracker:CaptureCurrentPosition()
         end
 
-        if type(QuestKing.Tracker.CheckDrag) == "function" then
-            QuestKing.Tracker:CheckDrag()
-        end
     end
 
-    ApplyTrackerPresentation()
-    QueueTrackerRefresh(forceBuild ~= false)
+    if presentationRefreshKeys[key] then
+        QueueTrackerPresentation()
+    end
+
+    local structuralRefresh = structuralRefreshKeys[key] == true
+    if structuralRefresh or renderRefreshKeys[key] then
+        QueueTrackerRefresh(structuralRefresh, "options")
+    end
 end
 
 local function ApplySavedOptions()
@@ -296,6 +447,13 @@ local function ApplySavedOptions()
     end
 
     SyncDragLockWithAllowDrag()
+    if options.disableBlizzard == true then
+        ApplyBlizzardTrackerSetting()
+        WarnAboutMainlineTrackerSuppression()
+    end
+    ApplyTrackerPresentation()
+    RefreshPetTrackerIntegration()
+    RefreshWorldQuestTrackerIntegration()
 end
 
 local function RestoreBaselineOptions()
@@ -311,8 +469,11 @@ local function RestoreBaselineOptions()
     SyncDragLockWithAllowDrag()
 
     ApplyBlizzardTrackerSetting()
+    RefreshPetTrackerIntegration()
+    RefreshWorldQuestTrackerIntegration()
     ApplyTrackerPresentation()
-    QueueTrackerRefresh(true)
+    SafeCallMethod(QuestKing, "InitLoot")
+    QueueTrackerRefresh(true, "displaydata")
 end
 
 local function CreateText(parent, text, template, x, y)
@@ -715,12 +876,44 @@ local function BuildPanel()
     y = y - 32
     y = AddDescription("Settings are grouped by what they affect: tracker visibility, frame appearance, row layout, quest behavior, scenario content, and compatibility. Changes are saved in QuestKingDB and apply without Ace3 or other helper libraries.", y)
 
-    y = AddSection("Main Tracker", "Controls whether QuestKing replaces the default tracker and how the main tracker frame behaves on screen.", y)
-    y = AddCheck("disableBlizzard", "Hide Blizzard Objective Tracker", "Uses QuestKing's conservative Blizzard tracker suppression path.", y)
+    y = AddSection("Main Tracker", "Controls QuestKing's tracker and whether Blizzard's tracker remains visible as a fallback.", y)
+    y = AddCheck(
+        "disableBlizzard",
+        "Hide entire Blizzard Objective Tracker (advanced)",
+        "QuestKing does not yet replace every Blizzard tracker module. Enabling this can hide objectives QuestKing cannot display.",
+        y
+    )
+    if IS_MAINLINE then
+        y = AddDescription(
+            "Retail fallback: leave this disabled to keep UI Widgets, Adventures, Monthly Activities, Initiative Tasks, and Profession Recipes visible in Blizzard's tracker.",
+            y
+        )
+    end
     y = AddCheck("allowDrag", "Allow QuestKing tracker dragging", "When enabled, the tracker keeps its current position and can be moved by dragging the titlebar.", y)
     y = AddCheck("hideToggleButtonBorder", "Hide tracker toggle button border", "Keeps the tracker titlebar cleaner by hiding the toggle button border.", y)
     y = AddSlider("trackerScale", "Tracker Scale", "Changes the overall QuestKing tracker scale.", 0.70, 1.50, 0.05, 2, "%.2f", y - 6)
     y = AddSlider("trackerAlpha", "Tracker Alpha", "Changes the opacity of the whole QuestKing tracker, including text and buttons.", 0.35, 1.00, 0.05, 2, "%.2f", y)
+
+    if _G.WOW_PROJECT_ID == nil
+        or _G.WOW_PROJECT_MAINLINE == nil
+        or _G.WOW_PROJECT_ID == _G.WOW_PROJECT_MAINLINE then
+        y = AddSection(
+            "Addon Integrations",
+            "Controls optional addons that can attach their existing display "
+                .. "to QuestKing without transferring ownership of their "
+                .. "frames or data.",
+            y - 8
+        )
+        y = AddCheck(
+            "attachWorldQuestTracker",
+            "Attach World Quest Tracker to QuestKing",
+            "When World Quest Tracker's own Attach to Quest Log setting is "
+                .. "enabled, anchors its existing tracker panel beneath "
+                .. "QuestKing. Disable this to restore World Quest Tracker's "
+                .. "native Blizzard attachment.",
+            y
+        )
+    end
 
     y = AddSection("Frame Appearance", "Controls the watch frame background, border, and fill opacity without changing quest row text visibility.", y - 8)
     y = AddCheck("enableAdvancedBackground", "Enable advanced background", "Uses QuestKing's framed background panel behind the tracker.", y)
@@ -732,7 +925,30 @@ local function BuildPanel()
     y = AddSlider("buttonWidth", "Button Width", "Width of each QuestKing tracker row.", 180, 360, 5, 0, "%d", y)
     y = AddSlider("lineHeight", "Line Height", "Height of each objective line.", 12, 28, 1, 0, "%d", y)
     y = AddSlider("titleHeight", "Title Height", "Height of the quest title line.", 12, 30, 1, 0, "%d", y)
+    local standardFont = _G.STANDARD_TEXT_FONT or [[Fonts\FRIZQT__.TTF]]
+    local fontChoices = {
+        { label = "Default UI", value = standardFont },
+        { label = "Source Sans", value = [[Interface\AddOns\QuestKing\fonts\SourceSansPro-Regular.ttf]] },
+        { label = "Source Sans Semibold", value = [[Interface\AddOns\QuestKing\fonts\SourceSansPro-Semibold.ttf]] },
+        { label = "Source Sans Bold", value = [[Interface\AddOns\QuestKing\fonts\SourceSansPro-Bold.ttf]] },
+    }
+    y = AddChoice("font", "Tracker Font", "Font used for tracker titles and objective text.", fontChoices, standardFont, y)
+    y = AddChoice("fontChallengeTimer", "Challenge Timer Font", "Font used for challenge, proving-ground, and score timer text.", fontChoices, standardFont, y)
     y = AddSlider("fontSize", "Font Size", "Base tracker font size.", 8, 20, 1, 0, "%d", y)
+    y = AddChoice("fontStyle", "Font Outline", "Outline and monochrome flags applied to tracker text.", {
+        { label = "None", value = "NONE" },
+        { label = "Outline", value = "OUTLINE" },
+        { label = "Thick Outline", value = "THICKOUTLINE" },
+        { label = "Monochrome", value = "MONOCHROME" },
+        { label = "Mono + Outline", value = "MONOCHROME,OUTLINE" },
+    }, "NONE", y)
+    y = AddChoice("fontLayer", "Font Draw Layer", "Draw layer used by QuestKing-owned tracker FontStrings.", {
+        { label = "Background", value = "BACKGROUND" },
+        { label = "Border", value = "BORDER" },
+        { label = "Artwork", value = "ARTWORK" },
+        { label = "Overlay", value = "OVERLAY" },
+        { label = "Highlight", value = "HIGHLIGHT" },
+    }, "OVERLAY", y)
 
     y = AddSection("Item Buttons, Rewards & Tooltips", "Controls the side and scale of tracker extras that attach to quest rows.", y - 8)
     y = AddSlider("itemButtonScale", "Quest Item Button Scale", "Scale multiplier for quest item buttons relative to the tracker.", 0.50, 1.75, 0.05, 2, "%.2f", y)
@@ -759,6 +975,11 @@ local function BuildPanel()
         { label = "Visible", value = true },
         { label = "Always", value = "always" },
     }, true, y)
+    y = AddChoice("trackerPopulationPolicy", "Tracker Quest Population", "Automatic shows every accepted quest on Classic-family clients, including zero-objective quests, and only watched quests on Mainline. Watched Only and All Accepted force the selected rule on every client.", {
+        { label = "Automatic", value = "automatic" },
+        { label = "Watched Only", value = "watched" },
+        { label = "All Accepted", value = "all" },
+    }, "automatic", y)
     y = AddCheck("hideSupersedingObjectives", "Hide superseded objectives", "Hides old objective tiers when newer objective steps supersede them.", y)
     y = AddCheck("showAvailableCampaignSteps", "Show campaign continuation hints", "Shows Blizzard-style campaign continuation rows, such as Continue the campaign by accepting the next quest. Turn this off to keep the watch frame less cluttered.", y)
 
@@ -769,9 +990,6 @@ local function BuildPanel()
     y = AddCheck("showScenarioObjectivesInRaids", "Show scenario objectives in raids", "Allows Blizzard scenario-backed raid objectives to appear in QuestKing.", y)
     y = AddCheck("allowInstanceScenarioFallback", "Allow instance scenario fallback", "Allows scenario-backed blocks in party and dungeon content even when the simple scenario gate is unavailable.", y)
     y = AddCheck("showScenarioSpellsInTooltip", "Show scenario spells in tooltip", "Shows spell names from scenario steps in the tooltip when available.", y)
-
-    y = AddSection("Compatibility", "Extra integration settings that are safer kept separate from normal display controls.", y - 8)
-    y = AddCheck("enablePetTrackerCompatibility", "Enable PetTracker compatibility helpers", "Disabled by default because third-party frame reparenting can increase taint risk on modern clients.", y)
 
     local resetButton = CreateFrame("Button", PANEL_NAME .. "ResetButton", scrollChild, "UIPanelButtonTemplate")
     resetButton:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 18, y - 12)
@@ -789,7 +1007,7 @@ local function BuildPanel()
     refreshButton:SetText("Refresh Tracker")
     refreshButton:SetScript("OnClick", function()
         ApplyTrackerPresentation()
-        QueueTrackerRefresh(true)
+        QueueTrackerRefresh(true, "displaydata")
         Print("Tracker refreshed.")
     end)
 
@@ -880,8 +1098,15 @@ local function RegisterSlashCommand()
     _G.SLASH_QUESTKINGOPTIONS1 = "/qkoptions"
     _G.SLASH_QUESTKINGOPTIONS2 = "/questkingoptions"
 
-    _G.SlashCmdList = _G.SlashCmdList or {}
-    _G.SlashCmdList.QUESTKINGOPTIONS = function()
+    -- SlashCmdList is created and owned by Blizzard. Reassigning its global
+    -- reference from addon code taints the shared slash-command import path,
+    -- including protected Blizzard commands executed from macros.
+    local slashCmdList = _G.SlashCmdList
+    if type(slashCmdList) ~= "table" then
+        return
+    end
+
+    slashCmdList.QUESTKINGOPTIONS = function()
         OpenOptions()
     end
 end

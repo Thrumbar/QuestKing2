@@ -105,6 +105,163 @@ local function deleteArrayValue(tbl, value)
     return false
 end
 
+local function getScenarioStepInfoSafe(stepID)
+    if type(QuestKing.GetScenarioStepInfo) == "function" then
+        return QuestKing.GetScenarioStepInfo(stepID, false)
+    end
+
+    if not (C_Scenario and C_Scenario.GetStepInfo and stepID) then
+        return nil, nil, 0, false, false, false, nil, nil, nil, nil, nil, nil
+    end
+
+    local ok,
+        title,
+        description,
+        numCriteria,
+        stepFailed,
+        isBonusStep,
+        isForCurrentStepOnly,
+        shouldShowBonusObjective,
+        _,
+        spells,
+        weightedProgress,
+        rewardQuestID,
+        widgetSetID = pcall(C_Scenario.GetStepInfo, stepID)
+
+    if not ok then
+        return nil, nil, 0, false, false, false, nil, nil, nil, nil, nil, nil
+    end
+
+    return title,
+        description,
+        SafeNumber(numCriteria, 0) or 0,
+        stepFailed and true or false,
+        isBonusStep and true or false,
+        isForCurrentStepOnly and true or false,
+        shouldShowBonusObjective,
+        spells,
+        SafeNumber(weightedProgress, nil),
+        SafeNumber(rewardQuestID, nil),
+        SafeNumber(widgetSetID, nil),
+        SafeNumber(stepID, nil)
+end
+
+local function getScenarioCriteriaInfoSafe(stepID, criteriaIndex)
+    if type(QuestKing.GetScenarioCriteriaInfo) == "function" then
+        return QuestKing.GetScenarioCriteriaInfo(stepID, criteriaIndex, false)
+    end
+
+    if not (C_Scenario and C_Scenario.GetCriteriaInfoByStep and stepID) then
+        return nil, nil, false, 0, 0, nil, nil, nil, nil, 0, 0, false, false, false
+    end
+
+    local ok,
+        criteriaString,
+        criteriaType,
+        criteriaCompleted,
+        quantity,
+        totalQuantity,
+        flags,
+        assetID,
+        quantityString,
+        criteriaID,
+        duration,
+        elapsed,
+        criteriaFailed,
+        isWeightedProgress =
+        pcall(C_Scenario.GetCriteriaInfoByStep, stepID, criteriaIndex)
+
+    if not ok then
+        return nil, nil, false, 0, 0, nil, nil, nil, nil, 0, 0, false, false, false
+    end
+
+    return criteriaString,
+        criteriaType,
+        criteriaCompleted,
+        quantity,
+        totalQuantity,
+        flags,
+        assetID,
+        quantityString,
+        criteriaID,
+        duration,
+        elapsed,
+        criteriaFailed,
+        isWeightedProgress,
+        false
+end
+
+local function getScenarioBonusStepsSafe()
+    if not (C_Scenario and C_Scenario.GetBonusSteps) then
+        return {}, false
+    end
+
+    local ok, bonusSteps = pcall(C_Scenario.GetBonusSteps)
+    if ok and type(bonusSteps) == "table" then
+        return bonusSteps, true
+    end
+
+    return {}, false
+end
+
+local function getScenarioSupersededObjectivesSafe()
+    if not (C_Scenario and C_Scenario.GetSupersededObjectives) then
+        return nil
+    end
+
+    local ok, objectives = pcall(C_Scenario.GetSupersededObjectives)
+    if ok and type(objectives) == "table" then
+        return objectives
+    end
+
+    return nil
+end
+
+local function getLegacyScenarioBonusStateSafe()
+    if not (C_Scenario and C_Scenario.GetInfo) then
+        return false, false
+    end
+
+    local ok,
+        scenarioName,
+        currentStage,
+        numStages,
+        flags,
+        hasBonusStep,
+        isBonusStepComplete = pcall(C_Scenario.GetInfo)
+
+    if not ok then
+        return false, false
+    end
+
+    return hasBonusStep and true or false,
+        isBonusStepComplete and true or false
+end
+
+local function isInScenarioSafe()
+    if not C_Scenario then
+        return false
+    end
+
+    if C_Scenario.IsInScenario then
+        local ok, inScenario = pcall(C_Scenario.IsInScenario)
+        if ok then
+            return inScenario and true or false
+        end
+    end
+
+    if C_Scenario.GetInfo then
+        local ok, _, currentStage, numStages, _, hasBonusStep = pcall(C_Scenario.GetInfo)
+        if ok then
+            currentStage = SafeNumber(currentStage, 0) or 0
+            numStages = SafeNumber(numStages, 0) or 0
+            return currentStage > 0 or numStages > 0 or (hasBonusStep and true or false)
+        end
+    end
+
+    return false
+end
+
 local function getTasksTableSafe()
     if GetTasksTable then
         return GetTasksTable() or {}
@@ -112,12 +269,43 @@ local function getTasksTableSafe()
     return {}
 end
 
+local function getTrackerTaskIDs()
+    local taskIDs = {}
+    local seenQuestIDs = {}
+    local tasksTable = getTasksTableSafe()
+
+    for i = 1, #tasksTable do
+        local questID = tasksTable[i]
+        if type(questID) == "number" and questID > 0 and not seenQuestIDs[questID] then
+            seenQuestIDs[questID] = true
+            taskIDs[#taskIDs + 1] = questID
+        end
+    end
+
+    local fallbackIDs = QuestKing.trackerWorldQuestFallbackIDs
+    if type(fallbackIDs) == "table" then
+        for i = 1, #fallbackIDs do
+            local questID = fallbackIDs[i]
+            if type(questID) == "number" and questID > 0 and not seenQuestIDs[questID] then
+                seenQuestIDs[questID] = true
+                taskIDs[#taskIDs + 1] = questID
+            end
+        end
+    end
+
+    return taskIDs
+end
+
 local function getTaskInfoSafe(questID)
     if GetTaskInfo then
-        local isInArea, isOnMap, numObjectives = GetTaskInfo(questID)
-        return isInArea and true or false, isOnMap and true or false, numObjectives or 0
+        local isInArea, isOnMap, numObjectives, taskName, displayAsObjective = GetTaskInfo(questID)
+        return isInArea and true or false,
+            isOnMap and true or false,
+            SafeNumber(numObjectives, 0) or 0,
+            SafeString(taskName, nil),
+            displayAsObjective and true or false
     end
-    return false, false, 0
+    return false, false, 0, nil, false
 end
 
 local function getQuestLogIndexByIDSafe(questID)
@@ -308,20 +496,21 @@ local function getQuestObjectiveInfoCompat(questID, objectiveIndex, displayCompl
             local text = SafeString(objective.text, UNKNOWN)
             local objectiveType = SafeString(objective.type or objective.objectiveType, nil)
             local isDone = (objective.finished or objective.completed) and true or false
-            local displayAsObjective = objective.useFullPositionTooltip and true or false
 
             objective.numFulfilled = SafeNumber(objective.numFulfilled, nil)
             objective.numRequired = SafeNumber(objective.numRequired, nil)
 
-            return text, objectiveType, isDone, displayAsObjective, objective
+            return text, objectiveType, isDone, objective
         end
     end
 
     if GetQuestObjectiveInfo then
-        return GetQuestObjectiveInfo(questID, objectiveIndex, displayComplete)
+        local text, objectiveType, isDone =
+            GetQuestObjectiveInfo(questID, objectiveIndex, displayComplete)
+        return text, objectiveType, isDone, nil
     end
 
-    return nil, nil, nil, nil, nil
+    return nil, nil, nil, nil
 end
 
 local function getQuestProgressBarPercentCompat(questID)
@@ -339,6 +528,28 @@ local function shouldSkipTrackedTaskQuest(questID)
         return QuestKing:ShouldSkipBonusTask(questID)
     end
     return false
+end
+
+local function freeLineBars(line)
+    if not line then
+        return
+    end
+
+    if line.timerBar and line.timerBar.Free then
+        line.timerBar:Free()
+    end
+
+    if line.progressBar and line.progressBar.Free then
+        line.progressBar:Free()
+    end
+end
+
+local function freeNextButtonLineBars(button)
+    if not button or type(button.lines) ~= "table" then
+        return
+    end
+
+    freeLineBars(button.lines[(button.currentLine or 0) + 1])
 end
 
 local function clamp01(value)
@@ -395,13 +606,13 @@ local function buildObjectiveDisplayText(desc, currentValue, maxValue, objective
     end
 
     if currentValue and maxValue and maxValue > 0 then
-        return desc, format(": %d/%d", currentValue, maxValue)
+        return format("%d/%d %s", currentValue, maxValue, desc), nil
     end
 
     if objectiveInfo and IsSafeNumber(objectiveInfo.numRequired) and objectiveInfo.numRequired > 0 and objectiveInfo.numFulfilled ~= nil then
         local fulfilled, required = normalizeObjectiveNumbers(objectiveInfo.numFulfilled, objectiveInfo.numRequired)
         if fulfilled and required then
-            return desc, format(": %d/%d", fulfilled, required)
+            return format("%d/%d %s", fulfilled, required, desc), nil
         end
     end
 
@@ -493,7 +704,7 @@ local function addBonusObjectiveTooltipObjectives(tooltip, questID)
     local added = 0
 
     for i = 1, numObjectives do
-        local desc, objectiveType, isDone, _, objectiveInfo = getQuestObjectiveInfoCompat(questID, i, false)
+        local desc, objectiveType, isDone, objectiveInfo = getQuestObjectiveInfoCompat(questID, i, false)
 
         if objectiveType == "progressbar" then
             local percent = SafeNumber(getQuestProgressBarPercentCompat(questID), 0) or 0
@@ -609,7 +820,7 @@ local function showBonusRewardTooltip(owner, questID)
     tooltip:SetText(SafeString(taggedTitle, UNKNOWN), r, g, b)
 
     if getSuperTrackedQuestIDSafe() == questID then
-        tooltip:AddLine(QUEST_SUPER_TRACKED or "Super Tracked", 0.55, 0.82, 1.00)
+        tooltip:AddLine("Focused for navigation", 0.55, 0.82, 1.00)
     end
 
     if not hasQuestData then
@@ -645,7 +856,16 @@ function addHeader()
         opt_colors.SectionHeader[2],
         opt_colors.SectionHeader[3]
     )
+    if header.SetMouseMode then
+        header:SetMouseMode(false, false)
+    end
     return header
+end
+
+local function applyTaskHeaderClassification(header, displayAsObjective)
+    if displayAsObjective and header and header.title then
+        header.title:SetText(TRACKER_HEADER_OBJECTIVE)
+    end
 end
 
 -- -----------------------------------------------------------------------------
@@ -653,11 +873,12 @@ end
 -- -----------------------------------------------------------------------------
 
 function QuestKing:UpdateTrackerBonusObjectives()
-    local tasksTable = getTasksTableSafe()
+    local tasksTable = getTrackerTaskIDs()
     local header
 
     if dummyTaskID then
         header = addHeader()
+        applyTaskHeaderClassification(header, dummyTaskUseNonBonusHeader)
 
         local button = WatchButton:GetKeyed("bonus_task_dummy", dummyTaskID)
         button._previousHeader = header
@@ -666,36 +887,63 @@ function QuestKing:UpdateTrackerBonusObjectives()
 
     for i = 1, #tasksTable do
         local questID = tasksTable[i]
-        local isInArea = false
 
         if questID then
-            isInArea = getTaskInfoSafe(questID)
-        end
+            local isInArea, _, numObjectives, _, displayAsObjective = getTaskInfoSafe(questID)
+            local fallbackQuestIDs = QuestKing.trackerWorldQuestFallbackQuestIDs
+            local isWatchedWorldQuestFallback = type(fallbackQuestIDs) == "table"
+                and fallbackQuestIDs[questID] == true
 
-        if isInArea and questID ~= dummyTaskID then
-            if not shouldSkipTrackedTaskQuest(questID) then
-                if not header then
-                    header = addHeader()
+            if (isInArea or isWatchedWorldQuestFallback) and questID ~= dummyTaskID then
+                if not shouldSkipTrackedTaskQuest(questID) then
+                    if not header then
+                        header = addHeader()
+                    end
+                    applyTaskHeaderClassification(header, displayAsObjective)
+
+                    local button = WatchButton:GetKeyed("bonus_task", questID)
+                    button._previousHeader = header
+                    setButtonToBonusTask(button, questID, numObjectives)
                 end
-
-                local button = WatchButton:GetKeyed("bonus_task", questID)
-                button._previousHeader = header
-                setButtonToBonusTask(button, questID)
             end
         end
     end
 
-    if not C_Scenario or not C_Scenario.IsInScenario or not C_Scenario.GetBonusSteps then
+    if not C_Scenario or not isInScenarioSafe() then
         return
     end
 
-    if not C_Scenario.IsInScenario() then
+    local tblBonusSteps, modernBonusStepsUsable = getScenarioBonusStepsSafe()
+
+    if #tblBonusSteps == 0 then
+        if modernBonusStepsUsable then
+            return
+        end
+
+        local hasLegacyBonusStep, isLegacyBonusStepComplete =
+            getLegacyScenarioBonusStateSafe()
+
+        if hasLegacyBonusStep
+            and C_Scenario.GetBonusStepInfo
+            and C_Scenario.GetBonusCriteriaInfo then
+            if not header then
+                header = addHeader()
+            end
+
+            local button = WatchButton:GetKeyed("bonus_step_legacy", "legacy")
+            button._previousHeader = header
+            QuestKing.SetButtonToScenario(
+                button,
+                nil,
+                false,
+                true,
+                isLegacyBonusStepComplete
+            )
+        end
         return
     end
 
-    local tblBonusSteps = C_Scenario.GetBonusSteps() or {}
-
-    supersededObjectives = C_Scenario.GetSupersededObjectives and C_Scenario.GetSupersededObjectives() or nil
+    supersededObjectives = getScenarioSupersededObjectivesSafe()
     if supersededObjectives and opt.hideSupersedingObjectives then
         local hiddenSteps = {}
 
@@ -703,16 +951,20 @@ function QuestKing:UpdateTrackerBonusObjectives()
             local bonusStepIndex = tblBonusSteps[i]
             local supersededIndex = getSupersedingStep(bonusStepIndex)
             if supersededIndex then
-                local _, _, numCriteria, stepFailed = C_Scenario.GetStepInfo(bonusStepIndex)
+                local _, _, numCriteria, stepFailed, _, _, _, _, weightedProgress =
+                    getScenarioStepInfoSafe(bonusStepIndex)
                 numCriteria = SafeNumber(numCriteria, 0) or 0
 
                 local completed = true
 
                 if stepFailed then
                     completed = false
+                elseif SafeNumber(weightedProgress, nil) then
+                    completed = weightedProgress >= 100
                 else
                     for criteriaIndex = 1, numCriteria do
-                        local criteriaString, _, criteriaCompleted = C_Scenario.GetCriteriaInfoByStep(bonusStepIndex, criteriaIndex)
+                        local criteriaString, _, criteriaCompleted =
+                            getScenarioCriteriaInfoSafe(bonusStepIndex, criteriaIndex)
                         if criteriaString and not criteriaCompleted then
                             completed = false
                             break
@@ -733,19 +985,22 @@ function QuestKing:UpdateTrackerBonusObjectives()
 
     for i = 1, #tblBonusSteps do
         local bonusStepIndex = tblBonusSteps[i]
+        local _, _, _, _, _, _, shouldShowBonusObjective =
+            getScenarioStepInfoSafe(bonusStepIndex)
 
-        if not header then
-            header = addHeader()
+        if shouldShowBonusObjective then
+            if not header then
+                header = addHeader()
+            end
+
+            local button = WatchButton:GetKeyed("bonus_step", bonusStepIndex)
+            button._previousHeader = header
+            QuestKing.SetButtonToScenario(button, bonusStepIndex)
         end
-
-        local button = WatchButton:GetKeyed("bonus_step", bonusStepIndex)
-        button._previousHeader = header
-        QuestKing.SetButtonToScenario(button, bonusStepIndex)
     end
 end
 
 function getSupersedingStep(bonusStepIndex)
-    supersededObjectives = C_Scenario and C_Scenario.GetSupersededObjectives and C_Scenario.GetSupersededObjectives() or nil
     if not supersededObjectives then
         return nil
     end
@@ -764,8 +1019,11 @@ end
 -- Bonus task button population
 -- -----------------------------------------------------------------------------
 
-function setButtonToBonusTask(button, questID)
+function setButtonToBonusTask(button, questID, numObjectives)
     button.mouseHandler = mouseHandlerBonusTask
+    local fallbackQuestIDs = QuestKing.trackerWorldQuestFallbackQuestIDs
+    local isWatchedWorldQuestFallback = type(fallbackQuestIDs) == "table"
+        and fallbackQuestIDs[questID] == true
 
     local taggedTitle, level, questIndex = getQuestTitleAndLevelSafe(questID)
     local color = GetQuestDifficultyColor(level or 0)
@@ -781,65 +1039,89 @@ function setButtonToBonusTask(button, questID)
     button.title:SetTextIcon(taggedTitle)
     button.title:SetTextColor(color.r, color.g, color.b)
 
-    local _, _, numObjectives = getTaskInfoSafe(questID)
-    local useNonBonusHeader = false
+    numObjectives = SafeNumber(numObjectives, 0) or 0
     local visibleObjectives = 0
+    local questComplete = false
+
+    if type(Compat.IsQuestComplete) == "function" then
+        questComplete = Compat.IsQuestComplete(questID, questIndex) and true or false
+    elseif C_QuestLog and type(C_QuestLog.IsComplete) == "function" then
+        local ok, result = pcall(C_QuestLog.IsComplete, questID)
+        questComplete = ok and (result == true or result == 1) or false
+    end
 
     for i = 1, numObjectives do
-        local desc, objectiveType, isDone, displayAsObjective, objectiveInfo = getQuestObjectiveInfoCompat(questID, i, false)
-        useNonBonusHeader = useNonBonusHeader or displayAsObjective
+        -- Request completed text from legacy APIs, then apply QuestKing's
+        -- shared three-state display policy ourselves.
+        local desc, objectiveType, isDone, objectiveInfo = getQuestObjectiveInfoCompat(questID, i, true)
 
         if desc == nil or desc == "" then
             desc = UNKNOWN
         end
 
-        if objectiveType == "progressbar" then
-            local percent = SafeNumber(getQuestProgressBarPercentCompat(questID), 0) or 0
-            if percent < 0 then
-                percent = 0
-            elseif percent > 100 then
-                percent = 100
+        local showObjective = not isDone
+        if isDone then
+            if type(QuestKing.ShouldShowCompletedObjective) == "function" then
+                showObjective = QuestKing.ShouldShowCompletedObjective(questComplete)
+            else
+                showObjective = opt.showCompletedObjectives == "always"
+                    or (not questComplete and opt.showCompletedObjectives == true)
             end
+        end
 
-            local barLabel = desc
-            local r, g, b = getObjectiveColor(isDone and 1 or clamp01(percent / 100))
-            button:AddLine(format("  %s", barLabel), nil, r, g, b)
-
-            local progressBar = button:AddProgressBar()
-            progressBar:SetPercent(percent)
-            visibleObjectives = visibleObjectives + 1
-        else
-            local displayText, currentValue, maxValue, progress = getObjectiveDisplayState(desc, isDone, objectiveInfo)
-            local leftText, rightText = buildObjectiveDisplayText(displayText, currentValue, maxValue, objectiveInfo)
-            local r, g, b = getObjectiveColor(progress)
-            local line = button:AddLine(format("  %s", leftText), rightText, r, g, b)
-
-            if line and IsSafeNumber(currentValue) then
-                local lastQuant = SafeNumber(line._lastQuant, nil)
-                if lastQuant and currentValue > lastQuant then
-                    line:Flash()
+        if showObjective then
+            if objectiveType == "progressbar" then
+                local percent = SafeNumber(getQuestProgressBarPercentCompat(questID), 0) or 0
+                if percent < 0 then
+                    percent = 0
+                elseif percent > 100 then
+                    percent = 100
                 end
-                line._lastQuant = currentValue
-            elseif line then
-                line._lastQuant = nil
-            end
 
-            visibleObjectives = visibleObjectives + 1
+                local barLabel = desc
+                local r, g, b = getObjectiveColor(isDone and 1 or clamp01(percent / 100))
+                local line = button:AddLine(format("  %s", barLabel), nil, r, g, b)
+                freeLineBars(line)
+
+                freeNextButtonLineBars(button)
+                local progressBar = button:AddProgressBar(
+                    format("bonus:%s:%s", tostring(questID), tostring(i))
+                )
+                progressBar:SetPercent(percent)
+                visibleObjectives = visibleObjectives + 1
+            else
+                local displayText, currentValue, maxValue, progress = getObjectiveDisplayState(desc, isDone, objectiveInfo)
+                local leftText, rightText = buildObjectiveDisplayText(displayText, currentValue, maxValue, objectiveInfo)
+                local r, g, b = getObjectiveColor(progress)
+                local line = button:AddLine(format("  %s", leftText), rightText, r, g, b)
+                freeLineBars(line)
+
+                if line and IsSafeNumber(currentValue) then
+                    local lastQuant = SafeNumber(line._lastQuant, nil)
+                    if lastQuant and currentValue > lastQuant then
+                        line:Flash()
+                    end
+                    line._lastQuant = currentValue
+                elseif line then
+                    line._lastQuant = nil
+                end
+
+                visibleObjectives = visibleObjectives + 1
+            end
         end
     end
 
-    if visibleObjectives == 0 then
-        button:AddLine(
+    if visibleObjectives == 0
+        and not isWatchedWorldQuestFallback
+        and (numObjectives == 0 or questComplete) then
+        local line = button:AddLine(
             format("  %s", COMPLETE or "Complete"),
             nil,
             opt_colors.ObjectiveGradientComplete[1],
             opt_colors.ObjectiveGradientComplete[2],
             opt_colors.ObjectiveGradientComplete[3]
         )
-    end
-
-    if useNonBonusHeader and button._previousHeader then
-        button._previousHeader.title:SetText(TRACKER_HEADER_OBJECTIVE)
+        freeLineBars(line)
     end
 
     if button.fresh then
@@ -862,16 +1144,8 @@ end
 function QuestKing:SetDummyTask(questID)
     local taggedTitle, _, questIndex = getQuestTitleAndLevelSafe(questID)
 
-    local _, _, numObjectives = getTaskInfoSafe(questID)
-    numObjectives = numObjectives or 0
-
-    local useNonBonusHeader = false
-    for i = 1, numObjectives do
-        local _, _, _, displayAsObjective = getQuestObjectiveInfoCompat(questID, i, false)
-        useNonBonusHeader = useNonBonusHeader or displayAsObjective
-    end
-
-    dummyTaskUseNonBonusHeader = useNonBonusHeader and true or false
+    local _, _, _, _, displayAsObjective = getTaskInfoSafe(questID)
+    dummyTaskUseNonBonusHeader = displayAsObjective and true or false
     dummyTaskID = questID
     dummyTaskTaggedTitle = taggedTitle
     dummyTaskQuestIndex = questIndex
@@ -904,9 +1178,6 @@ function setButtonToDummyTask(button, questID)
         opt_colors.ObjectiveComplete[3]
     )
 
-    if dummyTaskUseNonBonusHeader and button._previousHeader then
-        button._previousHeader.title:SetText(TRACKER_HEADER_OBJECTIVE)
-    end
 end
 
 function QuestKing:OnTaskTurnedIn(questID, xp, money)
@@ -924,31 +1195,54 @@ function QuestKing:OnCriteriaComplete(id)
         return
     end
 
-    if not C_Scenario or not C_Scenario.GetBonusSteps then
+    if not C_Scenario then
         return
     end
 
-    local tblBonusSteps = C_Scenario.GetBonusSteps() or {}
-    for i = 1, #tblBonusSteps do
-        local bonusStepIndex = tblBonusSteps[i]
-        local button = WatchButton:GetKeyedRaw("bonus_step", bonusStepIndex)
+    local tblBonusSteps, modernBonusStepsUsable = getScenarioBonusStepsSafe()
+    if #tblBonusSteps == 0 then
+        if modernBonusStepsUsable then
+            return
+        end
 
-        local _, _, numCriteria = C_Scenario.GetStepInfo(bonusStepIndex)
-        numCriteria = SafeNumber(numCriteria, 0) or 0
+        local hasLegacyBonusStep = getLegacyScenarioBonusStateSafe()
+        local button = WatchButton:GetKeyedRaw("bonus_step_legacy", "legacy")
+
+        if not hasLegacyBonusStep
+            or not button
+            or not C_Scenario.GetBonusStepInfo
+            or not C_Scenario.GetBonusCriteriaInfo then
+            return
+        end
+
+        local okStep, _, _, numCriteria = pcall(C_Scenario.GetBonusStepInfo)
+        numCriteria = okStep and (SafeNumber(numCriteria, 0) or 0) or 0
 
         local matchedCriteria = false
         local allCriteriaComplete = numCriteria > 0
 
         for criteriaIndex = 1, numCriteria do
-            local _, _, criteriaCompleted, _, _, _, _, _, criteriaID =
-                C_Scenario.GetCriteriaInfoByStep(bonusStepIndex, criteriaIndex)
+            local okCriteria,
+                _,
+                _,
+                criteriaCompleted,
+                _,
+                _,
+                _,
+                _,
+                _,
+                criteriaID = pcall(C_Scenario.GetBonusCriteriaInfo, criteriaIndex)
 
-            if criteriaID == id then
-                matchedCriteria = true
-            end
-
-            if not criteriaCompleted then
+            if not okCriteria then
                 allCriteriaComplete = false
+            else
+                if criteriaID == id then
+                    matchedCriteria = true
+                end
+
+                if not criteriaCompleted then
+                    allCriteriaComplete = false
+                end
             end
         end
 
@@ -957,12 +1251,54 @@ function QuestKing:OnCriteriaComplete(id)
                 SOUNDKIT and SOUNDKIT.UI_SCENARIO_BONUS_OBJECTIVE_COMPLETE,
                 "UI_Scenario_BonusObjective_Success"
             )
+        end
+        return
+    end
 
-            local questID = C_Scenario.GetBonusStepRewardQuestID and C_Scenario.GetBonusStepRewardQuestID(bonusStepIndex) or 0
-            if questID ~= 0 then
-                QuestKing:AddReward(button, questID)
+    for i = 1, #tblBonusSteps do
+        local bonusStepIndex = tblBonusSteps[i]
+        local button = WatchButton:GetKeyedRaw("bonus_step", bonusStepIndex)
+
+        if button then
+            local _, _, numCriteria = getScenarioStepInfoSafe(bonusStepIndex)
+            numCriteria = SafeNumber(numCriteria, 0) or 0
+
+            local matchedCriteria = false
+            local allCriteriaComplete = numCriteria > 0
+
+            for criteriaIndex = 1, numCriteria do
+                local _, _, criteriaCompleted, _, _, _, _, _, criteriaID =
+                    getScenarioCriteriaInfoSafe(bonusStepIndex, criteriaIndex)
+
+                if criteriaID == id then
+                    matchedCriteria = true
+                end
+
+                if not criteriaCompleted then
+                    allCriteriaComplete = false
+                end
             end
-            return
+
+            if matchedCriteria and allCriteriaComplete then
+                PlaySoundCompat(
+                    SOUNDKIT and SOUNDKIT.UI_SCENARIO_BONUS_OBJECTIVE_COMPLETE,
+                    "UI_Scenario_BonusObjective_Success"
+                )
+
+                local questID = 0
+                if C_Scenario.GetBonusStepRewardQuestID then
+                    local okReward, rewardQuestID =
+                        pcall(C_Scenario.GetBonusStepRewardQuestID, bonusStepIndex)
+                    if okReward then
+                        questID = SafeNumber(rewardQuestID, 0) or 0
+                    end
+                end
+
+                if questID ~= 0 then
+                    QuestKing:AddReward(button, questID)
+                end
+                return
+            end
         end
     end
 end
@@ -988,6 +1324,6 @@ function mouseHandlerBonusTask:TitleButtonOnClick(mouse, down)
 end
 
 function mouseHandlerBonusTask:TitleButtonOnEnter(motion)
-    local button = self.parent
+    local button = self.parent or self
     showBonusRewardTooltip(button, button and button.questID)
 end

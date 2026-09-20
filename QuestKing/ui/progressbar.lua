@@ -62,12 +62,16 @@ local function GetFontStyle()
     return opt.fontStyle or ""
 end
 
+local function GetFontLayer()
+    if QuestKing and type(QuestKing.GetFontLayer) == "function" then
+        return QuestKing.GetFontLayer()
+    end
+
+    return "OVERLAY"
+end
+
 local function ClampPercent(percent)
     percent = tonumber(percent) or 0
-
-    if percent <= 1 and percent >= 0 then
-        percent = percent * 100
-    end
 
     if percent < 0 then
         return 0
@@ -86,6 +90,11 @@ local function ApplyFontStringStyle(fontString)
     end
 
     fontString:SetFont(GetFontPath(), GetFontSize(), GetFontStyle())
+    if QuestKing and type(QuestKing.ApplyFontLayer) == "function" then
+        QuestKing.ApplyFontLayer(fontString)
+    elseif type(fontString.SetDrawLayer) == "function" then
+        fontString:SetDrawLayer(GetFontLayer())
+    end
     fontString:SetJustifyH("CENTER")
     fontString:SetJustifyV("MIDDLE")
     fontString:SetTextColor(1, 1, 1)
@@ -166,6 +175,18 @@ local function UpdateBurstWidths(progressBar)
     end
 end
 
+local function RefreshProgressBarPresentation(progressBar)
+    if not progressBar then
+        return
+    end
+
+    progressBar:SetWidth(GetProgressBarWidth())
+    if progressBar.text then
+        ApplyFontStringStyle(progressBar.text)
+    end
+    UpdateBurstWidths(progressBar)
+end
+
 local function ResetProgressBar(progressBar)
     if not progressBar then
         return
@@ -174,6 +195,7 @@ local function ResetProgressBar(progressBar)
     progressBar.baseLine = nil
     progressBar.baseButton = nil
     progressBar._lastPercent = nil
+    progressBar._progressKey = nil
 
     progressBar:SetMinMaxValues(0, 100)
     progressBar:SetValue(100)
@@ -299,7 +321,7 @@ local function CreateProgressBar()
     border:SetPoint("BOTTOMRIGHT", progressBar, "BOTTOMRIGHT", 3, -8)
     progressBar.border = border
 
-    local text = progressBar:CreateFontString(nil, "OVERLAY")
+    local text = progressBar:CreateFontString(nil, GetFontLayer())
     ApplyFontStringStyle(text)
     text:SetPoint("TOPLEFT", progressBar, "TOPLEFT", 0, 0)
     text:SetPoint("BOTTOMRIGHT", progressBar, "BOTTOMRIGHT", 0, 2)
@@ -459,14 +481,19 @@ local function CreateProgressBar()
     progressBar.Free = FreeProgressBar
     progressBar.SetPercent = SetPercent
     progressBar.UpdateBurstWidths = UpdateBurstWidths
+    progressBar.RefreshPresentation = RefreshProgressBarPresentation
 
     ResetProgressBar(progressBar)
     return progressBar
 end
 
-function QuestKing.WatchButton:AddProgressBar()
+function QuestKing.WatchButton:AddProgressBar(progressKey)
     local line = self:AddLine()
+    if line.timerBar then
+        line.timerBar:Free()
+    end
     local progressBar = line.progressBar
+    local reusedProgressBar = progressBar ~= nil
 
     if not progressBar then
         if #progressBarPool > 0 then
@@ -481,7 +508,12 @@ function QuestKing.WatchButton:AddProgressBar()
 
     progressBar.baseButton = self
     progressBar.baseLine = line
-    progressBar._lastPercent = nil
+    if not reusedProgressBar
+        or progressKey == nil
+        or progressBar._progressKey ~= progressKey then
+        progressBar._lastPercent = nil
+    end
+    progressBar._progressKey = progressKey
 
     progressBar:SetParent(self)
     progressBar:SetFrameLevel((self.GetFrameLevel and self:GetFrameLevel()) or 1)
@@ -489,6 +521,7 @@ function QuestKing.WatchButton:AddProgressBar()
     progressBar:SetHeight(BAR_HEIGHT)
     progressBar:UpdateBurstWidths()
     EnsureBackdrop(progressBar)
+    progressBar:RefreshPresentation()
 
     progressBar:ClearAllPoints()
     progressBar:SetPoint("TOPLEFT", line, "TOPLEFT", BAR_LEFT_INSET, BAR_TOP_OFFSET)

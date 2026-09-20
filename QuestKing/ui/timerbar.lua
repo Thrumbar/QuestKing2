@@ -6,6 +6,7 @@ local tremove = table.remove
 local GetTime = GetTime
 local GetTimeStringFromSecondsShort = QuestKing.GetTimeStringFromSecondsShort
 
+local abs = math.abs
 local tonumber = tonumber
 local type = type
 
@@ -29,14 +30,23 @@ local function GetOptions()
     return QuestKing.options or {}
 end
 
-local function QueueTrackerRefresh(forceBuild)
+local function QueueTrackerRefresh(forceBuild, baseButton)
+    local reason = baseButton and baseButton.type == "achievement"
+        and "achievement"
+        or "timer"
+
+    if QuestKing and type(QuestKing.RequestTrackerUpdate) == "function" then
+        QuestKing:RequestTrackerUpdate(false, reason, false)
+        return
+    end
+
     if QuestKing and type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild, false)
+        QuestKing:QueueTrackerUpdate(false, false, reason)
         return
     end
 
     if QuestKing and type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(forceBuild, false)
+        QuestKing:UpdateTracker(false, false, reason)
     end
 end
 
@@ -49,6 +59,14 @@ local function GetTimerBarWidth()
     return width
 end
 
+local function GetFontLayer()
+    if QuestKing and type(QuestKing.GetFontLayer) == "function" then
+        return QuestKing.GetFontLayer()
+    end
+
+    return "OVERLAY"
+end
+
 local function ApplyFontStringStyle(fontString)
     if not fontString then
         return
@@ -56,6 +74,11 @@ local function ApplyFontStringStyle(fontString)
 
     local opt = GetOptions()
     fontString:SetFont(opt.font or STANDARD_TEXT_FONT, tonumber(opt.fontSize) or 12, opt.fontStyle or "")
+    if QuestKing and type(QuestKing.ApplyFontLayer) == "function" then
+        QuestKing.ApplyFontLayer(fontString)
+    elseif type(fontString.SetDrawLayer) == "function" then
+        fontString:SetDrawLayer(GetFontLayer())
+    end
     fontString:SetShadowOffset(1, -1)
     fontString:SetShadowColor(0, 0, 0, 1)
 end
@@ -84,6 +107,17 @@ local function EnsureBackdrop(timerBar)
     end
 end
 
+local function RefreshTimerBarPresentation(timerBar)
+    if not timerBar then
+        return
+    end
+
+    timerBar:SetWidth(GetTimerBarWidth())
+    if timerBar.text then
+        ApplyFontStringStyle(timerBar.text)
+    end
+end
+
 local function ResetTimerBar(timerBar)
     if not timerBar then
         return
@@ -105,6 +139,7 @@ local function ResetTimerBar(timerBar)
 
     if timerBar.text then
         timerBar.text:SetText("0:00")
+        ApplyFontStringStyle(timerBar.text)
     end
 end
 
@@ -150,7 +185,7 @@ local function UpdateTimerBarDisplay(self, forceNow)
 
             if not self._expired then
                 self._expired = true
-                QueueTrackerRefresh(true)
+                QueueTrackerRefresh(false, self.baseButton)
             end
         end
         return
@@ -199,7 +234,7 @@ local function CreateTimerBar()
     border:SetTexCoord(0.00097656, 0.13769531, 0.47265625, 0.51757813)
     timerBar.border = border
 
-    local text = timerBar:CreateFontString(nil, "OVERLAY")
+    local text = timerBar:CreateFontString(nil, GetFontLayer())
     ApplyFontStringStyle(text)
     text:SetJustifyH("CENTER")
     text:SetJustifyV("MIDDLE")
@@ -211,6 +246,7 @@ local function CreateTimerBar()
     timerBar.text = text
 
     timerBar.Free = FreeTimerBar
+    timerBar.RefreshPresentation = RefreshTimerBarPresentation
     ResetTimerBar(timerBar)
 
     return timerBar
@@ -218,7 +254,22 @@ end
 
 function QuestKing.WatchButton:AddTimerBar(duration, startTime)
     local line = self:AddLine()
+    if line.progressBar then
+        line.progressBar:Free()
+    end
     local timerBar = line.timerBar
+
+    duration = tonumber(duration) or 0
+    startTime = tonumber(startTime) or GetTime()
+
+    if duration <= 0 then
+        duration = 1
+    end
+
+    local timerIdentityMatches = timerBar
+        and tonumber(timerBar.duration) == duration
+        and type(timerBar.startTime) == "number"
+        and abs(timerBar.startTime - startTime) < 0.5
 
     if not timerBar then
         if #timerBarPool > 0 then
@@ -233,15 +284,10 @@ function QuestKing.WatchButton:AddTimerBar(duration, startTime)
 
     timerBar.baseButton = self
     timerBar.baseLine = line
-    timerBar._expired = nil
-    timerBar._nextUpdate = 0
-
-    duration = tonumber(duration) or 0
-    startTime = tonumber(startTime) or GetTime()
-
-    if duration <= 0 then
-        duration = 1
+    if not timerIdentityMatches then
+        timerBar._expired = nil
     end
+    timerBar._nextUpdate = 0
 
     timerBar.duration = duration
     timerBar.startTime = startTime
@@ -251,6 +297,7 @@ function QuestKing.WatchButton:AddTimerBar(duration, startTime)
     timerBar:SetWidth(GetTimerBarWidth())
     timerBar:SetHeight(BAR_HEIGHT)
     EnsureBackdrop(timerBar)
+    timerBar:RefreshPresentation()
 
     timerBar:ClearAllPoints()
     timerBar:SetPoint("TOPLEFT", line, "TOPLEFT", BAR_LEFT_INSET, BAR_TOP_OFFSET)

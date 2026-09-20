@@ -11,9 +11,8 @@
 --   is ready, Blizzard calls ShowQuestComplete(questID) on Retail/Mainline.
 --   Classic-family clients generally need ShowQuestComplete(questLogIndex).
 --
---   Broken Earthen Figurine / Broken Boar Figurine can be ReadyForTurnIn from
---   bag items even when QuestKing's older completion check does not treat them
---   as complete. This module uses ReadyForTurnIn as the primary gate.
+--   ReadyForTurnIn alone is not enough: ordinary NPC turn-ins also report that
+--   state. Field completion is routed through the shared compatibility contract.
 --
 -- Lua 5.1 compatible.
 
@@ -35,6 +34,8 @@ if type(AutoComplete) ~= "table" then
     QuestKing.AutoComplete = AutoComplete
 end
 
+local CommonCompat = QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
+
 local frame = AutoComplete.EventFrame
 if not frame then
     frame = CreateFrame("Frame", "QuestKing_AutoCompleteEventFrame")
@@ -42,7 +43,6 @@ if not frame then
 end
 
 local hooksInstalled = false
-local scanQueued = false
 
 local tonumber = tonumber
 local tostring = tostring
@@ -73,18 +73,22 @@ local function IsMainlineClient()
 end
 
 local function RequestRefresh(forceBuild)
+    if type(QuestKing.RecordPerformanceMetric) == "function" then
+        QuestKing:RecordPerformanceMetric("autoCompleteRequestCount", 1)
+    end
+
     if type(QuestKing.RequestTrackerUpdate) == "function" then
-        QuestKing:RequestTrackerUpdate(forceBuild and true or false)
+        QuestKing:RequestTrackerUpdate(false, "autocomplete", false)
         return
     end
 
     if type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild and true or false, false)
+        QuestKing:QueueTrackerUpdate(false, false, "autocomplete")
         return
     end
 
     if type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(forceBuild and true or false, false)
+        QuestKing:UpdateTracker(false, false, "autocomplete")
         return
     end
 
@@ -94,25 +98,14 @@ local function RequestRefresh(forceBuild)
 end
 
 local function QueueRefresh(forceBuild)
-    if scanQueued then
-        return
+    RequestRefresh(forceBuild)
+end
+
+local function RecordQuestLogFallbackScan()
+    if type(QuestKing.RecordPerformanceMetric) == "function" then
+        QuestKing:RecordPerformanceMetric("autoCompleteScanCount", 1)
+        QuestKing:RecordPerformanceMetric("questLogScanCount", 1)
     end
-
-    scanQueued = true
-
-    if C_Timer and type(C_Timer.After) == "function" then
-        C_Timer.After(0.10, function()
-            scanQueued = false
-            RequestRefresh(forceBuild)
-        end)
-        return
-    end
-
-    frame:SetScript("OnUpdate", function(self)
-        self:SetScript("OnUpdate", nil)
-        scanQueued = false
-        RequestRefresh(forceBuild)
-    end)
 end
 
 local function GetQuestLogIndexForQuestID(questID)
@@ -141,6 +134,7 @@ local function GetQuestLogIndexForQuestID(questID)
             and type(C_QuestLog.GetInfo) == "function" then
         local ok, numEntries = pcall(C_QuestLog.GetNumQuestLogEntries)
         if ok and type(numEntries) == "number" then
+            RecordQuestLogFallbackScan()
             for index = 1, numEntries do
                 local infoOk, info = pcall(C_QuestLog.GetInfo, index)
                 if infoOk and type(info) == "table" and info.questID == questID then
@@ -152,6 +146,7 @@ local function GetQuestLogIndexForQuestID(questID)
 
     if type(_G.GetNumQuestLogEntries) == "function" and type(_G.GetQuestLogTitle) == "function" then
         local numEntries = _G.GetNumQuestLogEntries() or 0
+        RecordQuestLogFallbackScan()
         for index = 1, numEntries do
             local ok, title, level, suggestedGroup, isHeader, isCollapsed, isComplete, frequency, id =
                 pcall(_G.GetQuestLogTitle, index)
@@ -304,32 +299,8 @@ local function IsQuestReadyForTurnIn(questID, questLogIndex)
 end
 
 local function IsQuestAutoComplete(questID, questLogIndex)
-    questID = tonumber(questID)
-
-    if questID and questID > 0 then
-        if C_QuestLog and type(C_QuestLog.IsAutoComplete) == "function" then
-            local ok, auto = pcall(C_QuestLog.IsAutoComplete, questID)
-            if ok and auto then
-                return true
-            end
-        end
-    end
-
-    if not questLogIndex and questID then
-        questLogIndex = GetQuestLogIndexForQuestID(questID)
-    end
-
-    questLogIndex = tonumber(questLogIndex)
-    if questLogIndex and questLogIndex > 0 and type(_G.GetQuestLogIsAutoComplete) == "function" then
-        local ok, auto = pcall(_G.GetQuestLogIsAutoComplete, questLogIndex)
-        if ok and auto then
-            return true
-        end
-    end
-
-    local info = GetQuestInfo(questLogIndex)
-    if type(info) == "table" and info.isAutoComplete then
-        return true
+    if type(CommonCompat.IsQuestAutoComplete) == "function" then
+        return CommonCompat.IsQuestAutoComplete(questID, questLogIndex) and true or false
     end
 
     return false
@@ -340,6 +311,11 @@ local function HasAutoQuestPopUp(questID)
 
     if not questID or questID <= 0 then
         return false, nil
+    end
+
+    if type(CommonCompat.GetAutoQuestPopupType) == "function" then
+        local popupType = CommonCompat.GetAutoQuestPopupType(questID)
+        return popupType ~= nil, popupType
     end
 
     if type(_G.GetNumAutoQuestPopUps) ~= "function" or type(_G.GetAutoQuestPopUp) ~= "function" then
@@ -409,12 +385,20 @@ end
 local function TryShowQuestComplete(questID, questLogIndex)
     questID = tonumber(questID)
 
-    if not questID or questID <= 0 or type(_G.ShowQuestComplete) ~= "function" then
+    if not questID or questID <= 0 then
         return false
     end
 
     if not questLogIndex then
         questLogIndex = GetQuestLogIndexForQuestID(questID)
+    end
+
+    if type(CommonCompat.ShowQuestComplete) == "function" then
+        return CommonCompat.ShowQuestComplete(questID, questLogIndex) and true or false
+    end
+
+    if type(_G.ShowQuestComplete) ~= "function" then
+        return false
     end
 
     SelectQuest(questID, questLogIndex)
@@ -447,74 +431,6 @@ local function TryShowQuestComplete(questID, questLogIndex)
     return ok and true or false
 end
 
-local function TryUseSpecialQuestItem(questID, questLogIndex)
-    questID = tonumber(questID)
-
-    if not questID or questID <= 0 then
-        return false
-    end
-
-    if not questLogIndex then
-        questLogIndex = GetQuestLogIndexForQuestID(questID)
-    end
-
-    questLogIndex = tonumber(questLogIndex)
-    if not questLogIndex or questLogIndex <= 0 then
-        return false
-    end
-
-    if type(_G.UseQuestLogSpecialItem) ~= "function" then
-        return false
-    end
-
-    if not GetSpecialQuestItemInfo(questLogIndex) then
-        return false
-    end
-
-    SelectQuest(questID, questLogIndex)
-
-    local ok = SafeCall(_G.UseQuestLogSpecialItem, questLogIndex)
-    if ok then
-        if C_Timer and type(C_Timer.After) == "function" then
-            C_Timer.After(0.15, function()
-                if IsQuestReadyForTurnIn(questID, questLogIndex) then
-                    TryShowQuestComplete(questID, questLogIndex)
-                end
-            end)
-        end
-        return true
-    end
-
-    return false
-end
-
-local function GetQuestFromClickedWidget(widget)
-    if not widget then
-        return nil, nil, nil
-    end
-
-    local button = widget
-
-    if widget.parent then
-        button = widget.parent
-    elseif widget:GetParent() and widget:GetParent().questID then
-        button = widget:GetParent()
-    end
-
-    local questID = tonumber(button and button.questID)
-    local questLogIndex = tonumber(button and button.questLogIndex)
-
-    if not questID and questLogIndex then
-        questID = GetQuestIDForQuestLogIndex(questLogIndex)
-    end
-
-    if questID and not questLogIndex then
-        questLogIndex = GetQuestLogIndexForQuestID(questID)
-    end
-
-    return questID, questLogIndex, button
-end
-
 local function OpenQuestFromTracker(questID, questLogIndex)
     questID = tonumber(questID)
 
@@ -526,29 +442,17 @@ local function OpenQuestFromTracker(questID, questLogIndex)
         questLogIndex = GetQuestLogIndexForQuestID(questID)
     end
 
-    local ready = IsQuestReadyForTurnIn(questID, questLogIndex)
-    local auto = IsQuestAutoComplete(questID, questLogIndex)
     local hasPopup, popupType = HasAutoQuestPopUp(questID)
-    local specialItem = GetSpecialQuestItemInfo(questLogIndex)
+    local canCompleteRemotely = type(CommonCompat.CanCompleteQuestRemotely) == "function"
+        and CommonCompat.CanCompleteQuestRemotely(questID, questLogIndex)
+        or false
 
-    -- The important fix: ReadyForTurnIn is enough to try the native completion
-    -- panel. Some item-started quests report ready but do not satisfy the older
-    -- QuestKing complete/auto-complete gates.
-    if ready or auto or hasPopup then
-        if hasPopup then
-            RemoveAutoQuestPopUp(questID)
-        end
-
+    if canCompleteRemotely then
         if TryShowQuestComplete(questID, questLogIndex) then
-            QueueRefresh(true)
-            return true
-        end
-    end
+            if hasPopup and popupType == "COMPLETE" then
+                RemoveAutoQuestPopUp(questID)
+            end
 
-    -- Fallback for quests whose completion flow is controlled by a quest-log
-    -- special item rather than the normal autocomplete popup.
-    if specialItem and (ready or specialItem.showWhenComplete) then
-        if TryUseSpecialQuestItem(questID, questLogIndex) then
             QueueRefresh(true)
             return true
         end
@@ -561,49 +465,15 @@ QuestKing.OpenQuestFromTracker = OpenQuestFromTracker
 QuestKing.ShowQuestCompleteSafe = OpenQuestFromTracker
 AutoComplete.OpenQuestFromTracker = OpenQuestFromTracker
 
-local function TryOpenFromClickedWidget(widget)
-    local questID, questLogIndex = GetQuestFromClickedWidget(widget)
-
-    if not questID then
-        return false
-    end
-
-    return OpenQuestFromTracker(questID, questLogIndex)
-end
-
 local function InstallClickHooks()
     if hooksInstalled then
         return
     end
 
-    local WatchButton = QuestKing.WatchButton
-    if type(WatchButton) ~= "table" then
-        return
-    end
-
+    -- Normal quest rows route directly through buttons/quest.lua. Replacing the
+    -- shared WatchButton prototype would also intercept OFFER popups, bonus
+    -- objectives, and modified-click quest links.
     hooksInstalled = true
-
-    local originalTitleButtonOnClick = WatchButton.TitleButtonOnClick
-    WatchButton.TitleButtonOnClick = function(self, mouse, down)
-        if mouse == "LeftButton" and TryOpenFromClickedWidget(self) then
-            return
-        end
-
-        if type(originalTitleButtonOnClick) == "function" then
-            return originalTitleButtonOnClick(self, mouse, down)
-        end
-    end
-
-    local originalButtonOnClick = WatchButton.ButtonOnClick
-    WatchButton.ButtonOnClick = function(self, mouse, down)
-        if mouse == "LeftButton" and TryOpenFromClickedWidget(self) then
-            return
-        end
-
-        if type(originalButtonOnClick) == "function" then
-            return originalButtonOnClick(self, mouse, down)
-        end
-    end
 end
 
 AutoComplete.InstallClickHooks = InstallClickHooks
@@ -673,36 +543,31 @@ SlashCmdList.QUESTKINGAUTOCOMPLETE = function(message)
 end
 
 frame:SetScript("OnEvent", function(self, event, ...)
-    if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" or event == "ADDON_LOADED" then
+    if event == "ADDON_LOADED" then
+        local loadedAddonName = ...
+        if loadedAddonName ~= addonName then
+            return
+        end
+
+        self:UnregisterEvent("ADDON_LOADED")
         InstallClickHooks()
-        QueueRefresh(true)
         return
     end
 
-    QueueRefresh(true)
+    QueueRefresh(false)
 end)
 
 RegisterEventSafe("ADDON_LOADED")
-RegisterEventSafe("PLAYER_LOGIN")
-RegisterEventSafe("PLAYER_ENTERING_WORLD")
-RegisterEventSafe("QUEST_AUTOCOMPLETE")
-RegisterEventSafe("QUEST_COMPLETE")
 RegisterEventSafe("QUEST_ITEM_UPDATE")
-RegisterEventSafe("QUEST_LOG_UPDATE")
-RegisterEventSafe("QUEST_WATCH_LIST_CHANGED")
-RegisterEventSafe("UNIT_QUEST_LOG_CHANGED")
-RegisterEventSafe("BAG_UPDATE_DELAYED")
-RegisterEventSafe("BAG_UPDATE")
-RegisterEventSafe("BAG_UPDATE_COOLDOWN")
-RegisterEventSafe("QUEST_ACCEPTED")
-RegisterEventSafe("QUEST_TURNED_IN")
-RegisterEventSafe("QUEST_REMOVED")
 
 if type(hooksecurefunc) == "function" then
+    -- OFFER popups are inserted directly from QUEST_DETAIL on Mainline and do
+    -- not emit QUEST_AUTOCOMPLETE. Hook the mutation itself so both OFFER and
+    -- COMPLETE paths reach the coalesced tracker coordinator.
     if type(_G.AddAutoQuestPopUp) == "function" and not AutoComplete.AddAutoQuestPopUpHooked then
         AutoComplete.AddAutoQuestPopUpHooked = true
         hooksecurefunc("AddAutoQuestPopUp", function()
-            QueueRefresh(true)
+            QueueRefresh(false)
         end)
     end
 
@@ -722,4 +587,3 @@ if type(hooksecurefunc) == "function" then
 end
 
 InstallClickHooks()
-QueueRefresh(true)

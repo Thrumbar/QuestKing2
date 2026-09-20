@@ -10,15 +10,33 @@ local type = type
 local itemButtonPool = {}
 local RANGE_UPDATE_TIME = TOOLTIP_UPDATE_TIME or 0.2
 local ITEM_BUTTON_TEMPLATE = "QuestKingItemButtonTemplate"
-
+local SECURE_MODIFIED_CLICK_PREFIXES = {
+    "shift-",
+    "ctrl-",
+    "alt-",
+    "shift-ctrl-",
+    "shift-alt-",
+    "ctrl-alt-",
+    "shift-ctrl-alt-",
+    "ctrl-shift-",
+    "alt-shift-",
+    "alt-ctrl-",
+    "ctrl-alt-shift-",
+    "alt-ctrl-shift-",
+}
 local function QueueTrackerRefresh(forceBuild)
+    if QuestKing and type(QuestKing.RequestTrackerUpdate) == "function" then
+        QuestKing:RequestTrackerUpdate(false, "item", false)
+        return
+    end
+
     if QuestKing and type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild, false)
+        QuestKing:QueueTrackerUpdate(false, false, "item")
         return
     end
 
     if QuestKing and type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(forceBuild, false)
+        QuestKing:UpdateTracker(false, false, "item")
     end
 end
 
@@ -268,28 +286,80 @@ local function IsChatLinkModifiedClick()
     return ok and isModified and true or false
 end
 
-local function SafeUseQuestLogSpecialItem(questLogIndex)
-    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
+local function SafeSetAttribute(frame, name, value)
+    if not frame or type(frame.SetAttribute) ~= "function" then
         return false
     end
 
-    if type(_G.UseQuestLogSpecialItem) ~= "function" then
+    if IsInCombatLockdownCompat() then
         return false
     end
 
-    local ok = pcall(_G.UseQuestLogSpecialItem, questLogIndex)
+    local ok = pcall(frame.SetAttribute, frame, name, value)
     return ok and true or false
 end
 
-local function QueuePostClickTrackerRefresh()
-    if C_Timer and type(C_Timer.After) == "function" then
-        C_Timer.After(0, function()
-            QueueTrackerRefresh(true)
-        end)
+local function BuildSecureItemToken(itemID)
+    itemID = tonumber(itemID)
+    if itemID and itemID > 0 then
+        return "item:" .. itemID
+    end
+
+    return nil
+end
+
+local function ConfigureSecureItemUse(itemButton, questLogIndex, itemLink, itemID)
+    if not itemButton or IsInCombatLockdownCompat() then
+        return false
+    end
+
+    local item = BuildSecureItemToken(itemID or SafeGetItemIDFromLink(itemLink))
+    if not item then
+        return false
+    end
+
+    -- SecureActionButtonTemplate owns the protected use. Use a plain item:id
+    -- token instead of a full item link. Full links route through item-name
+    -- parsing on current clients and can taint C_Item.UseItemByName().
+    SafeSetAttribute(itemButton, "type1", "item")
+    SafeSetAttribute(itemButton, "item", item)
+    SafeSetAttribute(itemButton, "item1", item)
+    SafeSetAttribute(itemButton, "questLogIndex", questLogIndex)
+
+    -- Modified chat-link clicks are handled in PostClick. ATTRIBUTE_NOOP keeps
+    -- Shift/Ctrl/Alt left-clicks from also using the item.
+    for index = 1, #SECURE_MODIFIED_CLICK_PREFIXES do
+        SafeSetAttribute(itemButton, SECURE_MODIFIED_CLICK_PREFIXES[index] .. "type1", ATTRIBUTE_NOOP or "")
+    end
+
+    if type(itemButton.SetID) == "function" then
+        pcall(itemButton.SetID, itemButton, questLogIndex)
+    end
+
+    return true
+end
+
+local function ClearSecureItemUse(itemButton)
+    if not itemButton or IsInCombatLockdownCompat() then
         return
     end
 
-    QueueTrackerRefresh(true)
+    SafeSetAttribute(itemButton, "type1", nil)
+    SafeSetAttribute(itemButton, "item", nil)
+    SafeSetAttribute(itemButton, "item1", nil)
+    SafeSetAttribute(itemButton, "questLogIndex", nil)
+
+    for index = 1, #SECURE_MODIFIED_CLICK_PREFIXES do
+        SafeSetAttribute(itemButton, SECURE_MODIFIED_CLICK_PREFIXES[index] .. "type1", nil)
+    end
+
+    if type(itemButton.SetID) == "function" then
+        pcall(itemButton.SetID, itemButton, 0)
+    end
+end
+
+local function QueuePostClickTrackerRefresh()
+    QueueTrackerRefresh(false)
 end
 
 local function ClearButtonState(itemButton)
@@ -305,6 +375,9 @@ local function ClearButtonState(itemButton)
     itemButton.baseButton = nil
     itemButton._pendingQuestLogIndex = nil
     itemButton._pendingItemLink = nil
+    itemButton._stateRefreshPending = nil
+
+    ClearSecureItemUse(itemButton)
 
     SafeSetItemButtonCount(itemButton, 0)
     SafeSetItemButtonTexture(itemButton, nil)
@@ -380,6 +453,13 @@ local function AcquireItemButton(baseButton)
         itemButton = CreateFrame("Button", nil, QuestKing.Tracker, ITEM_BUTTON_TEMPLATE)
     end
 
+    -- Keep secure action buttons under the stable tracker. Reparenting one to
+    -- a recyclable watch row makes that row protected and prevents combat-time
+    -- mouse-state changes when the pool later reuses it for another row type.
+    if itemButton.GetParent and itemButton:GetParent() ~= QuestKing.Tracker then
+        itemButton:SetParent(QuestKing.Tracker)
+    end
+
     baseButton.itemButton = itemButton
     itemButton.baseButton = baseButton
     itemButton:ClearAllPoints()
@@ -452,11 +532,8 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
         return nil
     end
 
-    itemButton:SetParent(self)
-    itemButton:ClearAllPoints()
-    ApplyItemButtonZOrder(itemButton, self)
-
-    if IsInCombatLockdownCompat() then
+    local inCombat = IsInCombatLockdownCompat()
+    if inCombat then
         local currentQuestLogIndex = itemButton.questLogIndex
         local currentItemLink = itemButton.itemLink
 
@@ -468,17 +545,33 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
             end
             return itemButton
         end
-    else
-        itemButton._pendingQuestLogIndex = nil
-        itemButton._pendingItemLink = nil
+
+        itemButton.charges = charges
+        itemButton.rangeTimer = itemButton.rangeTimer or 0
+        itemButton._stateRefreshPending = nil
+        SafeSetItemButtonTexture(itemButton, itemTexture)
+        SafeSetItemButtonCount(itemButton, charges)
+        QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton)
+        UpdateRangeIndicator(itemButton)
+        return itemButton
     end
 
+    if itemButton.GetParent and itemButton:GetParent() ~= QuestKing.Tracker then
+        itemButton:SetParent(QuestKing.Tracker)
+    end
+    itemButton:ClearAllPoints()
+    ApplyItemButtonZOrder(itemButton, self)
+
+    itemButton._pendingQuestLogIndex = nil
+    itemButton._pendingItemLink = nil
+    itemButton._stateRefreshPending = nil
     itemButton.questLogIndex = questLogIndex
     itemButton.charges = charges
     itemButton.rangeTimer = 0
     itemButton.itemLink = link
     itemButton.itemID = SafeGetItemIDFromLink(link)
 
+    ConfigureSecureItemUse(itemButton, questLogIndex, itemButton.itemLink, itemButton.itemID)
     SafeSetItemButtonTexture(itemButton, itemTexture)
     SafeSetItemButtonCount(itemButton, charges)
     QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton)
@@ -508,6 +601,9 @@ function QuestKing.WatchButton:RemoveItemButton()
 
     itemButton:Hide()
     itemButton:ClearAllPoints()
+    if itemButton.GetParent and itemButton:GetParent() ~= QuestKing.Tracker then
+        itemButton:SetParent(QuestKing.Tracker)
+    end
 
     ClearButtonState(itemButton)
     self.itemButton = nil
@@ -528,24 +624,40 @@ function QuestKing_QuestObjectiveItem_OnUpdate(self, elapsed)
         return
     end
 
+    self.rangeTimer = RANGE_UPDATE_TIME
+
     local link, itemTexture, charges = GetQuestLogSpecialItemInfoCompat(self.questLogIndex)
     if not link or not itemTexture then
-        QueueTrackerRefresh(true)
+        if not self._stateRefreshPending then
+            self._stateRefreshPending = true
+            QueueTrackerRefresh(false)
+        end
         return
     end
 
     if charges ~= self.charges then
-        QueueTrackerRefresh(true)
+        if not self._stateRefreshPending then
+            self._stateRefreshPending = true
+            QueueTrackerRefresh(false)
+        end
         return
     end
 
     if self.itemLink ~= link then
-        self.itemLink = link
-        self.itemID = SafeGetItemIDFromLink(link)
+        if IsInCombatLockdownCompat() then
+            self._pendingQuestLogIndex = self.questLogIndex
+            self._pendingItemLink = link
+            if QuestKing.StartCombatTimer then
+                QuestKing:StartCombatTimer()
+            end
+        else
+            self.itemLink = link
+            self.itemID = SafeGetItemIDFromLink(link)
+            ConfigureSecureItemUse(self, self.questLogIndex, self.itemLink, self.itemID)
+        end
     end
 
     UpdateRangeIndicator(self)
-    self.rangeTimer = RANGE_UPDATE_TIME
 end
 
 function QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton)
@@ -571,7 +683,15 @@ function QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton)
     end
 end
 
-function QuestKing_QuestObjectiveItem_OnClick(self, mouseButton)
+function QuestKing_QuestObjectiveItem_OnClick(self, mouseButton, down, isKeyPress, isSecureAction)
+    -- Compatibility wrapper for old cached XML. Current XML does not override
+    -- OnClick; SecureActionButtonTemplate supplies the inherited handler.
+    if type(SecureActionButton_OnClick) == "function" then
+        return SecureActionButton_OnClick(self, mouseButton, down, isKeyPress, isSecureAction)
+    end
+end
+
+function QuestKing_QuestObjectiveItem_PostClick(self, mouseButton)
     if not self then
         return
     end
@@ -587,12 +707,11 @@ function QuestKing_QuestObjectiveItem_OnClick(self, mouseButton)
             link = GetQuestLogSpecialItemInfoCompat(questLogIndex)
         end
 
-        if SafeInsertChatLink(link) then
-            return
-        end
+        SafeInsertChatLink(link)
+        return
     end
 
-    if SafeUseQuestLogSpecialItem(questLogIndex) then
+    if mouseButton == "LeftButton" then
         QueuePostClickTrackerRefresh()
     end
 end
@@ -608,13 +727,47 @@ function QuestKing_QuestObjectiveItem_OnEnter(self)
     end
 
     local shown = false
+    local questLogIndex = self.questLogIndex
 
-    if self.itemLink then
-        shown = SafeSetHyperlink(tooltip, self.itemLink)
-    end
+    if QuestKing.IsMainline then
+        if questLogIndex
+            and type(QuestKing.PopulatePrivateTooltipFromQuestLogSpecialItem) == "function" then
+            shown = QuestKing:PopulatePrivateTooltipFromQuestLogSpecialItem(
+                tooltip,
+                questLogIndex
+            )
+        end
 
-    if not shown and self.itemID then
-        shown = SafeSetItemByID(tooltip, self.itemID)
+        if not shown
+            and self.itemLink
+            and type(QuestKing.PopulatePrivateTooltipFromHyperlink) == "function" then
+            shown = QuestKing:PopulatePrivateTooltipFromHyperlink(
+                tooltip,
+                self.itemLink
+            )
+        end
+
+        if not shown
+            and self.itemID
+            and type(QuestKing.PopulatePrivateTooltipFromItemID) == "function" then
+            shown = QuestKing:PopulatePrivateTooltipFromItemID(
+                tooltip,
+                self.itemID
+            )
+        end
+    else
+        if questLogIndex and type(tooltip.SetQuestLogSpecialItem) == "function" then
+            local ok = pcall(tooltip.SetQuestLogSpecialItem, tooltip, questLogIndex)
+            shown = ok and true or false
+        end
+
+        if not shown and self.itemLink then
+            shown = SafeSetHyperlink(tooltip, self.itemLink)
+        end
+
+        if not shown and self.itemID then
+            shown = SafeSetItemByID(tooltip, self.itemID)
+        end
     end
 
     if not shown then

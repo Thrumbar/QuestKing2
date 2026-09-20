@@ -1,3 +1,311 @@
+3.0.50
+- Updated the Burning Crusade Classic loader interface to 20506 for the supplied 2.5.6.68575 client source.
+- Corrected campaign continuation navigation to supertrack the unaccepted QuestOffer map pin instead of treating it as an accepted quest.
+- Added a right-click Stop Tracking menu and per-character, per-requirement suppression for campaign continuation hints.
+- Restored authoritative campaign classification through questClassification, parent campaign headers, campaign IDs, and Blizzard campaign APIs.
+- Changed the quest-cap numerator to Blizzard's accepted standard-quest count and preserved the accepted-capacity denominator.
+- Added targeted campaign continuation invalidation for quest-line and major-faction unlock changes without campaign polling.
+- Removed one guaranteed duplicate forced refresh from QUEST_ACCEPTED and reused population-fingerprint scratch tables.
+- Changed files: buttons/quest.lua, core/core.lua, core/events.lua, core/util.lua, ui/watchbutton.lua, QuestKing.toc, QuestKing_TBC.toc, all release TOCs, version.txt, CAMPAIGN_CONTINUATION_COMPATIBILITY_FIX_CHANGELOG.md, CONSOLIDATED_CHANGELOG.md, RELEASE_READINESS_REPORT.md, and SUPPLIED_PATCH_VALIDATION.md.
+
+3.0.49
+- Routed the pooled row body and title-button creation-time mouse states through the existing combat-safe mouse setter.
+- Removed direct EnableMouse calls from WatchButton:Create so creation follows the same protected-frame policy as pooled reuse.
+- Records body and title mouse-state caches only when the underlying state change succeeds; deferred states remain pending for post-combat reconciliation.
+- Preserved click registration, title/body interaction behavior, secure item-button ownership, Mainline tooltip isolation, and all QuestKing 3.0.48 behavior.
+- Changed files: ui/watchbutton.lua, all release TOCs, version.txt, POOLED_ROW_CREATION_MOUSE_STATE_FIX_CHANGELOG.md, CONSOLIDATED_CHANGELOG.md, and RELEASE_READINESS_REPORT.md.
+
+3.0.48
+- Propagated the actual return value from the addon-owned Mainline tooltip AddLine and AddDoubleLine methods through the protected C_TooltipInfo rendering boundary.
+- Prevented failed font acquisition from being counted as a successfully rendered tooltip data line.
+- Prevented QuestKing from showing an empty item tooltip when every candidate line was safely rejected.
+- Preserved the addon-owned Mainline tooltip, secret-value filtering, Classic legacy tooltip path, and all QuestKing 3.0.47 behavior.
+- Changed files: core/util.lua, all release TOCs, version.txt, MAINLINE_TOOLTIP_RENDER_RESULT_FIX_CHANGELOG.md, CONSOLIDATED_CHANGELOG.md, and RELEASE_READINESS_REPORT.md.
+
+3.0.47
+- Established and verified both fonts on every addon-owned Mainline tooltip row before the first FontString:SetText() call.
+- Restored usable fonts whenever a pooled tooltip row is reused.
+- Used QuestKing's packaged Source Sans Pro fonts when the intended Blizzard font object did not produce a usable font.
+- Kept a row out of the active layout when neither font path could be established.
+- Preserved the Classic-family tooltip implementation unchanged.
+- Changed files: core/util.lua, all release TOCs, version.txt, MAINLINE_TOOLTIP_FONT_INITIALIZATION_FIX_CHANGELOG.md, CONSOLIDATED_CHANGELOG.md, and RELEASE_READINESS_REPORT.md.
+
+3.0.46
+- Replaced the remaining Mainline GameTooltipTemplate-based QuestKing tooltip with an ordinary QuestKing-owned Frame and FontStrings.
+- Prevented QuestKing tooltip creation, display, and cleanup from entering Blizzard GameTooltip, TooltipComparisonManager, ShoppingTooltip, embedded-item-tooltip, or UIWidget state.
+- Preserved read-only C_TooltipInfo item data retrieval with secret-value filtering.
+- Added QuestKing-owned AddLine, AddDoubleLine, SetText, AddTexture, scaling, and all five configured anchor behaviors for Mainline.
+- Preserved the legacy GameTooltipTemplate path on Classic-family clients.
+- Preserved the 3.0.45 protected mouse-propagation correction and all earlier release behavior.
+- Changed files: core/util.lua, all release TOCs, version.txt, MAINLINE_TOOLTIP_OWNERSHIP_ISOLATION_CHANGELOG.md, CONSOLIDATED_CHANGELOG.md, and RELEASE_READINESS_REPORT.md.
+
+3.0.45
+- Removed protected and restricted SetPropagateMouseClicks calls from pooled watch-row and title-button creation.
+- Preserved ordinary row/title clicks and single-open quest context-menu behavior through the existing quest-ID guard.
+- Prevented QuestKing's Mainline item tooltips from entering Blizzard's tooltip widget-processing pipeline.
+- Replaced Mainline SetHyperlink, SetItemByID, and SetQuestLogSpecialItem population calls with read-only C_TooltipInfo data retrieval and QuestKing-owned text-line rendering.
+- Skips secret tooltip strings and secret dimensions instead of comparing or performing arithmetic on them.
+- Leaves Blizzard GameTooltip, UIWidgetManager, UIWidgetTemplateTextWithStateMixin, map POI tooltips, and widget registries untouched.
+- Preserved the legacy GameTooltip population path on Classic-family clients where C_TooltipInfo is unavailable.
+- Preserved all QuestKing 3.0.43 Phase 8 packaging, WorldQuestTracker integration, world-quest classification, and Phase 1 through Phase 7 behavior.
+- Changed files: core/util.lua, ui/itembutton.lua, buttons/popup.lua, all release TOCs, version.txt, MAINLINE_TOOLTIP_WIDGET_TAINT_FIX_CHANGELOG.md, CONSOLIDATED_CHANGELOG.md, and RELEASE_READINESS_REPORT.md.
+
+3.0.43
+- Completed Phase 8 packaging and cross-version release validation.
+- Added explicit Mainline, Classic Era, Burning Crusade Classic, Cataclysm Classic, and Mists Classic TOCs with exact interface values and identical load order.
+- Replaced the literal @project-version@ build token with the install-ready version 3.0.43.
+- Added the missing Interface-BCC and Interface-Mists package metadata.
+- Validated Lua 5.1 syntax, XML, exact-case TOC paths, dependency and SavedVariables declarations, archive root structure, ZIP integrity, and packaged-source equality.
+- Added a consolidated changelog and release-readiness report with the seven-build static matrix and required live-client tests.
+- Preserved all QuestKing 3.0.42 World Quest Tracker integration, 3.0.41 World Quest classification, and completed Phase 1 through Phase 7 runtime behavior without Lua changes.
+- Changed files: QuestKing.toc, QuestKing_Mainline.toc, QuestKing_Vanilla.toc, QuestKing_TBC.toc, QuestKing_Cata.toc, QuestKing_Mists.toc, version.txt, PHASE_8_RELEASE_VALIDATION_CHANGELOG.md, CONSOLIDATED_CHANGELOG.md, and RELEASE_READINESS_REPORT.md.
+
+3.0.42
+- Added an anchor-only World Quest Tracker integration beneath the QuestKing frame.
+- Kept WorldQuestTrackerScreenPanel parented to UIParent and left World Quest Tracker authoritative for its quest widgets, controls, scale, saved settings, and refresh lifecycle.
+- Securely post-hooks WorldQuestTracker.RefreshTrackerAnchor so World Quest Tracker refreshes cannot pull the panel back to Blizzard while the integration is enabled.
+- Honors World Quest Tracker's own Use Tracker and Attach to Quest Log settings and restores its native anchor when QuestKing integration is disabled.
+- Defers protected anchor changes during combat and reconciles them after combat.
+- Added an Addon Integrations option enabled by default and a Classic-safe inert path when World Quest Tracker is absent.
+- Preserved the complete QuestKing 3.0.41 World Quest classification fix and all Phase 7 visibility, coalescing, profiling, pooling, and failure-containment behavior.
+- Changed files: QuestKing.toc, options.lua, ui/optionspanel.lua, ui/worldquesttracker.lua, WORLD_QUEST_TRACKER_ADAPTER_CHANGELOG.md, and version.txt.
+
+3.0.41
+- Corrected World Quests being displayed under Bonus Objectives by following Blizzard's separate World Quest and bonus-objective classification paths.
+- Added local task World Quests and watched World Quest fallbacks to the normal QuestKing quest population and World Quests section.
+- Replaced the bonus-task fallback with a quest-ID display snapshot that preserves title-only rows while Blizzard objective data is loading.
+- Removed the raw `(109)e` presentation from the World Quest fallback path; World Quests now use the readable [World] prefix and separate level field.
+- Included local World Quest IDs in the Phase 7 population fingerprint and cached display refresh so area changes rebuild only when structurally necessary.
+- Preserved all QuestKing 3.0.40 Phase 7 visibility recovery, coalescing, profiling, pooling, and failure-containment behavior.
+- Changed files: buttons/quest.lua, WORLD_QUEST_CLASSIFICATION_FIX_CHANGELOG.md, and version.txt.
+
+3.0.40
+- Fixed the Phase 7 startup regression that could leave QuestKing as a small empty rectangle with no quest, achievement, or titlebar content.
+- Prevented the options loader from marking tracker layout metrics complete before Tracker:Init creates and anchors the titlebar controls.
+- Added tracker layout generations so pooled rows are reanchored whenever titlebar geometry is initialized or changed.
+- Replaced quest-log-entry-count-only cache validation with a population fingerprint covering policy, ordinary watched quest IDs, world watched quest IDs, and the active prey quest.
+- Allowed late quest-data results for live watched quests and valid All Accepted quest-log rows to repair an early empty population instead of being rejected by that stale cache.
+- Added two bounded post-login/reload readiness checks and a tracked-achievement resynchronization for Blizzard data that becomes available after the first 50 ms event burst.
+- Preserved the last completed row order when a transient quest renderer failure occurs and queues one forced recovery instead of freeing every row and shrinking the tracker.
+- Preserved the Phase 7 coalesced coordinator, profiler, targeted bag scans, pooled-row indexing, and all Phase 5 and Phase 6 behavior.
+- Changed files: buttons/quest.lua, core/core.lua, core/events.lua, ui/tracker.lua, ui/watchbutton.lua, PHASE_7_TRACKER_VISIBILITY_RECOVERY_CHANGELOG.md, and version.txt.
+
+3.0.39
+- Completed Phase 7 performance profiling and refresh-frequency reduction.
+- Replaced duplicate immediate, zero-delay, and delayed tracker requests with one 50 ms event-burst coordinator that merges structural, data, and post-combat work.
+- Cached quest population and refreshed ordinary objective snapshots without rebuilding population; collapsed trackers skip objective reconstruction while preserving counts.
+- Split achievement list changes from criteria updates, removed repeated tracked-ID polling, and reused cached achievement display rows.
+- Filtered non-achievement content-tracking traffic and excluded QuestKing-generated Classic header events from profiler ratios.
+- Restricted bag scans to item-related lifecycle events and removed bag walking from popup rendering and suppression.
+- Reduced AutoComplete to its uniquely required event, removed duplicate broad hooks, and eliminated its private refresh timer.
+- Added keyed pooled-row lookup, stable anchor and layout-metric caching, safe stale-bar cleanup, preserved same-kind bar state, and conditional PetTracker lifecycle refreshes.
+- Throttled missing quest-item metadata and charge changes so OnUpdate cannot generate an every-frame refresh storm.
+- Added the opt-in `/qk perf` profiler for refresh, rebuild, scan, layout, pool, timing, quest-event, and combat-event measurements.
+- Preserved all Phase 1 protected-action, Phase 5 scenario, Phase 6 population, and 3.0.37 hover-callback fixes.
+- Changed files: buttons/achievement.lua, buttons/popup.lua, buttons/quest.lua, buttons/scenario.lua, core/AutoComplete.lua, core/core.lua, core/events.lua, core/slashcommand.lua, core/supertracking.lua, core/util.lua, ui/actionbuttonlayout.lua, ui/itembutton.lua, ui/optionspanel.lua, ui/pettracker.lua, ui/progressbar.lua, ui/rewardsframe.lua, ui/timerbar.lua, ui/tracker.lua, ui/watchbutton.lua, PHASE_7_PERFORMANCE_REFRESH_FREQUENCY_CHANGELOG.md, and version.txt.
+
+3.0.38
+- Completed Phase 6 Classic-family tracker population hardening.
+- Added an explicit live tracker-population setting: Automatic, Watched Only, or All Accepted.
+- Automatic preserves every accepted Classic-family quest while keeping Mainline limited to watched quests.
+- Unified rendered quest rows, title numerator, and bonus-objective duplicate suppression on one resolved population; title dimming additionally honors visible non-quest blocks.
+- Unified Mainline ordinary and world-quest watch lists, retained watched world quests without ordinary log rows, and made active prey quests obey the resolved population policy.
+- Kept fallback world quests title-only when objective data is unavailable and cleared stale pooled bars from reused task lines.
+- Preserved and restored collapsed quest-log headers around one guarded population transaction, suppressed its synthetic quest-log events, and revalidated shifted indices before rendering.
+- Preserved zero-objective Classic quest titles and excluded campaign continuation hints from accepted-quest counts.
+- Added cross-version failed-quest detection and localized Failed rows; negative legacy completion states are no longer treated as successful completion.
+- Normalized invalid saved tracker-collapse and display-mode values before population and title updates.
+- Reused the population built for each refresh instead of independently rescanning the quest log for the title count.
+- Preserved the complete QuestKing 3.0.37 scenario-hover correction and all Phase 5 scenario work.
+- Changed files: options.lua, ui/optionspanel.lua, buttons/quest.lua, buttons/bonusobjective.lua, core/core.lua, core/events.lua, ui/tracker.lua, PHASE_6_CLASSIC_TRACKER_POPULATION_CHANGELOG.md, and version.txt.
+
+3.0.37
+- Fixed scenario tooltip hover crashing when the pooled watch row, rather than its title child, receives `OnEnter`.
+- Normalized scenario, achievement, and bonus-objective hover sources to QuestKing's existing dual-source watch-button callback contract.
+- Preserved tooltip anchoring to the frame actually hovered and left click dispatch, mouse state, scenario data, and Phase 5 reward logic unchanged.
+- Preserved the complete QuestKing 3.0.36 Phase 5 scenario reward and display implementation.
+- Changed files: buttons/scenario.lua, buttons/achievement.lua, buttons/bonusobjective.lua, SCENARIO_HOVER_CALLBACK_FIX_CHANGELOG.md, and version.txt.
+
+3.0.36
+- Completed Phase 5 scenario reward, display, bonus-step, weighted-progress, and timed-content hardening.
+- Consumes SCENARIO_COMPLETED as questID, XP, and money while displaying only the real XP and money payloads.
+- Reads only documented modern ScenarioInformation fields and activates legacy fallbacks only when modern data is unavailable or unusable.
+- Separates current-stage ordinals from explicit scenario step IDs and prevents bonus criteria from falling through to current-stage criteria.
+- Honors modern bonus visibility, preserves authoritative criteria counts, supports the Mists single-bonus-step and LFG bonus-reward APIs, and renders weighted progress on the correct 0–100 scale.
+- Fixes completed-scenario display, modern spell names, stage-transition feedback, max-level XP suppression, and pooled scenario bar cleanup.
+- Fixes proving-grounds score dispatch, adds challenge-start refresh, and makes challenge death-count updates event-driven.
+- Prevents delayed reward animations from anchoring to a pooled row that has since been reused.
+- Changed files: buttons/scenario.lua, buttons/bonusobjective.lua, buttons/challengetimer.lua, core/events.lua, ui/progressbar.lua, ui/rewardsframe.lua, PHASE_5_SCENARIO_REWARDS_DISPLAY_CHANGELOG.md, and version.txt.
+
+3.0.35
+- Matched PetTracker's zone-progress bar width and horizontal insets to QuestKing's quest progress-bar geometry.
+- Kept PetTracker's frame and species rows at their existing content width and position.
+- Preserved the complete 3.0.34 PetTracker startup recovery and all earlier quest, macro-taint, and secure quest-item fixes.
+- Changed files: ui/pettracker.lua, PETTRACKER_BAR_WIDTH_CHANGELOG.md, and version.txt.
+
+3.0.34
+- Fixed PetTracker remaining absent when the first post-login player-map lookup was temporarily unavailable.
+- Added five bounded map-readiness retries through QuestKing's existing coalesced update path; no permanent polling or OnUpdate work was added.
+- Resets the retry budget on relevant addon, login, world-entry, and zone-change lifecycle events and cancels it as soon as a valid player map is available.
+- Preserved PetTracker's Zone Tracker and completed-zone visibility rules.
+- Preserved all QuestKing 3.0.33 macro-taint, 3.0.32 objective-order, and secure quest-item fixes.
+- Changed files: ui/pettracker.lua, PETTRACKER_STARTUP_RECOVERY_CHANGELOG.md, and version.txt.
+
+3.0.33
+- Fixed `ADDON_ACTION_FORBIDDEN` attribution to QuestKing when a macro used Blizzard's `/tm` or `/targetmarker` command and reached protected `SetRaidTarget()`.
+- Stopped reassigning Blizzard's global `SlashCmdList` registry while registering `/qkoptions`; QuestKing now adds only its own command entry to the existing table.
+- Preserved secure quest-item buttons and all 3.0.32 objective-count ordering changes.
+- Changed files: ui/optionspanel.lua, RAID_TARGET_TAINT_FIX_CHANGELOG.md, and version.txt.
+
+3.0.32
+- Moved world-quest, bonus-objective, and scenario numeric progress before the objective description so watch rows display `1/3 Objective`, matching normal quest rows and Blizzard's tracker.
+- Preserved criteria text that Blizzard already formats and left weighted percentage/progress-bar rows unchanged.
+- Preserved all QuestKing 3.0.31 PetTracker runtime fixes.
+- Changed files: buttons/bonusobjective.lua, buttons/scenario.lua, OBJECTIVE_COUNT_ORDER_FIX_CHANGELOG.md, and version.txt.
+
+3.0.31
+- Fixed `FontString:SetText(): Font not set` while creating QuestKing's PetTracker header by assigning the configured font before the header text.
+- Delays the dedicated PetTracker renderer until `PLAYER_ENTERING_WORLD`, matching Blizzard Objective Tracker data readiness.
+- Refreshes PetTracker content after world entry, zone changes, PetTracker collection changes, and PetTracker option changes instead of reusing an early empty scan.
+- Keeps a failed or map-less refresh dirty so it is retried when the required runtime data becomes available.
+- Uses PetTracker's truthy Zone Tracker setting semantics and sizes the section from PetTracker's actual frame height.
+- Preserved the complete 3.0.27 menu-parity and 3.0.28 Focus/Track semantics code unchanged.
+- Changed files: ui/pettracker.lua, PETTRACKER_ADAPTER_CHANGELOG.md, and version.txt.
+
+3.0.30
+- Fixed the PetTracker section remaining completely absent when an obsolete saved QuestKing compatibility value was false.
+- Removed the duplicate QuestKing PetTracker toggle; PetTracker's own Zone Tracker option is now the single visibility control.
+- Detects PetTracker readiness from its initialized runtime API instead of blocking on a redundant addon-loaded gate.
+- Anchors and exposes the QuestKing-owned section before constructing the independent PetTracker tracker so its first update has a valid layout root.
+- Preserved the complete 3.0.27 menu-parity and 3.0.28 Focus/Track semantics code unchanged.
+- Changed files: options.lua, options_override.lua, ui/optionspanel.lua, ui/pettracker.lua, core/compatibility.lua, PETTRACKER_ADAPTER_CHANGELOG.md, and version.txt.
+
+3.0.29
+- Added a dedicated PetTracker adapter on top of the complete 3.0.28 Focus/Track semantics build.
+- Creates a separate PetTracker-owned tracker instance inside QuestKing without moving or modifying PetTracker's Blizzard Objective Tracker module.
+- Preserves PetTracker's Zone Tracker, Show Captured, target-quality, progress, species click, and right-click menu behavior.
+- Makes the existing PetTracker option a real visibility gate and enables it by default for new or unsaved configurations.
+- Refreshes the adapter after PetTracker collection/option signals, late addon loading, zone transitions, login, world entry, and post-combat reconciliation.
+- Coalesces PetTracker-only layout work without forcing full QuestKing quest-data rebuilds.
+- Preserved every 3.0.27 menu-parity and 3.0.28 Focus/Track API correction.
+- Added file: ui/pettracker.lua.
+- Changed files: QuestKing.toc, options.lua, options_override.lua, ui/optionspanel.lua, core/compatibility.lua, and version.txt.
+
+3.0.28
+- Corrected Focus and Track/Untrack to use Blizzard's two independent states.
+- Focus / Remove Focus now changes only `C_SuperTrack` quest navigation.
+- Track Quest / Untrack now changes only the quest watch list; Blizzard's own event lifecycle controls any resulting Focus change.
+- Classic-family accepted-but-unwatched quests now show Track Quest instead of treating Untrack as an addon-only hide action.
+- Corrected Mainline watched-state detection to Blizzard's `C_QuestLog.GetQuestWatchType` API.
+- Updated modern `C_QuestLog.AddQuestWatch` calls to Blizzard's documented quest-ID-only signature.
+- Routed world-quest Track/Untrack through Blizzard's dedicated `QuestUtil` helpers.
+- Added Blizzard-style normal, Classic, and manual world-quest watch-limit checks before Track Quest.
+- Renamed QuestKing's internal closest-quest and tracker-cycle functions from Track to Focus because they operate only on supertracking.
+- Renamed focus-related tooltips and sorting terminology so supertracking is no longer presented as normal quest tracking.
+- Changed files: buttons/quest.lua, buttons/bonusobjective.lua, core/compatibility.lua, core/core.lua, core/events.lua, core/supertracking.lua, QUEST_CONTEXT_MENU_ACTIONS_CHANGELOG.md, and version.txt.
+
+3.0.27
+- Rebuilt the quest right-click menu to match Blizzard's objective-tracker actions: Focus / Remove Focus, Open Quest Details, Open Quest Map, Untrack, Share Quest, and Abandon Quest.
+- Separated quest focus (supertracking) from watch-list removal.
+- Changed ordinary left-click to open the selected quest on the map while preserving Shift-click quest links and field-completable quest clicks.
+- Disabled Focus on clients without an exact quest-supertracking API and disabled Open Quest Map where no quest map exists or combat lockdown makes that path unsafe.
+- Re-resolved live quest-log indices from stable quest IDs before click and menu actions.
+- Removed the silent right-click fallback that changed quest focus when the context menu could not open.
+- Changed files: buttons/quest.lua, QUEST_CONTEXT_MENU_ACTIONS_CHANGELOG.md, and version.txt.
+
+3.0.26
+- Removed Open Quest from the quest right-click menu because left-click already opens the quest.
+- Removed the redundant Cancel row; the dropdown retains Blizzard's normal outside-click and Escape dismissal behavior.
+- Kept Track Quest / Untrack Quest, Remove Quest, Share Quest, and Abandon Quest unchanged.
+- Changed files: buttons/quest.lua and QUEST_CONTEXT_MENU_ACTIONS_CHANGELOG.md.
+
+3.0.25
+- Expanded the quest right-click menu with separate Remove Quest, Share Quest, and Abandon Quest actions.
+- Preserved Track Quest / Untrack Quest as the navigation-focus action instead of conflating it with watch-list removal.
+- Remove Quest now uses quest IDs on Mainline, quest-log indices on Classic-family clients, and the dedicated world-quest watch API where applicable.
+- Classic-family explicit removals remain hidden even though QuestKing normally displays every accepted quest; tracking the quest again through Blizzard restores it.
+- Share Quest is enabled only while grouped and the selected quest is currently pushable.
+- Abandon Quest is enabled only for abandonable quests and always opens Blizzard's item-aware confirmation dialog instead of abandoning immediately.
+- Menu callbacks resolve the live quest-log index from the stable quest ID before acting.
+- Changed file: buttons/quest.lua.
+
+3.0.24
+- Fixed ADDON_ACTION_BLOCKED from QuestKing_PoolButton*:EnableMouse() during combat.
+- Kept secure quest-item buttons parented to the stable tracker instead of recyclable watch rows.
+- Added combat-safe pooled-row mouse-mode changes with automatic post-combat reapplication.
+- Removed repeated quest-row click registration from tracker refreshes.
+- Fixed field-completable quests so Retail uses `C_QuestLog.GetInfo(logIndex).isAutoComplete` and Classic-family clients use their supported legacy/event signals.
+- Field-completable rows now show `Quest Complete`, `Click to complete`, a ready-check title icon, and a completion-specific tooltip.
+- Ordinary NPC turn-ins remain `Ready for turn-in` and no longer call `ShowQuestComplete`.
+- Treated `QUEST_AUTOCOMPLETE` and matching `COMPLETE` popups as authoritative while excluding `OFFER` popups.
+- Routed `ShowQuestComplete` with quest ID on Mainline and quest-log index on Classic-family clients.
+- Changed files: core/compatibility.lua, core/events.lua, core/util.lua, core/AutoComplete.lua, ui/itembutton.lua, ui/watchbutton.lua, buttons/quest.lua, buttons/popup.lua, buttons/achievement.lua, buttons/bonusobjective.lua, buttons/challengetimer.lua.
+
+3.0.23
+- Corrected the single right-click Track Quest action to use quest supertracking/navigation instead of watch-list membership.
+- Track Quest now selects the clicked quest as the active navigation target; Untrack Quest clears that target when the same quest is active.
+- Kept only one tracking action in the menu and preserved Open Quest, Cancel, grouped quest progress, and duplicate-click guards.
+- Changed file: buttons/quest.lua.
+
+3.0.22
+- Removed the Set Active Quest / Clear Active Quest row from the quest right-click menu.
+- Kept a single Track Quest / Untrack Quest action for watch-list tracking.
+- Changed the no-menu fallback to toggle watch tracking instead of supertracking.
+- Preserved Open Quest, Cancel, grouped quest progress, and the duplicate-click guards.
+- Changed file: buttons/quest.lua.
+
+3.0.21
+- Fixed the grouped quest right-click menu showing two entries with the same Track Quest wording.
+- Renamed the supertracking action to Set Active Quest / Clear Active Quest instead of reusing Blizzard's Track Quest / Untrack Quest text.
+- Kept one separate Track Quest / Untrack Quest action for the player's watch list; party members who share the quest do not receive separate menu actions.
+- Preserved the 3.0.20 duplicate-click propagation and menu-open guards.
+- Changed file: buttons/quest.lua.
+
+3.0.20
+- Fixed repeated quest context menus when one right-click was dispatched through multiple watch-row click regions or repeated group quest notifications.
+- Disabled mouse-click propagation on both the pooled watch-row body and its title child so one physical click reaches only one QuestKing handler.
+- Added a quest-ID-specific context-menu guard that ignores duplicate opens while the same menu is already visible and debounces same-frame duplicate dispatches.
+- Closes any stale level-one dropdown before opening the requested quest menu, without changing left-click quest opening, track/untrack, or active-quest behavior.
+- Changed files: buttons/quest.lua, ui/watchbutton.lua.
+
+3.0.19
+- Corrected SCENARIO_COMPLETED handling to consume Blizzard's documented questID, XP, and money argument order.
+- Corrected modern ScenarioInformation field mapping and retained guarded legacy scenario bonus-step compatibility.
+- Kept non-protected quest, objective, scenario, title, and row updates active during combat while specialized secure UI paths continue to defer protected mutations.
+- Applied saved and live font/completed-objective settings dynamically instead of retaining file-load defaults.
+- Unified the three-state completed-objective policy for normal quests, progress bars, and scenario criteria.
+- Corrected task/bonus-objective header classification using GetTaskInfo's displayAsObjective return value.
+- Added a cross-version right-click quest menu using Blizzard's stable UIDropDownMenu API.
+- Made PetTracker compatibility state refreshable after saved variables load and stopped unnecessary loader events once dependency state is known.
+- Corrected safe-call failure reporting so fallback tracker updates execute after exceptions.
+- Reduced AutoComplete event traffic and restricted ADDON_LOADED handling to QuestKing itself.
+- Corrected TOC file-name case and expanded Mainline interface metadata for supplied 12.0.7 and 12.1.0 snapshots.
+
+## 3.0.18 - Secure quest item button click fix
+
+- Fixed the watch-frame quest item button after the protected `UseQuestLogSpecialItem()` taint report.
+- Restored `SecureActionButtonTemplate` use, but corrected the XML so `SecureActionButton_OnClick` is no longer overwritten by QuestKing's Lua click handler.
+- Left-click quest item use is now handled by secure `type1="item"` / `item1=<item link>` attributes.
+- Added a `PostClick` handler only for safe tracker refresh and modified-click chat-link insertion.
+- Kept combat-lockdown guards around secure attribute, parent, point, and layout changes.
+- Changed files: ui/itembutton.lua, ui/itembutton.xml.
+
+## 3.0.16 - Quest special item click restore
+
+- Restored Blizzard-style quest item use for the watch-frame item button.
+- Removed secure `type="item"` / `item1` handling because quest-log special items are not always real bag items and can fail silently, as seen with `Prophecy Stirs`.
+- Kept the previous taint fix by removing the `pcall(UseQuestLogSpecialItem)` wrapper; the protected item use now receives the original hardware click path.
+- Updated the item tooltip path to prefer `GameTooltip:SetQuestLogSpecialItem(questLogIndex)` when available.
+
+3.0.15
+- Attempted to fix QuestKing-attributed protected `UNKNOWN()` taint from quest item buttons by moving item use to `SecureActionButtonTemplate` attributes.
+- Removed the direct item-button `UseQuestLogSpecialItem()` call from `ui/itembutton.lua`; left-click now uses secure `type1="item"` / `item1=<item link>` handling.
+- Disabled the insecure autocomplete fallback that attempted to use quest-log special items from a quest title click.
+- Added combat-lockdown guards so secure item button attributes, parent, points, and layout are not changed while in combat.
+- Added `QUEST_ITEM_SECURE_CLICK_TAINT_FIX_CHANGELOG.md`.
+- Changed files: ui/itembutton.lua, ui/itembutton.xml, core/AutoComplete.lua.
+
+
 3.0.14
 - Fixed QuestKing-attributed `SetRaidTarget()` protected-call taint by removing the addon-owned `SecureActionButtonTemplate` quest item button path.
 - Converted `QuestKingItemButtonTemplate` to a normal button, matching Blizzard's modern Objective Tracker quest item button pattern.

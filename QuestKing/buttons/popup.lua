@@ -3,6 +3,7 @@ local addonName, QuestKing = ...
 local opt = QuestKing.options or {}
 local opt_colors = (opt and opt.colors) or {}
 local WatchButton = QuestKing.WatchButton
+local Compat = QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
 
 local C_Container = C_Container
 local C_Item = C_Item
@@ -21,6 +22,7 @@ local ipairs = ipairs
 local tinsert = table.insert
 local tonumber = tonumber
 local type = type
+local wipe = wipe
 
 local NUM_BAG_SLOTS_COMPAT = NUM_BAG_SLOTS or 4
 local REAGENT_BAG_ID = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag or nil
@@ -87,6 +89,9 @@ local questStartItemSet = nil
 local activeQuestTextCache = nil
 local activeQuestSpecialItemCache = nil
 local pendingQuestStartItemID = nil
+local pendingLootBagScanAlert = false
+local questPopupStateDirty = false
+local questStartItemsInBags = {}
 local mouseHandlerPopup = {}
 local GetItemInfoCompat
 local GetQuestPopupTitle
@@ -134,6 +139,12 @@ local function SafeCall(func, ...)
     end
 
     return false, nil, nil, nil, nil, nil
+end
+
+local function RecordPerformanceMetric(metricName)
+    if type(QuestKing.RecordPerformanceMetric) == "function" then
+        QuestKing:RecordPerformanceMetric(metricName, 1)
+    end
 end
 
 local function IsSecretValue(value)
@@ -207,10 +218,12 @@ local function SafeStringFind(value, pattern)
 end
 
 local function QueueTrackerRefresh(forceBuild)
-    if type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild, false)
+    if type(QuestKing.RequestTrackerUpdate) == "function" then
+        QuestKing:RequestTrackerUpdate(false, "popup", false)
+    elseif type(QuestKing.QueueTrackerUpdate) == "function" then
+        QuestKing:QueueTrackerUpdate(false, false, "popup")
     elseif type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(forceBuild, false)
+        QuestKing:UpdateTracker(false, false, "popup")
     end
 end
 
@@ -325,6 +338,7 @@ local function FindContainerPositionByID(searchID)
 
     local foundBagID, foundSlotID = nil, nil
 
+    RecordPerformanceMetric("bagScanCount")
     IteratePlayerBags(function(bagID)
         if foundBagID then
             return
@@ -405,6 +419,11 @@ end
 local function ResetQuestPopupCaches()
     activeQuestTextCache = nil
     activeQuestSpecialItemCache = nil
+end
+
+function QuestKing:InvalidateQuestPopupState()
+    ResetQuestPopupCaches()
+    questPopupStateDirty = true
 end
 
 local function ExtractItemIDFromLink(itemLink)
@@ -568,6 +587,7 @@ local function BuildActiveQuestTextCache()
     local texts = {}
     local numEntries = GetNumQuestLogEntriesCompat()
 
+    RecordPerformanceMetric("questLogScanCount")
     for questLogIndex = 1, numEntries do
         local title, questID, isHeader = GetQuestInfoByLogIndexCompat(questLogIndex)
         if not isHeader then
@@ -594,6 +614,7 @@ local function BuildActiveQuestSpecialItemSet()
     local activeItems = {}
     local numEntries = GetNumQuestLogEntriesCompat()
 
+    RecordPerformanceMetric("questLogScanCount")
     for questLogIndex = 1, numEntries do
         local _, _, isHeader = GetQuestInfoByLogIndexCompat(questLogIndex)
         if not isHeader then
@@ -672,13 +693,13 @@ local function ShouldSuppressAutoQuestPopup(questID, popupType)
     end
 
     local itemID = START_ITEM_ID_BY_AUTO_QUEST_ID[questID]
-    if itemID and itemPopups[itemID] ~= nil and FindContainerItemByID(itemID) then
+    if itemID and itemPopups[itemID] ~= nil and questStartItemsInBags[itemID] then
         return true
     end
 
     local questTitle = GetQuestPopupTitle(questID, GetQuestLogIndexByIDCompat(questID))
     for popupItemID, popupInfo in pairs(itemPopups) do
-        if FindContainerItemByID(popupItemID) then
+        if questStartItemsInBags[popupItemID] then
             local itemName = popupInfo and popupInfo.name or nil
             if TextHasAllItemTokens(questTitle, itemName) then
                 return true
@@ -729,18 +750,16 @@ local function CallQuestPopupAPICompat(func, questID, questLogIndex)
         return false
     end
 
-    if type(questID) == "number" and questID > 0 then
+    local isMainline = type(Compat.IsMainline) == "function" and Compat.IsMainline()
+
+    if isMainline and type(questID) == "number" and questID > 0 then
         local ok = SafeCall(func, questID)
-        if ok then
-            return true
-        end
+        return ok and true or false
     end
 
     if type(questLogIndex) == "number" and questLogIndex > 0 then
         local ok = SafeCall(func, questLogIndex)
-        if ok then
-            return true
-        end
+        return ok and true or false
     end
 
     return false
@@ -756,13 +775,13 @@ end
 local function GetPopupCompleteLineText(questID)
     if IsTaskQuestCompat(questID) then
         return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE_TASK
+            or QUEST_WATCH_CLICK_TO_COMPLETE
             or QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
-            or QUEST_WATCH_QUEST_READY
             or "Click to complete"
     end
 
-    return QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
-        or QUEST_WATCH_QUEST_READY
+    return QUEST_WATCH_CLICK_TO_COMPLETE
+        or QUEST_WATCH_POPUP_CLICK_TO_COMPLETE
         or "Click to complete"
 end
 
@@ -848,11 +867,19 @@ end
 function QuestKing:ScanQuestStartItemPopups(playAlert)
     ResetQuestPopupCaches()
 
+    playAlert = playAlert == true or pendingLootBagScanAlert
+    pendingLootBagScanAlert = false
+
     if opt.enableItemPopups ~= true then
-        return false
+        local changed = next(itemPopups) ~= nil
+        wipe(itemPopups)
+        wipe(questStartItemsInBags)
+        return changed
     end
 
+    RecordPerformanceMetric("bagScanCount")
     BuildQuestStartItemSet()
+    wipe(questStartItemsInBags)
 
     local changed = false
 
@@ -861,6 +888,7 @@ function QuestKing:ScanQuestStartItemPopups(playAlert)
         for slotID = 1, numSlots do
             local itemID = GetContainerItemIDCompat(bagID, slotID)
             if itemID and questStartItemSet[itemID] then
+                questStartItemsInBags[itemID] = true
                 if TrackQuestStartItem(itemID, nil, playAlert) then
                     changed = true
                 end
@@ -868,8 +896,12 @@ function QuestKing:ScanQuestStartItemPopups(playAlert)
         end
     end)
 
-    if changed then
-        QueueTrackerRefresh(true)
+    for itemID, popupInfo in pairs(itemPopups) do
+        if not questStartItemsInBags[itemID]
+            or ShouldHideQuestStartItemPopup(itemID, popupInfo and popupInfo.name or nil) then
+            itemPopups[itemID] = nil
+            changed = true
+        end
     end
 
     return changed
@@ -900,8 +932,9 @@ local function SetPopupVisuals(button, titleColorName, backgroundColorName, icon
     button.title:SetTextColor(titleColor[1] or 1, titleColor[2] or 1, titleColor[3] or 1)
     SetButtonBackdropColor(button, backgroundColor)
     button:SetIcon(iconType)
-    button.titleButton:EnableMouse(false)
-    button:EnableMouse(true)
+    if button.SetMouseMode then
+        button:SetMouseMode(true, false)
+    end
 end
 
 local function SetButtonToItemPopup(button, itemID, popupInfo)
@@ -975,16 +1008,6 @@ local function SetButtonToQuestPopup(button, questID, popupType)
     end
 end
 
-local function CleanupStaleItemPopups()
-    ResetQuestPopupCaches()
-
-    for itemID, popupInfo in pairs(itemPopups) do
-        if not FindContainerItemByID(itemID) or ShouldHideQuestStartItemPopup(itemID, popupInfo and popupInfo.name or nil) then
-            itemPopups[itemID] = nil
-        end
-    end
-end
-
 local function OpenItemPopupTooltip(owner, itemID, popupInfo)
     if not owner or type(itemID) ~= "number" or itemID <= 0 or not QuestKing.PrepareTooltip then
         return
@@ -997,25 +1020,53 @@ local function OpenItemPopupTooltip(owner, itemID, popupInfo)
 
     local itemLink = popupInfo and popupInfo.link or nil
 
-    if tooltip.SetHyperlink and itemLink then
-        local ok = SafeCall(tooltip.SetHyperlink, tooltip, itemLink)
-        if ok then
+    if QuestKing.IsMainline then
+        local shown = false
+
+        if itemLink
+            and type(QuestKing.PopulatePrivateTooltipFromHyperlink) == "function" then
+            shown = QuestKing:PopulatePrivateTooltipFromHyperlink(
+                tooltip,
+                itemLink
+            )
+        end
+
+        if not shown
+            and type(QuestKing.PopulatePrivateTooltipFromItemID) == "function" then
+            shown = QuestKing:PopulatePrivateTooltipFromItemID(
+                tooltip,
+                itemID
+            )
+        end
+
+        if shown then
             tooltip:AddLine(" ")
             tooltip:AddLine("Left-click to use the item", 0.7, 0.7, 0.7)
             tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
             tooltip:Show()
             return
         end
-    end
+    else
+        if tooltip.SetHyperlink and itemLink then
+            local ok = SafeCall(tooltip.SetHyperlink, tooltip, itemLink)
+            if ok then
+                tooltip:AddLine(" ")
+                tooltip:AddLine("Left-click to use the item", 0.7, 0.7, 0.7)
+                tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
+                tooltip:Show()
+                return
+            end
+        end
 
-    if tooltip.SetItemByID then
-        local ok = SafeCall(tooltip.SetItemByID, tooltip, itemID)
-        if ok then
-            tooltip:AddLine(" ")
-            tooltip:AddLine("Left-click to use the item", 0.7, 0.7, 0.7)
-            tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
-            tooltip:Show()
-            return
+        if tooltip.SetItemByID then
+            local ok = SafeCall(tooltip.SetItemByID, tooltip, itemID)
+            if ok then
+                tooltip:AddLine(" ")
+                tooltip:AddLine("Left-click to use the item", 0.7, 0.7, 0.7)
+                tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
+                tooltip:Show()
+                return
+            end
         end
     end
 
@@ -1047,26 +1098,46 @@ local function OpenQuestPopupTooltip(owner, questID, popupType, questLogIndex)
     end
 
     tooltip:AddLine(" ")
-    tooltip:AddLine("Left-click to open the popup", 0.7, 0.7, 0.7)
+    if popupType == "COMPLETE" then
+        tooltip:AddLine("Left-click to complete quest", 0.3, 1.0, 0.6)
+    else
+        tooltip:AddLine("Left-click to view quest", 0.7, 0.7, 0.7)
+    end
     tooltip:AddLine("Right-click to dismiss", 0.7, 0.7, 0.7)
     tooltip:Show()
 end
 
 
 function QuestKing:OnQuestStartItemQuestAccepted(questID)
-    if not pendingQuestStartItemID then
-        return false
+    local acceptedQuestID = SafeNumber(questID, nil)
+    local changed = false
+
+    if pendingQuestStartItemID then
+        local itemID = pendingQuestStartItemID
+        pendingQuestStartItemID = nil
+        acceptedQuestStartItemIDs[itemID] = acceptedQuestID or true
+        if itemPopups[itemID] ~= nil then
+            itemPopups[itemID] = nil
+            changed = true
+        end
     end
 
-    local itemID = pendingQuestStartItemID
-    local acceptedQuestID = SafeNumber(questID, nil)
-
-    pendingQuestStartItemID = nil
-    acceptedQuestStartItemIDs[itemID] = acceptedQuestID or true
-    itemPopups[itemID] = nil
     ResetQuestPopupCaches()
-    QueueTrackerRefresh(true)
-    return true
+    questPopupStateDirty = true
+
+    for itemID, popupInfo in pairs(itemPopups) do
+        if QUEST_ID_BY_START_ITEM_ID[itemID] == acceptedQuestID
+            or ShouldHideQuestStartItemPopup(itemID, popupInfo and popupInfo.name or nil) then
+            itemPopups[itemID] = nil
+            changed = true
+        end
+    end
+
+    if changed then
+        QueueTrackerRefresh(false)
+    end
+
+    return changed
 end
 
 function QuestKing:OnQuestStartItemQuestRemoved(questID)
@@ -1074,6 +1145,7 @@ function QuestKing:OnQuestStartItemQuestRemoved(questID)
     local changed = acceptedQuestID and RemoveAcceptedQuestStartItemForQuest(acceptedQuestID) or false
 
     ResetQuestPopupCaches()
+    questPopupStateDirty = true
 
     if changed then
         QueueTrackerRefresh(true)
@@ -1090,10 +1162,12 @@ function QuestKing:ParseLoot(msg)
     -- Retail/Midnight can deliver protected chat payloads as secret strings.
     -- Do not compare, concatenate, or call string methods on such values.
     if IsSecretValue(msg) then
-        return self:ScanQuestStartItemPopups(true)
+        pendingLootBagScanAlert = true
+        return false
     end
 
     if type(msg) ~= "string" then
+        pendingLootBagScanAlert = true
         return false
     end
 
@@ -1109,11 +1183,15 @@ function QuestKing:ParseLoot(msg)
     end
 
     if not itemID then
-        return self:ScanQuestStartItemPopups(false)
+        pendingLootBagScanAlert = true
+        return false
     end
 
+    if BuildQuestStartItemSet()[itemID] then
+        questStartItemsInBags[itemID] = true
+    end
     if TrackQuestStartItem(itemID, itemName, true) then
-        QueueTrackerRefresh(true)
+        QueueTrackerRefresh(false)
         return true
     end
 
@@ -1127,14 +1205,29 @@ function QuestKing:InitLoot()
         return
     end
 
-    if self.EventsFrame then
-        self.EventsFrame:UnregisterEvent("CHAT_MSG_LOOT")
-        self.EventsFrame:UnregisterEvent("BAG_UPDATE_DELAYED")
-    end
+    wipe(itemPopups)
+    wipe(questStartItemsInBags)
+    pendingLootBagScanAlert = false
+    questPopupStateDirty = false
 end
 
 function QuestKing:UpdateTrackerPopups()
-    CleanupStaleItemPopups()
+    if questPopupStateDirty then
+        questPopupStateDirty = false
+        ResetQuestPopupCaches()
+
+        for itemID, present in pairs(questStartItemsInBags) do
+            if present then
+                TrackQuestStartItem(itemID, nil, false)
+            end
+        end
+
+        for itemID, popupInfo in pairs(itemPopups) do
+            if ShouldHideQuestStartItemPopup(itemID, popupInfo and popupInfo.name or nil) then
+                itemPopups[itemID] = nil
+            end
+        end
+    end
 
     for itemID, popupInfo in pairs(itemPopups) do
         local button = WatchButton:GetKeyed("popup", "item:" .. tostring(itemID))
@@ -1202,13 +1295,23 @@ function mouseHandlerPopup:ButtonOnClick(mouse)
     end
 
     if popupType == "OFFER" then
-        CallQuestPopupAPICompat(ShowQuestOffer, questID, questLogIndex)
-        RemoveAutoQuestPopUpCompat(questID)
-        QueueTrackerRefresh(true)
+        if CallQuestPopupAPICompat(ShowQuestOffer, questID, questLogIndex) then
+            RemoveAutoQuestPopUpCompat(questID)
+            QueueTrackerRefresh(true)
+        end
     elseif popupType == "COMPLETE" then
-        CallQuestPopupAPICompat(ShowQuestComplete, questID, questLogIndex)
-        RemoveAutoQuestPopUpCompat(questID)
-        QueueTrackerRefresh(true)
+        local shown = false
+
+        if type(Compat.ShowQuestComplete) == "function" then
+            shown = Compat.ShowQuestComplete(questID, questLogIndex) and true or false
+        else
+            shown = CallQuestPopupAPICompat(ShowQuestComplete, questID, questLogIndex)
+        end
+
+        if shown then
+            RemoveAutoQuestPopUpCompat(questID)
+            QueueTrackerRefresh(true)
+        end
     end
 end
 

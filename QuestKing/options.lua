@@ -46,17 +46,17 @@ opt.trackerBackgroundAlpha = 0.55
 -- Behavior toggles
 ----------------------------------------------------------------------
 
--- If true, QuestKing will suppress Blizzard's tracker roots with a conservative,
--- root-only visual pass. This intentionally avoids recursive child-region
--- suppression and leaves world map tooltip / widget internals alone.
---
--- This setting is for the Blizzard tracker itself, not World Map quest/POI pins.
+-- Fail-open default: leave Blizzard's tracker visible so content from modules
+-- QuestKing does not replace remains available. If enabled, this suppresses the
+-- entire Blizzard tracker, not only the quest types QuestKing currently covers.
+-- The setting does not affect World Map quest/POI pins.
 opt.disableBlizzard = false
 
--- If true, QuestKing will enable PetTracker integration helpers.
--- This is disabled by default because reparenting third-party objective frames
--- into a custom tracker is a common taint source on modern clients.
-opt.enablePetTrackerCompatibility = false
+-- When World Quest Tracker is installed and its own "Attach to Quest Log"
+-- setting is enabled, attach its existing UIParent-owned tracker panel beneath
+-- QuestKing instead. World Quest Tracker retains ownership of its rows,
+-- controls, refreshes, scale, and visibility.
+opt.attachWorldQuestTracker = true
 
 -- Show special popup when looting an item that starts a quest
 opt.enableItemPopups = true
@@ -69,6 +69,16 @@ opt.showCompletedObjectives = true
 
 -- Hide objectives that are superseded by newer steps (e.g., scenario score tiers, invasion scores)
 opt.hideSupersedingObjectives = true
+
+-- Controls which accepted quests populate QuestKing's normal quest sections:
+--   "automatic" = all accepted quests on Classic-family clients, watched quests on Mainline
+--   "watched"   = watched quests only on every client
+--   "all"       = all accepted quests on every client
+--
+-- The automatic policy preserves Classic quests that Blizzard cannot place on
+-- its watch list, including accepted quests with no objectives, without making
+-- Mainline behave like an all-quest-log tracker.
+opt.trackerPopulationPolicy = "automatic"
 
 -- Show Blizzard-style campaign continuation rows such as:
 -- "Continue the campaign by accepting the quest ..."

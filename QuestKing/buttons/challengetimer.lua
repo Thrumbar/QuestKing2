@@ -30,6 +30,7 @@ local CHALLENGE_BAR_MIN_WIDTH = 120
 local UPDATE_INTERVAL = 0.05
 
 local activeProvingGroundBar = nil
+local activeModernChallengeBar = nil
 
 local function SafeCall(func, ...)
     if type(func) ~= "function" then
@@ -65,6 +66,14 @@ local function GetChallengeBarWidth()
     return width
 end
 
+local function GetFontLayer()
+    if QuestKing and type(QuestKing.GetFontLayer) == "function" then
+        return QuestKing.GetFontLayer()
+    end
+
+    return "OVERLAY"
+end
+
 local function ApplyFontStringStyle(fontString, sizeOffset)
     if not fontString then
         return
@@ -75,6 +84,11 @@ local function ApplyFontStringStyle(fontString, sizeOffset)
     local fontStyle = opt.fontStyle or ""
 
     fontString:SetFont(fontPath, fontSize, fontStyle)
+    if QuestKing and type(QuestKing.ApplyFontLayer) == "function" then
+        QuestKing.ApplyFontLayer(fontString)
+    elseif type(fontString.SetDrawLayer) == "function" then
+        fontString:SetDrawLayer(GetFontLayer())
+    end
     fontString:SetShadowOffset(1, -1)
     fontString:SetShadowColor(0, 0, 0, 1)
 end
@@ -159,9 +173,28 @@ local function TriggerCountdownPulse(challengeBar)
     end
 end
 
+local function RefreshChallengeBarPresentation(challengeBar)
+    if not challengeBar then
+        return
+    end
+
+    challengeBar:SetWidth(GetChallengeBarWidth())
+    ApplyFontStringStyle(challengeBar.text, 0)
+    ApplyFontStringStyle(challengeBar.extraText, -0.5)
+    ApplyFontStringStyle(challengeBar.score, -0.5)
+end
+
 local function ResetChallengeBarVisuals(challengeBar)
     if not challengeBar then
         return
+    end
+
+    if activeProvingGroundBar == challengeBar then
+        activeProvingGroundBar = nil
+    end
+
+    if activeModernChallengeBar == challengeBar then
+        activeModernChallengeBar = nil
     end
 
     challengeBar:SetWidth(GetChallengeBarWidth())
@@ -170,6 +203,7 @@ local function ResetChallengeBarVisuals(challengeBar)
     challengeBar:SetMinMaxValues(0, 1)
     challengeBar:SetValue(1)
     challengeBar:SetScript("OnUpdate", nil)
+    RefreshChallengeBarPresentation(challengeBar)
 
     StopPulseAnimation(challengeBar)
 
@@ -269,7 +303,7 @@ local function CreateChallengeBar(button)
     icon:SetTexCoord(0.25, 0.7, 0.25, 0.7)
     challengeBar.icon = icon
 
-    local text = challengeBar:CreateFontString(nil, "OVERLAY")
+    local text = challengeBar:CreateFontString(nil, GetFontLayer())
     ApplyFontStringStyle(text, 0)
     text:SetJustifyH("CENTER")
     text:SetJustifyV("MIDDLE")
@@ -279,7 +313,7 @@ local function CreateChallengeBar(button)
     text:SetText(CHALLENGES_TIMER_NO_MEDAL or "No Medal")
     challengeBar.text = text
 
-    local extraText = challengeBar:CreateFontString(nil, "OVERLAY")
+    local extraText = challengeBar:CreateFontString(nil, GetFontLayer())
     ApplyFontStringStyle(extraText, -0.5)
     extraText:SetPoint("BOTTOMLEFT", challengeBar, "TOPLEFT", 2, 4)
     extraText:SetTextColor(1, 1, 1)
@@ -290,7 +324,7 @@ local function CreateChallengeBar(button)
     extraText:Hide()
     challengeBar.extraText = extraText
 
-    local score = challengeBar:CreateFontString(nil, "OVERLAY")
+    local score = challengeBar:CreateFontString(nil, GetFontLayer())
     ApplyFontStringStyle(score, -0.5)
     score:SetJustifyH("RIGHT")
     score:SetJustifyV("MIDDLE")
@@ -300,6 +334,7 @@ local function CreateChallengeBar(button)
     score:SetText("0")
     score:Hide()
     challengeBar.score = score
+    challengeBar.RefreshPresentation = RefreshChallengeBarPresentation
 
     ResetChallengeBarVisuals(challengeBar)
     return challengeBar
@@ -335,7 +370,9 @@ local function SetChallengeTitleState(button)
         return
     end
 
-    button.titleButton:EnableMouse(false)
+    if button.SetMouseMode then
+        button:SetMouseMode(false, false)
+    end
     button.title:SetText("")
 end
 
@@ -505,7 +542,6 @@ local function OnUpdateModernChallengeTimer(self, elapsed)
     self:SetValue(timeLeft)
     self.text:SetText(GetTimeStringFromSecondsShort(ceil(timeLeft)))
 
-    UpdateModernChallengeDeathCount(self)
     UpdateFinalCountdownEffects(self, timeLeft)
 end
 
@@ -528,6 +564,8 @@ local function SetModernChallengeTimer(button, timerID, elapsedTime, mapID, time
     SetModernChallengeMeta(challengeBar)
     OnUpdateModernChallengeTimer(challengeBar, 0)
     challengeBar:SetScript("OnUpdate", OnUpdateModernChallengeTimer)
+
+    activeModernChallengeBar = challengeBar
 end
 
 local function SetLegacyMedalVisual(challengeBar, medalIndex)
@@ -729,9 +767,19 @@ local function SetProvingGroundsTimer(button, timerID, elapsedTime, diffID, curr
     activeProvingGroundBar = challengeBar
 end
 
-function QuestKing.ProvingGroundsScoreUpdate(score)
-    if activeProvingGroundBar and activeProvingGroundBar:IsShown() then
+function QuestKing:ProvingGroundsScoreUpdate(score)
+    if activeProvingGroundBar
+        and activeProvingGroundBar.mode == "proving_grounds"
+        and activeProvingGroundBar:IsShown() then
         activeProvingGroundBar.score:SetText(score or "0")
+    end
+end
+
+function QuestKing:ChallengeModeDeathCountUpdated()
+    if activeModernChallengeBar
+        and activeModernChallengeBar.mode == "modern_challenge"
+        and activeModernChallengeBar:IsShown() then
+        UpdateModernChallengeDeathCount(activeModernChallengeBar)
     end
 end
 

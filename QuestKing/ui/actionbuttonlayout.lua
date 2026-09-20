@@ -21,8 +21,6 @@ Compatibility:
 local addonName, QuestKing = ...
 
 local _G = _G
-local CreateFrame = CreateFrame
-local InCombatLockdown = InCombatLockdown
 local tonumber = tonumber
 local type = type
 local max = math.max
@@ -40,12 +38,6 @@ local Layout = {}
 Layout.debug = false
 Layout.lastAdjusted = 0
 Layout.installed = false
-
-local driver = CreateFrame("Frame")
-
-local function IsInCombatLockdownCompat()
-  return type(InCombatLockdown) == "function" and InCombatLockdown() or false
-end
 
 local function GetOptions()
   return (QuestKing and QuestKing.options) or {}
@@ -229,12 +221,10 @@ local function HookWatchButtonRender()
   watchButton.Render = function(self, ...)
     originalRender(self, ...)
 
-    if not IsInCombatLockdownCompat() then
-      local adjusted = ApplyLayoutToWatchButton(self)
-      Layout.lastAdjusted = adjusted
-      if adjusted > 0 then
-        DebugPrint("adjusted " .. adjusted .. " bar(s) after Render")
-      end
+    local adjusted = ApplyLayoutToWatchButton(self)
+    Layout.lastAdjusted = adjusted
+    if adjusted > 0 then
+      DebugPrint("adjusted " .. adjusted .. " bar(s) after Render")
     end
   end
 
@@ -256,7 +246,7 @@ local function HookProgressBarCreation()
 
   watchButton.AddProgressBar = function(self, ...)
     local progressBar = originalAddProgressBar(self, ...)
-    if progressBar and progressBar.baseLine and not IsInCombatLockdownCompat() then
+    if progressBar and progressBar.baseLine then
       SetBarLayout(self, progressBar.baseLine, progressBar)
     end
     return progressBar
@@ -279,10 +269,6 @@ local function InstallHooks()
 end
 
 local function RequestLayoutPass()
-  if IsInCombatLockdownCompat() then
-    return
-  end
-
   if not InstallHooks() then
     return
   end
@@ -290,23 +276,10 @@ local function RequestLayoutPass()
   ApplyLayoutToUsedButtons()
 end
 
-driver:SetScript("OnEvent", function(_, event)
-  if event == "PLAYER_REGEN_ENABLED" then
-    RequestLayoutPass()
-    return
-  end
-
-  if event == "PLAYER_LOGIN" or event == "PLAYER_ENTERING_WORLD" then
-    RequestLayoutPass()
-  end
-end)
-
-driver:RegisterEvent("PLAYER_LOGIN")
-driver:RegisterEvent("PLAYER_ENTERING_WORLD")
-driver:RegisterEvent("PLAYER_REGEN_ENABLED")
-
 _G.SLASH_QUESTKINGACTIONLAYOUT1 = "/qkactionlayout"
-_G.SlashCmdList.QUESTKINGACTIONLAYOUT = function(message)
+local slashCmdList = _G.SlashCmdList
+if type(slashCmdList) == "table" then
+slashCmdList.QUESTKINGACTIONLAYOUT = function(message)
   message = type(message) == "string" and message:lower() or ""
 
   if message == "debug" then
@@ -319,6 +292,7 @@ _G.SlashCmdList.QUESTKINGACTIONLAYOUT = function(message)
   local adjusted = ApplyLayoutToUsedButtons()
 
   print(DEBUG_PREFIX .. "installed=" .. tostring(installed) .. ", adjusted=" .. tostring(adjusted) .. ", last=" .. tostring(Layout.lastAdjusted))
+end
 end
 
 InstallHooks()

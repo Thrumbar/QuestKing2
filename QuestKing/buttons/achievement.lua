@@ -15,6 +15,7 @@ local sort = table.sort
 local tinsert = table.insert
 local tostring = tostring
 local type = type
+local wipe = wipe
 local GetTime = GetTime
 
 local NORMAL_FONT_COLOR = NORMAL_FONT_COLOR or { r = 1, g = 0.82, b = 0 }
@@ -107,10 +108,12 @@ local function Clamp01(value)
 end
 
 local function QueueTrackerRefresh(forceBuild)
-    if type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild, false)
+    if type(QuestKing.RequestTrackerUpdate) == "function" then
+        QuestKing:RequestTrackerUpdate(false, "achievement", false)
+    elseif type(QuestKing.QueueTrackerUpdate) == "function" then
+        QuestKing:QueueTrackerUpdate(false, false, "achievement")
     elseif type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(forceBuild, false)
+        QuestKing:UpdateTracker(false, false, "achievement")
     end
 end
 
@@ -126,6 +129,10 @@ local function HasModernContentTracking()
 end
 
 local function GetTrackedAchievementIDs()
+    if type(QuestKing.RecordPerformanceMetric) == "function" then
+        QuestKing:RecordPerformanceMetric("achievementListScanCount", 1)
+    end
+
     local ids = {}
     local seen = {}
 
@@ -176,20 +183,19 @@ local function GetTrackedAchievementIDs()
     return ids
 end
 
-local function BuildTrackedAchievementSignature()
-    local ids = GetTrackedAchievementIDs()
-
+local function BuildTrackedAchievementSignature(ids)
     if #ids == 0 then
         return ""
     end
 
     sort(ids)
 
+    local parts = {}
     for index = 1, #ids do
-        ids[index] = tostring(ids[index])
+        parts[index] = tostring(ids[index])
     end
 
-    return table.concat(ids, ",")
+    return table.concat(parts, ",")
 end
 
 function QuestKing:SyncTrackedAchievementCacheFromAPIs()
@@ -201,7 +207,9 @@ function QuestKing:SyncTrackedAchievementCacheFromAPIs()
     end
 
     self.trackedAchievements = cache
-    return cache
+    local signature = BuildTrackedAchievementSignature(ids)
+    self._lastTrackedAchievementSignature = signature
+    return cache, signature, ids
 end
 
 QuestKing.EnsureTrackedAchievementCache = EnsureTrackedAchievementCache
@@ -216,45 +224,38 @@ local function RefreshAchievementUIState()
     end
 end
 
-function QuestKing:QueueAchievementTrackerRefresh()
-    self._achievementRefreshToken = (self._achievementRefreshToken or 0) + 1
+function QuestKing:QueueAchievementTrackerRefresh(waitForListChange)
+    if not waitForListChange then
+        self._achievementDisplayDataReady = false
+        QueueTrackerRefresh(false)
+        return
+    end
 
-    local token = self._achievementRefreshToken
-    local attempts = 0
+    self._achievementDisplayDataReady = false
+    self._achievementRefreshNeedsListSettle = true
+    if self._achievementRefreshPending then
+        return
+    end
 
-    local function RefreshStep()
-        if token ~= QuestKing._achievementRefreshToken then
-            return
-        end
+    self._achievementRefreshPending = true
 
-        local oldSignature = QuestKing._lastTrackedAchievementSignature or ""
+    local function FinishListRefresh()
+        QuestKing._achievementRefreshPending = false
+        QuestKing._achievementRefreshNeedsListSettle = false
 
         if type(QuestKing.SyncTrackedAchievementCacheFromAPIs) == "function" then
             QuestKing:SyncTrackedAchievementCacheFromAPIs()
         end
 
-        local newSignature = BuildTrackedAchievementSignature()
+        QuestKing._achievementDisplayDataReady = false
         RefreshAchievementUIState()
-
-        if newSignature ~= oldSignature or attempts >= 4 then
-            QuestKing._lastTrackedAchievementSignature = newSignature
-            QueueTrackerRefresh(true)
-            return
-        end
-
-        attempts = attempts + 1
-
-        if C_Timer and C_Timer.After then
-            C_Timer.After(0.05, RefreshStep)
-        else
-            QueueTrackerRefresh(true)
-        end
+        QueueTrackerRefresh(false)
     end
 
     if C_Timer and C_Timer.After then
-        C_Timer.After(0, RefreshStep)
+        C_Timer.After(0.05, FinishListRefresh)
     else
-        RefreshStep()
+        FinishListRefresh()
     end
 end
 
@@ -314,7 +315,7 @@ local function ToggleAchievementTracked(achievementID)
 
         RefreshAchievementUIState()
         if type(QuestKing.QueueAchievementTrackerRefresh) == "function" then
-            QuestKing:QueueAchievementTrackerRefresh()
+            QuestKing:QueueAchievementTrackerRefresh(true)
         end
         return
     end
@@ -331,7 +332,7 @@ local function ToggleAchievementTracked(achievementID)
 
         RefreshAchievementUIState()
         if type(QuestKing.QueueAchievementTrackerRefresh) == "function" then
-            QuestKing:QueueAchievementTrackerRefresh()
+            QuestKing:QueueAchievementTrackerRefresh(true)
         end
     end
 end
@@ -475,9 +476,17 @@ local function GetAchievementCriteriaInfoCompat(achievementID, criteriaIndex)
     }
 end
 
-local function ShouldShowCompletedObjective()
+local function ShouldShowCompletedObjective(containerComplete)
+    if type(QuestKing.ShouldShowCompletedObjective) == "function" then
+        return QuestKing.ShouldShowCompletedObjective(containerComplete)
+    end
+
     local value = opt.showCompletedObjectives
-    return value == true or value == "always"
+    if value == "always" then
+        return true
+    end
+
+    return not containerComplete and value == true
 end
 
 local function AddTooltipLine(tooltip, text, r, g, b)
@@ -498,7 +507,7 @@ local function BuildCriteriaDisplay(criteria)
     return text, nil, nil, criteria.completed and 1 or 0
 end
 
-local function AddAchievementTooltipObjectives(tooltip, achievementID)
+local function AddAchievementTooltipObjectives(tooltip, achievementID, achievementComplete)
     local count = GetAchievementNumCriteriaCompat(achievementID)
     if count <= 0 then
         return 0
@@ -513,7 +522,7 @@ local function AddAchievementTooltipObjectives(tooltip, achievementID)
         local text, quantity, reqQuantity, progress = BuildCriteriaDisplay(criteria)
 
         if criteria.completed then
-            if ShouldShowCompletedObjective() then
+            if ShouldShowCompletedObjective(achievementComplete) then
                 if quantity and reqQuantity then
                     AddTooltipLine(
                         tooltip,
@@ -583,7 +592,9 @@ local function AddHeader()
     local header = WatchButton:GetKeyed("header", "Achievements")
     header.title:SetText(TRACKER_HEADER_ACHIEVEMENTS or "Achievements")
     header.title:SetTextColor(SECTION_HEADER_COLOR[1], SECTION_HEADER_COLOR[2], SECTION_HEADER_COLOR[3])
-    header.titleButton:EnableMouse(false)
+    if header.SetMouseMode then
+        header:SetMouseMode(false, false)
+    end
     return header
 end
 
@@ -634,7 +645,7 @@ function mouseHandlerAchievement:TitleButtonOnClick(mouseButton)
 end
 
 function mouseHandlerAchievement:TitleButtonOnEnter()
-    local button = self.parent
+    local button = self.parent or self
     local achievementID = button and button.achievementID
 
     if type(achievementID) ~= "number" then
@@ -674,7 +685,7 @@ function mouseHandlerAchievement:TitleButtonOnEnter()
 
     if criteriaCount > 0 then
         AddTooltipLine(tooltip, " ")
-        addedObjectives = AddAchievementTooltipObjectives(tooltip, achievementID)
+        addedObjectives = AddAchievementTooltipObjectives(tooltip, achievementID, info.completed)
     end
 
     if info.completed then
@@ -710,11 +721,11 @@ function mouseHandlerAchievement:TitleButtonOnLeave()
     end
 end
 
-local function AddCriteriaLine(button, criteria)
+local function AddCriteriaLine(button, criteria, achievementComplete)
     local text, quantity, reqQuantity, progress = BuildCriteriaDisplay(criteria)
 
     if criteria.completed then
-        if not ShouldShowCompletedObjective() then
+        if not ShouldShowCompletedObjective(achievementComplete) then
             return nil
         end
 
@@ -758,7 +769,9 @@ local function AddCriteriaLine(button, criteria)
     end
 
     if criteria.duration and criteria.elapsed and criteria.elapsed < criteria.duration and type(button.AddTimerBar) == "function" then
-        local timerBar = button:AddTimerBar(criteria.duration, GetTime() - criteria.elapsed)
+        local timerStartTime = SafeNumber(criteria._timerStartTime, nil)
+            or (GetTime() - criteria.elapsed)
+        local timerBar = button:AddTimerBar(criteria.duration, timerStartTime)
         if timerBar and type(timerBar.SetStatusBarColor) == "function" then
             timerBar:SetStatusBarColor(TIMER_COLOR[1], TIMER_COLOR[2], TIMER_COLOR[3])
         end
@@ -767,8 +780,83 @@ local function AddCriteriaLine(button, criteria)
     return line
 end
 
-local function SetButtonToAchievement(button, achievementID)
-    local info = GetAchievementInfoCompat(achievementID)
+local function BuildAchievementDisplayRows(self)
+    local cache = EnsureTrackedAchievementCache()
+    self._achievementDisplayRows = self._achievementDisplayRows or {}
+    self._achievementDisplayByID = self._achievementDisplayByID or {}
+    local rows = self._achievementDisplayRows
+    local rowsByID = self._achievementDisplayByID
+    local generation = (self._achievementDisplayGeneration or 0) + 1
+    self._achievementDisplayGeneration = generation
+    wipe(rows)
+
+    for achievementID, tracked in pairs(cache) do
+        if tracked and type(achievementID) == "number" then
+            local info = GetAchievementInfoCompat(achievementID)
+            local displayData = rowsByID[achievementID]
+            if not displayData then
+                displayData = {
+                    achievementID = achievementID,
+                    criteria = {},
+                }
+                rowsByID[achievementID] = displayData
+            end
+
+            local criteria = displayData.criteria
+            wipe(criteria)
+            local count = GetAchievementNumCriteriaCompat(achievementID)
+
+            if type(self.RecordPerformanceMetric) == "function" then
+                self:RecordPerformanceMetric("achievementCriteriaScanCount", 1)
+            end
+
+            for index = 1, count do
+                local criteriaInfo = GetAchievementCriteriaInfoCompat(achievementID, index)
+                if criteriaInfo.duration
+                    and criteriaInfo.elapsed
+                    and criteriaInfo.elapsed < criteriaInfo.duration then
+                    criteriaInfo._timerStartTime = GetTime() - criteriaInfo.elapsed
+                end
+                criteria[index] = criteriaInfo
+            end
+
+            displayData.info = info
+            displayData.generation = generation
+            rows[#rows + 1] = displayData
+        end
+    end
+
+    for achievementID, displayData in pairs(rowsByID) do
+        if displayData.generation ~= generation then
+            rowsByID[achievementID] = nil
+        end
+    end
+
+    sort(rows, function(a, b)
+        local infoA = a.info
+        local infoB = b.info
+
+        if infoA.completed ~= infoB.completed then
+            return not infoA.completed
+        end
+
+        local nameA = SafeString(infoA.name, tostring(a.achievementID))
+        local nameB = SafeString(infoB.name, tostring(b.achievementID))
+
+        if nameA ~= nameB then
+            return nameA < nameB
+        end
+
+        return a.achievementID < b.achievementID
+    end)
+
+    self._achievementDisplayDataReady = true
+    return rows
+end
+
+local function SetButtonToAchievement(button, displayData)
+    local achievementID = displayData.achievementID
+    local info = displayData.info
 
     button.mouseHandler = mouseHandlerAchievement
     button.achievementID = achievementID
@@ -781,13 +869,13 @@ local function SetButtonToAchievement(button, achievementID)
         button.title:SetTextColor(TITLE_COLOR[1], TITLE_COLOR[2], TITLE_COLOR[3])
     end
 
-    local count = GetAchievementNumCriteriaCompat(achievementID)
-    for index = 1, count do
-        AddCriteriaLine(button, GetAchievementCriteriaInfoCompat(achievementID, index))
+    local criteria = displayData.criteria or {}
+    for index = 1, #criteria do
+        AddCriteriaLine(button, criteria[index], info.completed)
     end
 
     if button.fresh and type(button.lines) == "table" then
-        for index = 1, #button.lines do
+        for index = 1, button.currentLine do
             local line = button.lines[index]
             if line then
                 if type(line.Glow) == "function" then
@@ -800,60 +888,38 @@ local function SetButtonToAchievement(button, achievementID)
     end
 end
 
-function QuestKing:UpdateTrackerAchievements()
-    local cache = self.SyncTrackedAchievementCacheFromAPIs and self:SyncTrackedAchievementCacheFromAPIs() or EnsureTrackedAchievementCache()
-    local ids = {}
-
-    for achievementID, tracked in pairs(cache) do
-        if tracked and type(achievementID) == "number" then
-            ids[#ids + 1] = achievementID
-        end
+function QuestKing:UpdateTrackerAchievements(refreshData)
+    local rows = self._achievementDisplayRows
+    if refreshData or self._achievementDisplayDataReady ~= true or type(rows) ~= "table" then
+        rows = BuildAchievementDisplayRows(self)
     end
 
-    if #ids == 0 then
+    if #rows == 0 then
         return
     end
 
-    sort(ids, function(a, b)
-        local infoA = GetAchievementInfoCompat(a)
-        local infoB = GetAchievementInfoCompat(b)
-
-        if infoA.completed ~= infoB.completed then
-            return not infoA.completed
-        end
-
-        local nameA = SafeString(infoA.name, tostring(a))
-        local nameB = SafeString(infoB.name, tostring(b))
-
-        if nameA ~= nameB then
-            return nameA < nameB
-        end
-
-        return a < b
-    end)
-
     local header = AddHeader()
 
-    for index = 1, #ids do
-        local achievementID = ids[index]
-        local button = WatchButton:GetKeyed("achievement", achievementID)
+    for index = 1, #rows do
+        local displayData = rows[index]
+        local button = WatchButton:GetKeyed("achievement", displayData.achievementID)
         button._previousHeader = header
-        SetButtonToAchievement(button, achievementID)
+        SetButtonToAchievement(button, displayData)
     end
 end
 
 function QuestKing:OnTrackedAchievementListChanged()
-    self:QueueAchievementTrackerRefresh()
+    self:QueueAchievementTrackerRefresh(true)
 end
 
 function QuestKing:OnTrackedAchievementUpdate()
-    self:QueueAchievementTrackerRefresh()
+    self:QueueAchievementTrackerRefresh(false)
 end
 
 function QuestKing:OnAchievementCriteriaUpdate()
-    self:QueueAchievementTrackerRefresh()
+    self:QueueAchievementTrackerRefresh(false)
 end
 
 function QuestKing:OnAchievementEarned()
-    self:QueueAchievementTrackerRefresh()
+    self:QueueAchievementTrackerRefresh(false)
 end

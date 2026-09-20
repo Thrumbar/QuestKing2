@@ -48,13 +48,18 @@ local function SafeString(value, fallback)
 end
 
 local function QueueTrackerRefresh(forceBuild)
+    if QuestKing and type(QuestKing.RequestTrackerUpdate) == "function" then
+        QuestKing:RequestTrackerUpdate(false, "reward", false)
+        return
+    end
+
     if QuestKing and type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild, false)
+        QuestKing:QueueTrackerUpdate(false, false, "reward")
         return
     end
 
     if QuestKing and type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(forceBuild, false)
+        QuestKing:UpdateTracker(false, false, "reward")
     end
 end
 
@@ -99,6 +104,13 @@ local function QueueDummyTaskCleanup(questID, delay)
 end
 
 local function GetPlayerAtEffectiveMaxLevel()
+    if GameRulesUtil and type(GameRulesUtil.IsPlayerAtEffectiveMaxLevel) == "function" then
+        local ok, atMax = SafeCall(GameRulesUtil.IsPlayerAtEffectiveMaxLevel)
+        if ok then
+            return atMax and true or false
+        end
+    end
+
     if type(IsPlayerAtEffectiveMaxLevel) == "function" then
         local ok, atMax = SafeCall(IsPlayerAtEffectiveMaxLevel)
         if ok then
@@ -382,8 +394,11 @@ local function SetAnimationShadowScale(rewardsFrame, contentsHeight)
     end
 end
 
-local function ResolveAnchorButton(button)
-    if button and button.IsVisible and button:IsVisible() then
+local function ResolveAnchorButton(button, buttonType, buttonUniq)
+    local identityMatches = buttonType == nil
+        or (button and button.type == buttonType and button.uniq == buttonUniq)
+
+    if identityMatches and button and button.IsVisible and button:IsVisible() then
         return button
     end
 
@@ -394,8 +409,12 @@ local function ResolveAnchorButton(button)
     return UIParent
 end
 
-local function PositionRewardsFrame(rewardsFrame, button)
-    local anchorButton = ResolveAnchorButton(button)
+local function PositionRewardsFrame(rewardsFrame, data)
+    local anchorButton = ResolveAnchorButton(
+        data and data.button,
+        data and data.buttonType,
+        data and data.buttonUniq
+    )
     local tracker = QuestKing and QuestKing.Tracker
     local trackerScale = (tracker and tracker.GetScale and tracker:GetScale()) or 1
 
@@ -422,6 +441,8 @@ end
 local function BuildRewardData(button, questID, xp, money)
     local data = {
         button = button,
+        buttonType = button and button.type or nil,
+        buttonUniq = button and button.uniq or nil,
         questID = questID,
         rewards = {},
     }
@@ -554,7 +575,7 @@ function QuestKing:AnimateReward()
     local data = tremove(rewardQueue, 1)
     animatingData = data
 
-    PositionRewardsFrame(rewardsFrame, data.button)
+    PositionRewardsFrame(rewardsFrame, data)
     rewardsFrame:Show()
 
     local numRewards = #data.rewards

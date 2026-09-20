@@ -13,6 +13,13 @@ local DEFAULT_TITLEBAR_TEXT = "Unlocked - Drag titlebar"
 local BUTTON_SIZE = 15
 local BUTTON_ART_SIZE = 22
 
+local VALID_DISPLAY_MODES = {
+    combined = true,
+    quests = true,
+    achievements = true,
+    raids = true,
+}
+
 local pairs = pairs
 local tonumber = tonumber
 local tostring = tostring
@@ -36,15 +43,18 @@ local function IsInCombatLockdownSafe()
     return type(InCombatLockdown) == "function" and InCombatLockdown() or false
 end
 
-local function QueueTrackerLayoutRefresh(forceBuild)
-    if QuestKing and type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild, true)
-        return
+local function DeferProtectedPresentation(tracker)
+    if not IsInCombatLockdownSafe() then
+        return false
     end
+
+    tracker._presentationRefreshPending = true
 
     if QuestKing and type(QuestKing.StartCombatTimer) == "function" then
         QuestKing:StartCombatTimer()
     end
+
+    return true
 end
 
 local function GetQuestCap()
@@ -157,19 +167,36 @@ local function IsWatchFrameBorderHidden(options)
     return options.hideWatchFrameBorder == true
 end
 
-local function GetBackdropForBorderVisibility(backdropTable, hideBorder)
-    if type(backdropTable) ~= "table" or not hideBorder then
+local function GetBackdropForBorderVisibility(backdropTable, hideBorder, topInset)
+    if type(backdropTable) ~= "table" then
         return backdropTable
     end
 
-    local borderlessBackdrop = {}
-    for key, value in pairs(backdropTable) do
-        borderlessBackdrop[key] = value
+    if not hideBorder and topInset == nil then
+        return backdropTable
     end
 
-    borderlessBackdrop.edgeFile = nil
-    borderlessBackdrop.edgeSize = 0
-    return borderlessBackdrop
+    local adjustedBackdrop = {}
+    for key, value in pairs(backdropTable) do
+        adjustedBackdrop[key] = value
+    end
+
+    if hideBorder then
+        adjustedBackdrop.edgeFile = nil
+        adjustedBackdrop.edgeSize = 0
+    end
+
+    if topInset ~= nil then
+        adjustedBackdrop.insets = {}
+        if type(backdropTable.insets) == "table" then
+            for key, value in pairs(backdropTable.insets) do
+                adjustedBackdrop.insets[key] = value
+            end
+        end
+        adjustedBackdrop.insets.top = topInset
+    end
+
+    return adjustedBackdrop
 end
 
 local function ApplyBackdropBorderColor(frame, borderColor, hideBorder)
@@ -232,8 +259,16 @@ local function EnsureSavedVariables()
     QuestKingDB.dragOrigin = QuestKingDB.dragOrigin or "TOPRIGHT"
     QuestKingDB.dragRelativePoint = QuestKingDB.dragRelativePoint or QuestKingDB.dragOrigin
 
-    QuestKingDBPerChar.trackerCollapsed = tonumber(QuestKingDBPerChar.trackerCollapsed) or 0
-    QuestKingDBPerChar.displayMode = type(QuestKingDBPerChar.displayMode) == "string" and QuestKingDBPerChar.displayMode or "combined"
+    local trackerCollapsed = tonumber(QuestKingDBPerChar.trackerCollapsed)
+    if trackerCollapsed ~= 0 and trackerCollapsed ~= 1 and trackerCollapsed ~= 2 then
+        trackerCollapsed = 0
+    end
+    QuestKingDBPerChar.trackerCollapsed = trackerCollapsed
+
+    local displayMode = type(QuestKingDBPerChar.displayMode) == "string"
+        and QuestKingDBPerChar.displayMode
+        or "combined"
+    QuestKingDBPerChar.displayMode = VALID_DISPLAY_MODES[displayMode] and displayMode or "combined"
     QuestKingDBPerChar.trackerPositionPreset = tonumber(QuestKingDBPerChar.trackerPositionPreset) or 1
 end
 
@@ -332,12 +367,34 @@ local function GetTrackerFontStyle()
     return opt.fontStyle or ""
 end
 
+local function GetTrackerFontLayer()
+    if QuestKing and type(QuestKing.GetFontLayer) == "function" then
+        return QuestKing.GetFontLayer()
+    end
+
+    local layer = GetOptions().fontLayer
+    if layer == "BACKGROUND"
+        or layer == "BORDER"
+        or layer == "ARTWORK"
+        or layer == "OVERLAY"
+        or layer == "HIGHLIGHT" then
+        return layer
+    end
+
+    return "OVERLAY"
+end
+
 local function SetFontStringStyle(fontString, r, g, b)
     if not fontString then
         return
     end
 
     fontString:SetFont(GetTrackerFontPath(), GetTrackerFontSize(), GetTrackerFontStyle())
+    if QuestKing and type(QuestKing.ApplyFontLayer) == "function" then
+        QuestKing.ApplyFontLayer(fontString)
+    elseif type(fontString.SetDrawLayer) == "function" then
+        fontString:SetDrawLayer(GetTrackerFontLayer())
+    end
     fontString:SetShadowOffset(1, -1)
     fontString:SetShadowColor(0, 0, 0, 1)
 
@@ -346,28 +403,44 @@ local function SetFontStringStyle(fontString, r, g, b)
     end
 end
 
+local function SetTitlebarButtonBorderVisible(button, visible)
+    if not button then
+        return
+    end
+
+    local alpha = visible and 1 or 0
+    if button._questKingNormalBorder then
+        button._questKingNormalBorder:SetAlpha(alpha)
+    end
+    if button._questKingPushedBorder then
+        button._questKingPushedBorder:SetAlpha(alpha)
+    end
+end
+
 local function CreateButtonArt(button)
     local opt = GetOptions()
 
-    if not opt.hideToggleButtonBorder then
-        local normal = button:CreateTexture(nil, "ARTWORK")
-        normal:SetPoint("CENTER")
-        normal:SetTexture([[Interface\Buttons\UI-Quickslot2]])
-        normal:SetSize(BUTTON_ART_SIZE, BUTTON_ART_SIZE)
-        button:SetNormalTexture(normal)
+    local normal = button:CreateTexture(nil, "ARTWORK")
+    normal:SetPoint("CENTER")
+    normal:SetTexture([[Interface\Buttons\UI-Quickslot2]])
+    normal:SetSize(BUTTON_ART_SIZE, BUTTON_ART_SIZE)
+    button:SetNormalTexture(normal)
+    button._questKingNormalBorder = normal
 
-        local pushed = button:CreateTexture(nil, "ARTWORK")
-        pushed:SetPoint("CENTER")
-        pushed:SetTexture([[Interface\Buttons\UI-Quickslot2]])
-        pushed:SetSize(BUTTON_SIZE, BUTTON_SIZE)
-        button:SetPushedTexture(pushed)
-    end
+    local pushed = button:CreateTexture(nil, "ARTWORK")
+    pushed:SetPoint("CENTER")
+    pushed:SetTexture([[Interface\Buttons\UI-Quickslot2]])
+    pushed:SetSize(BUTTON_SIZE, BUTTON_SIZE)
+    button:SetPushedTexture(pushed)
+    button._questKingPushedBorder = pushed
 
     local highlight = button:CreateTexture(nil, "HIGHLIGHT")
     highlight:SetPoint("CENTER")
     highlight:SetTexture([[Interface\Buttons\UI-Quickslot-Depress]])
     highlight:SetSize(BUTTON_SIZE, BUTTON_SIZE)
     button:SetHighlightTexture(highlight, "ADD")
+
+    SetTitlebarButtonBorderVisible(button, opt.hideToggleButtonBorder ~= true)
 end
 
 local function CreateTitlebarButton(parent, labelText, onClick)
@@ -375,7 +448,7 @@ local function CreateTitlebarButton(parent, labelText, onClick)
     button:SetSize(BUTTON_SIZE, BUTTON_SIZE)
     CreateButtonArt(button)
 
-    local label = button:CreateFontString(nil, GetOptions().fontLayer)
+    local label = button:CreateFontString(nil, GetTrackerFontLayer())
     local r, g, b = EnsureColorTriplet((GetOptions().colors or {}).TrackerTitlebarText, 1, 1, 1)
     SetFontStringStyle(label, r, g, b)
     label:SetJustifyH("CENTER")
@@ -391,11 +464,40 @@ local function CreateTitlebarButton(parent, labelText, onClick)
     return button
 end
 
+function Tracker:RefreshTypography()
+    local titleColor = (GetOptions().colors or {}).TrackerTitlebarText
+    local titleR, titleG, titleB = EnsureColorTriplet(titleColor, 1, 1, 1)
+
+    SetFontStringStyle(self.titlebarText, titleR, titleG, titleB)
+    SetFontStringStyle(self.titlebarText2, 0.7, 0.5, 0.9)
+
+    if self.minimizeButton then
+        SetFontStringStyle(self.minimizeButton.label, titleR, titleG, titleB)
+    end
+
+    if self.modeButton then
+        SetFontStringStyle(self.modeButton.label, titleR, titleG, titleB)
+    end
+
+    return true
+end
+
+function Tracker:RefreshToggleButtonBorders()
+    local visible = GetOptions().hideToggleButtonBorder ~= true
+    SetTitlebarButtonBorderVisible(self.minimizeButton, visible)
+    SetTitlebarButtonBorderVisible(self.modeButton, visible)
+    return true
+end
+
 function Tracker:ApplyTitlebarState()
     local opt = GetOptions()
     local titlebar = self.titlebar
     if not titlebar then
-        return
+        return false
+    end
+
+    if DeferProtectedPresentation(self) then
+        return false
     end
 
     local displayMode = QuestKingDBPerChar and QuestKingDBPerChar.displayMode or "combined"
@@ -438,16 +540,38 @@ function Tracker:ApplyTitlebarState()
     elseif not SafeSetBackdropColor(titlebar, 0, 0, 0, 0) then
         SetFlatBackgroundColor(titlebar, 0, 0, 0, 0)
     end
+
+    return true
+end
+
+local function HasCompleteLayoutControls(tracker)
+    return tracker
+        and tracker.titlebar ~= nil
+        and tracker.titlebarText ~= nil
+        and tracker.titlebarText2 ~= nil
+        and tracker.minimizeButton ~= nil
+        and tracker.modeButton ~= nil
 end
 
 function Tracker:RefreshLayoutMetrics()
     local opt = GetOptions()
     local width = tonumber(opt.buttonWidth) or 230
     local titleHeight = tonumber(opt.titleHeight) or 18
+    local controlsReady = HasCompleteLayoutControls(self)
 
-    if IsInCombatLockdownSafe() then
-        QueueTrackerLayoutRefresh(true)
+    if controlsReady
+        and self._layoutMetricsInitialized == true
+        and self._layoutMetricWidth == width
+        and self._layoutMetricTitleHeight == titleHeight then
+        return true
+    end
+
+    if DeferProtectedPresentation(self) then
         return false
+    end
+
+    if QuestKing and type(QuestKing.RecordPerformanceMetric) == "function" then
+        QuestKing:RecordPerformanceMetric("layoutMetricPassCount", 1)
     end
 
     self:SetWidth(width)
@@ -477,7 +601,19 @@ function Tracker:RefreshLayoutMetrics()
         self.titlebarText:SetPoint("RIGHT", self.modeButton, "LEFT", -TITLEBAR_TEXT_GAP, 0)
     end
 
-    self:ApplyTrackerBackground()
+    if controlsReady then
+        self._layoutMetricWidth = width
+        self._layoutMetricTitleHeight = titleHeight
+        self._layoutMetricsInitialized = true
+        self._layoutGeneration = (tonumber(self._layoutGeneration) or 0) + 1
+    else
+        -- ui/optionspanel.lua can apply saved presentation settings from its
+        -- ADDON_LOADED handler before Tracker:Init creates the titlebar and
+        -- controls. Never let that partial pass satisfy the initialized cache.
+        self._layoutMetricWidth = nil
+        self._layoutMetricTitleHeight = nil
+        self._layoutMetricsInitialized = false
+    end
 
     return true
 end
@@ -506,7 +642,7 @@ function Tracker:Init()
     end
 
     if not self.titlebarText then
-        local titlebarText = self.titlebar:CreateFontString(nil, opt.fontLayer)
+        local titlebarText = self.titlebar:CreateFontString(nil, GetTrackerFontLayer())
         titlebarText:SetJustifyH("RIGHT")
         titlebarText:SetJustifyV("MIDDLE")
         titlebarText:SetWordWrap(false)
@@ -514,7 +650,7 @@ function Tracker:Init()
     end
 
     if not self.titlebarText2 then
-        local titlebarText2 = self.titlebar:CreateFontString(nil, opt.fontLayer)
+        local titlebarText2 = self.titlebar:CreateFontString(nil, GetTrackerFontLayer())
         titlebarText2:SetJustifyH("LEFT")
         titlebarText2:SetJustifyV("MIDDLE")
         titlebarText2:SetWordWrap(false)
@@ -532,10 +668,17 @@ function Tracker:Init()
     self:ApplyTrackerBackground()
 
     self:ApplyTitlebarState()
+    -- A saved-options presentation pass may have run before these controls
+    -- existed. Force one complete metric and anchor application during Init.
+    self._layoutMetricWidth = nil
+    self._layoutMetricTitleHeight = nil
+    self._layoutMetricsInitialized = false
     self:RefreshLayoutMetrics()
 
     self:ApplyInitialPosition()
-    QuestKingDB.dragLocked = not opt.allowDrag
+    if opt.allowDrag ~= true then
+        QuestKingDB.dragLocked = true
+    end
     self:CheckDrag()
 
     self:SetCustomAlpha()
@@ -557,6 +700,10 @@ function Tracker:SetBackgroundAlpha(alpha)
 end
 
 function Tracker:ApplyTrackerBackground()
+    if DeferProtectedPresentation(self) then
+        return false
+    end
+
     local opt = GetOptions()
     local hasBackground = opt.enableAdvancedBackground == true or opt.enableBackdrop == true
 
@@ -566,8 +713,12 @@ function Tracker:ApplyTrackerBackground()
     end
 
     if opt.enableAdvancedBackground then
+        if self.SetBackdrop then
+            self:SetBackdrop(nil)
+        end
+        SetFlatBackgroundColor(self, 0, 0, 0, 0)
         self:ApplyAdvancedBackground()
-        return
+        return true
     end
 
     if self.advancedBackground then
@@ -576,7 +727,11 @@ function Tracker:ApplyTrackerBackground()
 
     if opt.enableBackdrop and opt.backdropTable then
         local hideBorder = IsWatchFrameBorderHidden(opt)
-        local backdrop = GetBackdropForBorderVisibility(opt.backdropTable, hideBorder)
+        local topInset = nil
+        if opt.backdropTable._titleInsetFollowsTitleHeight == true then
+            topInset = (tonumber(opt.titleHeight) or 18) + 1
+        end
+        local backdrop = GetBackdropForBorderVisibility(opt.backdropTable, hideBorder, topInset)
         local alpha = ResolveTrackerBackgroundAlpha(opt, opt.backdropTable)
         local r, g, b, a = GetColorWithAlpha(opt.backdropTable._backdropColor, alpha, 0, 0, 0)
 
@@ -585,7 +740,7 @@ function Tracker:ApplyTrackerBackground()
             SetFlatBackgroundColor(self, r, g, b, a)
         end
         ApplyBackdropBorderColor(self, opt.backdropTable._borderColor, hideBorder)
-        return
+        return true
     end
 
     if self.SetBackdrop then
@@ -593,13 +748,18 @@ function Tracker:ApplyTrackerBackground()
     end
 
     SetFlatBackgroundColor(self, 0, 0, 0, 0)
+    return true
 end
 
 function Tracker:ApplyAdvancedBackground()
+    if DeferProtectedPresentation(self) then
+        return false
+    end
+
     local opt = GetOptions()
     local background = opt.advancedBackgroundTable
     if not background then
-        return
+        return false
     end
 
     local frame = self.advancedBackground
@@ -634,6 +794,7 @@ function Tracker:ApplyAdvancedBackground()
     frame:Show()
 
     self.advancedBackgroundHideWhenEmpty = background._hideWhenEmpty and true or false
+    return true
 end
 
 function Tracker:SetCustomAlpha(alpha)
@@ -649,8 +810,13 @@ function Tracker:SetCustomAlpha(alpha)
 
     alpha = ClampAlpha(alpha)
 
-    self:SetAlpha(alpha)
+    if DeferProtectedPresentation(self) then
+        return false
+    end
+
     QuestKing.itemButtonAlpha = alpha
+    self:SetAlpha(alpha)
+    return true
 end
 
 function Tracker:SetCustomScale(scale)
@@ -668,22 +834,92 @@ function Tracker:SetCustomScale(scale)
         scale = 1
     end
 
-    self:SetScale(scale)
+    if DeferProtectedPresentation(self) then
+        return false
+    end
+
     QuestKing.itemButtonScale = (tonumber(opt.itemButtonScale) or 1) * scale
+    self:SetScale(scale)
+    return true
+end
+
+local function GetTrackerHeaderTop(tracker)
+    local titlebar = tracker and tracker.titlebar
+    if titlebar and type(titlebar.GetTop) == "function" then
+        local top = titlebar:GetTop()
+        if type(top) == "number" then
+            return top
+        end
+    end
+
+    if tracker and type(tracker.GetTop) == "function" then
+        local top = tracker:GetTop()
+        if type(top) == "number" then
+            return top
+        end
+    end
+
+    return nil
+end
+
+local function SetTrackerHeight(tracker, height, preserveHeaderPosition)
+    if not preserveHeaderPosition then
+        tracker:SetHeight(height)
+        return
+    end
+
+    local originalTop = GetTrackerHeaderTop(tracker)
+    tracker:SetHeight(height)
+
+    local currentTop = GetTrackerHeaderTop(tracker)
+    if originalTop == nil or currentTop == nil then
+        return
+    end
+
+    local offsetCorrection = originalTop - currentTop
+    if math.abs(offsetCorrection) < 0.001 then
+        return
+    end
+
+    if type(tracker.GetPoint) ~= "function"
+        or type(tracker.ClearAllPoints) ~= "function"
+        or type(tracker.SetPoint) ~= "function" then
+        return
+    end
+
+    local point, relativeTo, relativePoint, xOfs, yOfs = tracker:GetPoint(1)
+    if not point or type(xOfs) ~= "number" or type(yOfs) ~= "number" then
+        return
+    end
+
+    tracker:ClearAllPoints()
+    tracker:SetPoint(
+        point,
+        relativeTo,
+        relativePoint,
+        xOfs,
+        yOfs + offsetCorrection
+    )
+
+    if type(tracker.CaptureCurrentPosition) == "function" then
+        tracker:CaptureCurrentPosition()
+    end
 end
 
 function Tracker:Resize(lastShown)
     local titleHeight = tonumber(GetOptions().titleHeight) or 18
 
-    if IsInCombatLockdownSafe() then
-        QueueTrackerLayoutRefresh(true)
-        return
+    if DeferProtectedPresentation(self) then
+        return false
     end
 
     self:RefreshLayoutMetrics()
 
+    local preserveHeaderPosition = self._preserveHeaderPositionOnNextResize == true
+    self._preserveHeaderPositionOnNextResize = nil
+
     if not lastShown or not lastShown.IsShown or not lastShown:IsShown() then
-        self:SetHeight(titleHeight)
+        SetTrackerHeight(self, titleHeight, preserveHeaderPosition)
 
         if self.advancedBackground and self.advancedBackgroundHideWhenEmpty then
             self.advancedBackground:Hide()
@@ -695,18 +931,20 @@ function Tracker:Resize(lastShown)
     local lastBottom = lastShown:GetBottom()
 
     if not titleTop or not lastBottom then
-        self:SetHeight(titleHeight)
+        SetTrackerHeight(self, titleHeight, preserveHeaderPosition)
     else
         local height = titleTop - lastBottom + TRACKER_BOTTOM_PADDING
         if height < titleHeight then
             height = titleHeight
         end
-        self:SetHeight(height)
+        SetTrackerHeight(self, height, preserveHeaderPosition)
     end
 
     if self.advancedBackground and self.advancedBackgroundHideWhenEmpty then
         self.advancedBackground:Show()
     end
+
+    return true
 end
 
 function Tracker:SetPresetPosition()
@@ -734,6 +972,12 @@ function Tracker:SetPresetPosition()
 
     if xOfs == nil or yOfs == nil then
         xOfs, yOfs = GetDefaultDragOffsets(point)
+    end
+
+    if IsInCombatLockdownSafe() then
+        self._positionRefreshPending = "preset"
+        DeferProtectedPresentation(self)
+        return false
     end
 
     self:ClearAllPoints()
@@ -776,6 +1020,12 @@ end
 function Tracker:ApplyInitialPosition()
     EnsureSavedVariables()
 
+    if IsInCombatLockdownSafe() then
+        self._positionRefreshPending = "initial"
+        DeferProtectedPresentation(self)
+        return false
+    end
+
     if QuestKingDB.dragX ~= nil and QuestKingDB.dragY ~= nil then
         local point, relativePoint, xOfs, yOfs = GetSavedDragPoint()
         self:ClearAllPoints()
@@ -805,16 +1055,27 @@ end
 
 function Tracker:StartDragging()
     if self.isMoving or not IsTrackerDragUnlocked() then
-        return
+        return false
+    end
+
+    if IsInCombatLockdownSafe() then
+        return false
     end
 
     self.isMoving = true
     self:StartMoving()
+    return true
 end
 
 function Tracker:StopDragging()
     if not self.isMoving then
-        return
+        return false
+    end
+
+    if IsInCombatLockdownSafe() then
+        self._stopDraggingPending = true
+        DeferProtectedPresentation(self)
+        return false
     end
 
     EnsureSavedVariables()
@@ -842,10 +1103,12 @@ function Tracker:StopDragging()
     QuestKingDB.dragY = yOfs
 
     if QuestKing and type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(true, false)
+        QuestKing:QueueTrackerUpdate(false, false, "presentation")
     elseif QuestKing and type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(true, false)
+        QuestKing:UpdateTracker(false, false, "presentation")
     end
+
+    return true
 end
 
 function Tracker:InitDrag()
@@ -875,6 +1138,10 @@ function Tracker:CheckDrag()
     local dragAllowed = IsTrackerDragAllowed()
     if not dragAllowed then
         QuestKingDB.dragLocked = true
+    end
+
+    if DeferProtectedPresentation(self) then
+        return false
     end
 
     local dragUnlocked = dragAllowed and QuestKingDB.dragLocked == false
@@ -921,6 +1188,60 @@ function Tracker:CheckDrag()
     end
 
     self:ApplyTitlebarState()
+    return true
+end
+
+function Tracker:ApplyPresentationSettings()
+    self:RefreshTypography()
+    self:RefreshToggleButtonBorders()
+
+    local watchButton = QuestKing and QuestKing.WatchButton or nil
+    if type(watchButton) == "table" and type(watchButton.RefreshFonts) == "function" then
+        watchButton:RefreshFonts()
+    end
+
+    if DeferProtectedPresentation(self) then
+        return false
+    end
+
+    self:SetCustomAlpha()
+    self:SetCustomScale()
+    self:CheckDrag()
+    self:RefreshLayoutMetrics()
+    self:ApplyTrackerBackground()
+
+    return true
+end
+
+function Tracker:ApplyDeferredProtectedPresentation()
+    if IsInCombatLockdownSafe() then
+        return false
+    end
+
+    local stopDragging = self._stopDraggingPending == true
+    local positionMode = self._positionRefreshPending
+    local presentationPending = self._presentationRefreshPending == true
+
+    if not stopDragging and positionMode == nil and not presentationPending then
+        return false
+    end
+
+    self._stopDraggingPending = nil
+    self._positionRefreshPending = nil
+    self._presentationRefreshPending = nil
+
+    if stopDragging then
+        self:StopDragging()
+    end
+
+    if positionMode == "initial" then
+        self:ApplyInitialPosition()
+    elseif positionMode == "preset" then
+        self:SetPresetPosition()
+    end
+
+    self:ApplyPresentationSettings()
+    return true
 end
 
 function Tracker.MinimizeButtonOnClick(self, mouse)
@@ -931,6 +1252,12 @@ function Tracker.MinimizeButtonOnClick(self, mouse)
         Tracker:CyclePresetPosition()
         return
     end
+
+    -- The tracker may be anchored from its bottom or center. Its height changes
+    -- when rows are minimized or restored, which would otherwise move the
+    -- titlebar while leaving that anchor fixed. Preserve the titlebar's screen
+    -- position during the next successful layout resize.
+    Tracker._preserveHeaderPositionOnNextResize = true
 
     if mouse == "RightButton" then
         QuestKingDBPerChar.trackerCollapsed = 2
@@ -947,7 +1274,7 @@ function Tracker.MinimizeButtonOnClick(self, mouse)
     end
 
     if QuestKing and type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(true, false)
+        QuestKing:UpdateTracker(false, false, "presentation")
     end
 end
 
@@ -996,6 +1323,6 @@ function Tracker.ModeButtonOnClick(self, mouse)
     Tracker:ApplyTitlebarState()
 
     if QuestKing and type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(true, false)
+        QuestKing:UpdateTracker(false, false, "presentation")
     end
 end

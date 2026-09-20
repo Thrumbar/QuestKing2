@@ -3,13 +3,44 @@ local addonName, QuestKing = ...
 -- options
 local opt = QuestKing.options
 
-local opt_font = opt.font
-local opt_fontChallengeTimer = opt.fontChallengeTimer
-local opt_fontSize = opt.fontSize
-local opt_fontStyle = opt.fontStyle
-local opt_fontLayer = opt.fontLayer
-
 local opt_colors = opt.colors
+
+local function GetFontPath()
+    return opt.font or _G.STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
+end
+
+local function GetFontSize()
+    local size = tonumber(opt.fontSize) or 12
+    if size < 1 then
+        size = 12
+    end
+    return size
+end
+
+local function GetFontStyle()
+    return opt.fontStyle or "NONE"
+end
+
+local function GetFontLayer()
+    if QuestKing and type(QuestKing.GetFontLayer) == "function" then
+        return QuestKing.GetFontLayer()
+    end
+
+    return opt.fontLayer or "OVERLAY"
+end
+
+local function ApplyFontStringStyle(fontString)
+    if not fontString then
+        return
+    end
+
+    fontString:SetFont(GetFontPath(), GetFontSize(), GetFontStyle())
+    if QuestKing and type(QuestKing.ApplyFontLayer) == "function" then
+        QuestKing.ApplyFontLayer(fontString)
+    elseif type(fontString.SetDrawLayer) == "function" then
+        fontString:SetDrawLayer(GetFontLayer())
+    end
+end
 
 -- import
 local tinsert = table.insert
@@ -91,19 +122,65 @@ local function HideQuestKingTooltips()
     end
 end
 
+local function IsInCombatLockdownSafe()
+    return type(InCombatLockdown) == "function" and InCombatLockdown() or false
+end
+
+local function IsProtectedFrame(frame)
+    if not frame or type(frame.IsProtected) ~= "function" then
+        return true
+    end
+
+    local ok, protected = pcall(frame.IsProtected, frame)
+    return not ok or protected == true
+end
+
+local function SetMouseEnabledSafe(frame, enabled)
+    if not frame or type(frame.EnableMouse) ~= "function" then
+        return false
+    end
+
+    -- A pooled row from an older session path may already be protected.
+    -- Defer only that forbidden mutation; ordinary unprotected rows retain
+    -- their normal click behavior while combat-time text refreshes continue.
+    if IsInCombatLockdownSafe() and IsProtectedFrame(frame) then
+        if QuestKing and type(QuestKing.StartCombatTimer) == "function" then
+            QuestKing:StartCombatTimer()
+        end
+        return false
+    end
+
+    frame:EnableMouse(enabled and true or false)
+    return true
+end
+
 do
     local buttonCounter = 0
 
     local usedPool = {}
     local freePool = {}
     local requestOrder = {}
+    local previousRequestOrder = {}
+    local usedByType = {}
     WatchButton.usedPool = usedPool
     WatchButton.freePool = freePool
     WatchButton.requestOrder = requestOrder
+    WatchButton.previousRequestOrder = previousRequestOrder
+    WatchButton.usedByType = usedByType
 
     WatchButton.requestCount = 0
+    WatchButton.previousRequestCount = 0
 
     function WatchButton:StartOrder()
+        local previousRequestCount = WatchButton.requestCount or 0
+        WatchButton.previousRequestCount = previousRequestCount
+        for i = 1, previousRequestCount do
+            previousRequestOrder[i] = requestOrder[i]
+        end
+        for i = previousRequestCount + 1, #previousRequestOrder do
+            previousRequestOrder[i] = nil
+        end
+
         for i = 1, #usedPool do
             local button = usedPool[i]
             button.wasRequested = false
@@ -111,40 +188,146 @@ do
         WatchButton.requestCount = 0
     end
 
+    function WatchButton:AbortOrder()
+        for i = 1, #usedPool do
+            usedPool[i].wasRequested = false
+        end
+
+        local failedRequestCount = WatchButton.requestCount or 0
+        local previousRequestCount = WatchButton.previousRequestCount or 0
+        for i = 1, previousRequestCount do
+            local button = previousRequestOrder[i]
+            requestOrder[i] = button
+            if button then
+                button.wasRequested = true
+            end
+        end
+        for i = previousRequestCount + 1, failedRequestCount do
+            requestOrder[i] = nil
+        end
+
+        WatchButton.requestCount = previousRequestCount
+    end
+
+    function WatchButton:CommitOrder()
+        for i = 1, #previousRequestOrder do
+            previousRequestOrder[i] = nil
+        end
+        WatchButton.previousRequestCount = 0
+    end
+
     function WatchButton:FreeUnused()
         for i = #usedPool, 1, -1 do
             local button = usedPool[i]
             if button and button.wasRequested == false then
-                button:Wipe()
-                tremove(usedPool, i)
-                tinsert(freePool, button)
+                local buttonType = button.type
+                local buttonUniq = button.uniq
+                if button:Wipe() then
+                    local typeMap = buttonType ~= nil and usedByType[buttonType] or nil
+                    if buttonUniq ~= nil and typeMap and typeMap[buttonUniq] == button then
+                        typeMap[buttonUniq] = nil
+                    end
+                    tremove(usedPool, i)
+                    tinsert(freePool, button)
+                    if QuestKing and type(QuestKing.RecordPerformanceMetric) == "function" then
+                        QuestKing:RecordPerformanceMetric("rowReleaseCount", 1)
+                    end
+                end
             end
         end
     end
 
-    function WatchButton:GetKeyedRaw(type, uniq)
-        for i = 1, #usedPool do
-            local b = usedPool[i]
-            if b.type == type and b.uniq == uniq then
-                return b
+    function WatchButton:RefreshFonts()
+        local fontPath = GetFontPath()
+        local fontSize = GetFontSize()
+        local fontStyle = GetFontStyle()
+
+        local function RefreshButton(button)
+            if not button then
+                return
+            end
+
+            if button.title and button.title.SetFont then
+                button.title:SetFont(fontPath, fontSize, fontStyle)
+                if QuestKing and type(QuestKing.ApplyFontLayer) == "function" then
+                    QuestKing.ApplyFontLayer(button.title)
+                end
+            end
+
+            local lines = button.lines or {}
+            for index = 1, #lines do
+                local line = lines[index]
+                if line and line.SetFont then
+                    line:SetFont(fontPath, fontSize, fontStyle)
+                    if QuestKing and type(QuestKing.ApplyFontLayer) == "function" then
+                        QuestKing.ApplyFontLayer(line)
+                    end
+                end
+                if line and line.right and line.right.SetFont then
+                    line.right:SetFont(fontPath, fontSize, fontStyle)
+                    if QuestKing and type(QuestKing.ApplyFontLayer) == "function" then
+                        QuestKing.ApplyFontLayer(line.right)
+                    end
+                end
+                if line and line.progressBar and type(line.progressBar.RefreshPresentation) == "function" then
+                    line.progressBar:RefreshPresentation()
+                end
+                if line and line.timerBar and type(line.timerBar.RefreshPresentation) == "function" then
+                    line.timerBar:RefreshPresentation()
+                end
+            end
+
+            local challengeBar = button._challengeBarPersistent
+            if challengeBar and type(challengeBar.RefreshPresentation) == "function" then
+                challengeBar:RefreshPresentation()
+            end
+        end
+
+        for index = 1, #usedPool do
+            RefreshButton(usedPool[index])
+        end
+
+        for index = 1, #freePool do
+            RefreshButton(freePool[index])
+        end
+    end
+
+    function WatchButton:GetKeyedRaw(buttonType, uniq)
+        if buttonType ~= nil and uniq ~= nil then
+            local typeMap = usedByType[buttonType]
+            if typeMap then
+                return typeMap[uniq]
+            end
+        else
+            for i = 1, #usedPool do
+                local b = usedPool[i]
+                if b.type == buttonType and b.uniq == uniq then
+                    return b
+                end
             end
         end
         return nil
     end
 
-    function WatchButton:GetKeyed(type, uniq)
+    function WatchButton:GetKeyed(buttonType, uniq)
         local button
 
-        for i = 1, #usedPool do
-            local b = usedPool[i]
-            if b.type == type and b.uniq == uniq then
-                button = b
-                button.fresh = false
-                break
+        if buttonType ~= nil and uniq ~= nil then
+            local typeMap = usedByType[buttonType]
+            button = typeMap and typeMap[uniq] or nil
+        else
+            for i = 1, #usedPool do
+                local b = usedPool[i]
+                if b.type == buttonType and b.uniq == uniq then
+                    button = b
+                    break
+                end
             end
         end
 
-        if not button then
+        if button then
+            button.fresh = false
+        else
             if #freePool > 0 then
                 button = tremove(freePool)
             else
@@ -153,11 +336,20 @@ do
             tinsert(usedPool, button)
 
             button.fresh = true
-            button.type = type
+            button.type = buttonType
             button.uniq = uniq
 
-            if type == "header" then
-                button.titleButton:EnableMouse(false)
+            if buttonType ~= nil and uniq ~= nil then
+                usedByType[buttonType] = usedByType[buttonType] or {}
+                usedByType[buttonType][uniq] = button
+            end
+
+            if QuestKing and type(QuestKing.RecordPerformanceMetric) == "function" then
+                QuestKing:RecordPerformanceMetric("rowAcquireCount", 1)
+            end
+
+            if buttonType == "header" then
+                button:SetMouseMode(false, false)
             end
         end
 
@@ -170,18 +362,20 @@ do
     end
 
     function WatchButton:Wipe()
+        if IsInCombatLockdownSafe() and (self.itemButton ~= nil or IsProtectedFrame(self)) then
+            if QuestKing.StartCombatTimer then
+                QuestKing:StartCombatTimer()
+            end
+            return false
+        end
+
         self:Hide()
 
         if self.itemButton then
-            if InCombatLockdown() then
-                QuestKing:StartCombatTimer()
-            else
-                self:RemoveItemButton()
-            end
+            self:RemoveItemButton()
         end
 
-        self:EnableMouse(false)
-        self.titleButton:EnableMouse(true)
+        self:SetMouseMode(false, true)
 
         if self.SetBackdropColor then
             self:SetBackdropColor(0, 0, 0, 0)
@@ -217,6 +411,7 @@ do
         self.questLogIndex = nil
         self.campaignID = nil
         self.campaignMapID = nil
+        self.campaignRequirementKey = nil
         self._availableCampaignRow = nil
 
         self._questCompleted = nil
@@ -224,6 +419,10 @@ do
         self._lastStepIndex = nil
 
         self._previousHeader = nil
+        self._layoutPreviousButton = nil
+        self._layoutAnchorKind = nil
+        self._layoutGeneration = nil
+        self._appliedItemLayout = nil
 
         self._challengeMedalTimes = nil
         self._challengeTime = nil
@@ -236,11 +435,41 @@ do
 
         self.type = "none"
         self.uniq = 0
+
+        return true
     end
 
     function WatchButton:HideTitle()
         self.titleButton:Hide()
         self.noTitle = true
+    end
+
+    function WatchButton:SetMouseMode(bodyEnabled, titleEnabled)
+        bodyEnabled = bodyEnabled and true or false
+        titleEnabled = titleEnabled and true or false
+
+        if self._mouseBodyEnabled == bodyEnabled
+            and self._mouseTitleEnabled == titleEnabled then
+            return true
+        end
+
+        local bodyApplied = self._mouseBodyEnabled == bodyEnabled
+        if not bodyApplied then
+            bodyApplied = SetMouseEnabledSafe(self, bodyEnabled)
+            if bodyApplied then
+                self._mouseBodyEnabled = bodyEnabled
+            end
+        end
+
+        local titleApplied = self._mouseTitleEnabled == titleEnabled
+        if not titleApplied then
+            titleApplied = SetMouseEnabledSafe(self.titleButton, titleEnabled)
+            if titleApplied then
+                self._mouseTitleEnabled = titleEnabled
+            end
+        end
+
+        return bodyApplied and titleApplied
     end
 
     function WatchButton:Ready()
@@ -384,7 +613,10 @@ do
         button.buttonHighlightTexture = buttonHighlight
 
         button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        button:EnableMouse(false)
+        button._mouseBodyEnabled = nil
+        if SetMouseEnabledSafe(button, false) then
+            button._mouseBodyEnabled = false
+        end
         button:SetHighlightTexture(buttonHighlight, "ADD")
         button:SetScript("OnClick", WatchButton.ButtonOnClick)
         button:SetScript("OnEnter", WatchButton.ButtonOnEnter)
@@ -462,11 +694,14 @@ do
         tex:SetAlpha(0.5)
         titleButton.highlightTexture = tex
 
-        titleButton:EnableMouse(true)
+        button._mouseTitleEnabled = nil
+        if SetMouseEnabledSafe(titleButton, true) then
+            button._mouseTitleEnabled = true
+        end
         titleButton:SetHighlightTexture(tex, "ADD")
 
-        local title = titleButton:CreateFontString(nil, opt_fontLayer)
-        title:SetFont(opt_font, opt_fontSize, opt_fontStyle)
+        local title = titleButton:CreateFontString(nil, GetFontLayer())
+        ApplyFontStringStyle(title)
         title:SetJustifyH("LEFT")
         title:SetJustifyV("TOP")
         title:SetTextColor(1, 1, 0)
@@ -550,8 +785,8 @@ do
     function WatchButton:CreateLines(currentLine)
         local buttonWidth = GetButtonWidth()
 
-        local line = self:CreateFontString(nil, opt_fontLayer)
-        line:SetFont(opt_font, opt_fontSize, opt_fontStyle)
+        local line = self:CreateFontString(nil, GetFontLayer())
+        ApplyFontStringStyle(line)
         line:SetJustifyH("LEFT")
         line:SetJustifyV("TOP")
         line:SetTextColor(1, 1, 0)
@@ -566,8 +801,8 @@ do
         line.SetLayoutInsets = lineSetLayoutInsets
         tinsert(self.lines, line)
 
-        local right = self:CreateFontString(nil, opt_fontLayer)
-        right:SetFont(opt_font, opt_fontSize, opt_fontStyle)
+        local right = self:CreateFontString(nil, GetFontLayer())
+        ApplyFontStringStyle(right)
         right:SetJustifyH("RIGHT")
         right:SetJustifyV("TOP")
         right:SetTextColor(1, 1, 0)
@@ -679,7 +914,24 @@ do
             line, right = self:CreateLines(currentLine)
         end
 
+        local reservesBar = textleft == nil
+            and textright == nil
+            and r == nil
+            and g == nil
+            and b == nil
+            and a == nil
+        if not reservesBar then
+            if line.timerBar then
+                line.timerBar:Free()
+            end
+            if line.progressBar then
+                line.progressBar:Free()
+            end
+        end
+
         line.isTimer = false
+        line:SetAlpha(1)
+        right:SetAlpha(1)
 
         local textLeftValue = textleft or ""
         local autoLeftInset, displayTextLeft = GetLeadingSpaceFallbackIndent(line, textLeftValue)
@@ -718,12 +970,30 @@ do
 
         local buttonWidth = GetButtonWidth()
         local lineHeight = GetLineHeight()
+        local titleHeight = GetTitleHeight()
         local itemButtonScale = GetItemButtonScale()
         local itemAnchorSide = GetItemAnchorSide()
+
+        local inCombat = IsInCombatLockdownSafe()
+        local appliedItemLayout = self._appliedItemLayout
+        if inCombat and self.itemButton and type(appliedItemLayout) == "table" then
+            buttonWidth = appliedItemLayout.buttonWidth or buttonWidth
+            lineHeight = appliedItemLayout.lineHeight or lineHeight
+            titleHeight = appliedItemLayout.titleHeight or titleHeight
+            itemButtonScale = appliedItemLayout.itemButtonScale or itemButtonScale
+            itemAnchorSide = appliedItemLayout.itemAnchorSide or itemAnchorSide
+        end
+
         local itemInset = GetItemInset(lineHeight, itemButtonScale, self.itemButton ~= nil)
 
         self:SetWidth(buttonWidth)
         self.titleButton:SetWidth(buttonWidth)
+        self.titleButton:SetHeight(titleHeight)
+
+        if self.icon then
+            self.icon:SetHeight(lineHeight * 2 - 2)
+            self.icon:SetWidth(lineHeight * 1.4)
+        end
 
         if self.title then
             local titleLeftInset = 0
@@ -802,7 +1072,7 @@ do
 
                     line:SetWidth(availableWidth)
                     right:SetWidth(rightWidth)
-                    right:SetHeight(GetLineHeight())
+                    right:SetHeight(lineHeight)
                     right:SetPoint("TOPLEFT", line, "TOPRIGHT", 0, 0)
                 else
                     line:SetWidth(buttonWidth - lineLeftInset - lineRightInset)
@@ -858,7 +1128,7 @@ do
         self:Show()
 
         if self.itemButton then
-            if InCombatLockdown() then
+            if inCombat then
                 QuestKing:StartCombatTimer()
             else
                 self.itemButton:ClearAllPoints()
@@ -869,6 +1139,17 @@ do
                     self.itemButton:SetPoint("TOPLEFT", self, "TOPLEFT", 4, -1)
                 end
             end
+        end
+
+        if self.itemButton and not inCombat then
+            self._appliedItemLayout = self._appliedItemLayout or {}
+            self._appliedItemLayout.buttonWidth = buttonWidth
+            self._appliedItemLayout.lineHeight = lineHeight
+            self._appliedItemLayout.titleHeight = titleHeight
+            self._appliedItemLayout.itemButtonScale = itemButtonScale
+            self._appliedItemLayout.itemAnchorSide = itemAnchorSide
+        elseif not self.itemButton then
+            self._appliedItemLayout = nil
         end
     end
 end
@@ -903,7 +1184,7 @@ function WatchButton:TitleButtonOnClick(mouse, down)
         else
             QuestKingDBPerChar.collapsedHeaders[headerName] = true
         end
-        QuestKing:UpdateTracker()
+        QuestKing:UpdateTracker(false, false, "presentation")
     end
 end
 

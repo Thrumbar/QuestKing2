@@ -80,7 +80,7 @@ local function SafeCallMethod(target, method, ...)
         _G.geterrorhandler()(result)
     end
 
-    return true, nil
+    return false, nil
 end
 
 local function EnsureSavedVariables()
@@ -119,13 +119,20 @@ local function GetTracker()
 end
 
 local function QueueTrackerRefresh(forceBuild)
+    local reason = forceBuild and "displaydata" or "presentation"
+
+    if QuestKing and type(QuestKing.RequestTrackerUpdate) == "function" then
+        QuestKing:RequestTrackerUpdate(forceBuild and true or false, reason, false)
+        return
+    end
+
     if QuestKing and type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild, false)
+        QuestKing:QueueTrackerUpdate(forceBuild and true or false, false, reason)
         return
     end
 
     if QuestKing and type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(forceBuild, false)
+        QuestKing:UpdateTracker(forceBuild and true or false, false, reason)
     end
 end
 
@@ -167,7 +174,7 @@ local function ApplyDisplayMode(mode)
 
     perChar.displayMode = mode
     SetModeButtonLabel(mode)
-    RefreshTrackerPresentation(true)
+    RefreshTrackerPresentation(false)
     return mode
 end
 
@@ -214,6 +221,7 @@ local function PrintHelp()
     Print("  alpha <0-1|clear> - set tracker alpha override")
     Print("  scale <value|clear> - set tracker scale override")
     Print("  refresh - force a tracker rebuild")
+    Print("  perf <on|off|reset|status> - control the Phase 7 profiler")
     Print("  reset - clear collapsed headers, quests, and achievements")
     Print("  resetall yes - reset all saved variables for this character and reload")
 end
@@ -285,6 +293,113 @@ Command.refresh = function()
     RefreshTrackerPresentation(true)
     Print("Tracker refreshed.")
 end
+
+Command.perf = function(action)
+    action = lower(tostring(action or "status"))
+    if action == "r" then
+        action = "status"
+    end
+
+    if action == "on" then
+        if type(QuestKing.SetPerformanceProfilingEnabled) == "function" then
+            QuestKing:SetPerformanceProfilingEnabled(true)
+            Print("Performance profiling enabled; counters reset.")
+        else
+            Print("Performance profiling is not available.")
+        end
+        return
+    end
+
+    if action == "off" then
+        if type(QuestKing.SetPerformanceProfilingEnabled) == "function" then
+            QuestKing:SetPerformanceProfilingEnabled(false)
+            Print("Performance profiling disabled.")
+        else
+            Print("Performance profiling is not available.")
+        end
+        return
+    end
+
+    if action == "reset" then
+        if type(QuestKing.ResetPerformanceProfile) == "function" then
+            QuestKing:ResetPerformanceProfile()
+            Print("Performance counters reset.")
+        else
+            Print("Performance profiling is not available.")
+        end
+        return
+    end
+
+    if action ~= "status" then
+        Print("Usage: |cffaaffaa/qk perf on|off|reset|status|r")
+        return
+    end
+
+    local profile = type(QuestKing.GetPerformanceProfile) == "function"
+        and QuestKing:GetPerformanceProfile()
+        or nil
+    if type(profile) ~= "table" then
+        Print("Performance profiling is not available.")
+        return
+    end
+
+    local refreshCount = tonumber(profile.trackerRefreshCount) or 0
+    local questEventCount = tonumber(profile.questEventCount) or 0
+    local combatQuestEventCount = tonumber(profile.combatQuestEventCount) or 0
+    local averageMilliseconds = refreshCount > 0
+        and ((tonumber(profile.totalRefreshMilliseconds) or 0) / refreshCount)
+        or 0
+    local questRefreshRatio = questEventCount > 0
+        and ((tonumber(profile.questEventRefreshCount) or 0) / questEventCount)
+        or 0
+    local combatRefreshRatio = combatQuestEventCount > 0
+        and ((tonumber(profile.combatQuestRefreshCount) or 0) / combatQuestEventCount)
+        or 0
+
+    Print("Profiler=%s", profile.enabled and "on" or "off")
+    Print(
+        "requests=%d coalesced=%d refreshes=%d full=%d cached=%d autocomplete=%d",
+        tonumber(profile.refreshRequestCount) or 0,
+        tonumber(profile.coalescedRequestCount) or 0,
+        refreshCount,
+        tonumber(profile.fullRebuildCount) or 0,
+        tonumber(profile.cachedPopulationRefreshCount) or 0,
+        tonumber(profile.autoCompleteRequestCount) or 0
+    )
+    Print(
+        "scans quest=%d objectives=%d achievements=%d/%d bags=%d autocomplete=%d",
+        tonumber(profile.questLogScanCount) or 0,
+        tonumber(profile.objectiveScanCount) or 0,
+        tonumber(profile.achievementListScanCount) or 0,
+        tonumber(profile.achievementCriteriaScanCount) or 0,
+        tonumber(profile.bagScanCount) or 0,
+        tonumber(profile.autoCompleteScanCount) or 0
+    )
+    Print(
+        "layout=%d anchors=%d metrics=%d rows +%d/-%d",
+        tonumber(profile.layoutPassCount) or 0,
+        tonumber(profile.layoutAnchorUpdateCount) or 0,
+        tonumber(profile.layoutMetricPassCount) or 0,
+        tonumber(profile.rowAcquireCount) or 0,
+        tonumber(profile.rowReleaseCount) or 0
+    )
+    Print(
+        "refresh ms avg=%.2f last=%.2f max=%.2f",
+        averageMilliseconds,
+        tonumber(profile.lastRefreshMilliseconds) or 0,
+        tonumber(profile.maxRefreshMilliseconds) or 0
+    )
+    Print(
+        "quest events=%d refresh/event=%.3f combat events=%d combat refresh/event=%.3f",
+        questEventCount,
+        questRefreshRatio,
+        combatQuestEventCount,
+        combatRefreshRatio
+    )
+end
+
+Command.profile = Command.perf
+Command.profiler = Command.perf
 
 Command.reset = function()
     local _, perChar = EnsureSavedVariables()

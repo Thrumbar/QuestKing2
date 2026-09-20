@@ -1,0 +1,42 @@
+## Interface: 40402
+## Title: QuestKing2 = Reborn
+## Author: Original: Barjack (up to WotLK) Current: Thrumbar
+## Version: 3.0.50
+## Notes: Lightweight objective tracker replacement for Retail, MoP Classic, Classic Era, and Classic TBC.
+## X-Curse-Project-ID: 1516209
+## SavedVariables: QuestKingDB
+## SavedVariablesPerCharacter: QuestKingDBPerChar
+## OptionalDeps: PetTracker, WorldQuestTracker
+
+options.lua
+options_override.lua
+ui\optionspanel.lua
+## options_override_custom.lua
+
+core\util.lua
+core\compatibility.lua
+
+ui\tracker.lua
+ui\pettracker.lua
+ui\worldquesttracker.lua
+ui\watchbutton.lua
+ui\actionbuttonlayout.lua
+ui\itembutton.lua
+ui\itembutton.xml
+ui\rewardsframe.lua
+ui\rewardsframe.xml
+ui\timerbar.lua
+ui\progressbar.lua
+
+buttons\quest.lua
+buttons\scenario.lua
+buttons\popup.lua
+buttons\achievement.lua
+buttons\challengetimer.lua
+buttons\bonusobjective.lua
+
+core\supertracking.lua
+core\core.lua
+core\slashcommand.lua
+core\events.lua
+core\AutoComplete.lua

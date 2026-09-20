@@ -4,7 +4,6 @@ local Compat = QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
 
 local opt = QuestKing.options
 local opt_colors = opt.colors
-local opt_showCompletedObjectives = opt.showCompletedObjectives
 
 local WatchButton = QuestKing.WatchButton
 local getObjectiveColor = QuestKing.GetObjectiveColor
@@ -111,94 +110,170 @@ end
 -- Helpers
 -- ---------------------------------------------------------------------
 
+local function SafeGetLegacyScenarioInfo()
+    if not (C_Scenario and C_Scenario.GetInfo) then
+        return nil
+    end
+
+    local ok,
+        scenarioName,
+        currentStage,
+        numStages,
+        flags,
+        legacyHasBonusStep,
+        legacyIsBonusStepComplete,
+        completed,
+        xp,
+        money,
+        scenarioType,
+        areaName,
+        textureKit,
+        scenarioID = pcall(C_Scenario.GetInfo)
+
+    if not ok then
+        return nil
+    end
+
+    return scenarioName,
+        currentStage,
+        numStages,
+        flags,
+        completed,
+        xp,
+        money,
+        scenarioType,
+        areaName,
+        textureKit,
+        scenarioID
+end
+
 local function SafeGetScenarioInfo()
     if C_ScenarioInfo and C_ScenarioInfo.GetScenarioInfo then
-        local info = C_ScenarioInfo.GetScenarioInfo()
-        if info then
-            return SafeString(info.name, nil),
-                SafeNumber(info.currentStage, 0),
-                SafeNumber(info.numStages, 0),
-                SafeNumber(info.flags, 0),
-                SafeBoolean(info.hasBonusStep, false),
-                SafeBoolean(info.isBonusStepComplete, false),
-                SafeBoolean(info.isComplete, false),
-                SafeNumber(info.xp, 0),
-                SafeNumber(info.money, 0),
-                SafeNumber(info.scenarioType, nil),
-                SafeNumber(info.areaID, nil),
-                SafeString(info.textureKit, nil),
-                SafeNumber(info.scenarioID, nil)
+        local ok, info = pcall(C_ScenarioInfo.GetScenarioInfo)
+        if ok and type(info) == "table" then
+            local scenarioName = SafeString(info.name, nil)
+            if scenarioName and scenarioName ~= "" then
+                return scenarioName,
+                    SafeNumber(info.currentStage, 0),
+                    SafeNumber(info.numStages, 0),
+                    SafeNumber(info.flags, 0),
+                    SafeBoolean(info.isComplete, false),
+                    SafeNumber(info.xp, 0),
+                    SafeNumber(info.money, 0),
+                    SafeNumber(info.type, nil),
+                    SafeString(info.area, nil),
+                    SafeString(info.uiTextureKit, nil),
+                    SafeNumber(info.scenarioID, nil)
+            end
         end
     end
 
-    if C_Scenario and C_Scenario.GetInfo then
-        local scenarioName,
-            currentStage,
-            numStages,
-            flags,
-            hasBonusStep,
-            isBonusStepComplete,
-            completed,
-            xp,
-            money,
-            scenarioType,
-            areaID,
-            textureKit,
-            scenarioID = C_Scenario.GetInfo()
+    local scenarioName,
+        currentStage,
+        numStages,
+        flags,
+        completed,
+        xp,
+        money,
+        scenarioType,
+        areaName,
+        textureKit,
+        scenarioID = SafeGetLegacyScenarioInfo()
 
+    if scenarioName ~= nil then
         return SafeString(scenarioName, nil),
             SafeNumber(currentStage, 0),
             SafeNumber(numStages, 0),
             SafeNumber(flags, 0),
-            SafeBoolean(hasBonusStep, false),
-            SafeBoolean(isBonusStepComplete, false),
             SafeBoolean(completed, false),
             SafeNumber(xp, 0),
             SafeNumber(money, 0),
             SafeNumber(scenarioType, nil),
-            SafeNumber(areaID, nil),
+            SafeString(areaName, nil),
             SafeString(textureKit, nil),
             SafeNumber(scenarioID, nil)
     end
 
-    return nil, 0, 0, 0, false, false, false, 0, 0, nil, nil, nil, nil
+    return nil, 0, 0, 0, false, 0, 0, nil, nil, nil, nil
 end
 
-local function SafeGetScenarioStepInfo(stepIndex)
-    if not stepIndex or stepIndex <= 0 then
-        return nil, nil, 0, false, false, false, 0, nil, nil, nil, nil
+local function SafeGetScenarioStepInfo(stepID, useCurrentStep)
+    if not useCurrentStep and (not stepID or stepID <= 0) then
+        return nil, nil, 0, false, false, false, nil, nil, nil, nil, nil, nil
     end
 
     if C_ScenarioInfo and C_ScenarioInfo.GetScenarioStepInfo then
-        local info = C_ScenarioInfo.GetScenarioStepInfo(stepIndex)
-        if info then
+        local ok, info
+        if useCurrentStep then
+            ok, info = pcall(C_ScenarioInfo.GetScenarioStepInfo)
+        else
+            ok, info = pcall(C_ScenarioInfo.GetScenarioStepInfo, stepID)
+        end
+
+        if ok and type(info) == "table" then
             return SafeString(info.title, nil),
                 SafeString(info.description, nil),
                 SafeNumber(info.numCriteria, 0),
                 SafeBoolean(info.stepFailed, false),
                 SafeBoolean(info.isBonusStep, false),
                 SafeBoolean(info.isForCurrentStepOnly, false),
-                (info.spells and #info.spells) or 0,
-                info.spells,
+                SafeBoolean(info.shouldShowBonusObjective, nil),
+                type(info.spells) == "table" and info.spells or nil,
                 SafeNumber(info.weightedProgress, nil),
                 SafeNumber(info.rewardQuestID, nil),
-                SafeNumber(info.widgetSetID, nil)
+                SafeNumber(info.widgetSetID, nil),
+                SafeNumber(info.stepID, nil)
         end
     end
 
     if C_Scenario and C_Scenario.GetStepInfo then
-        local stageName,
+        local ok,
+            stageName,
             stageDescription,
             numCriteria,
             stepFailed,
             isBonusStep,
             isForCurrentStepOnly,
+            shouldShowBonusObjective,
             _,
-            numSpells,
             allSpellInfo,
             weightedProgress,
             rewardQuestID,
-            widgetSetID = C_Scenario.GetStepInfo(stepIndex)
+            widgetSetID
+
+        if useCurrentStep then
+            ok,
+                stageName,
+                stageDescription,
+                numCriteria,
+                stepFailed,
+                isBonusStep,
+                isForCurrentStepOnly,
+                shouldShowBonusObjective,
+                _,
+                allSpellInfo,
+                weightedProgress,
+                rewardQuestID,
+                widgetSetID = pcall(C_Scenario.GetStepInfo)
+        else
+            ok,
+                stageName,
+                stageDescription,
+                numCriteria,
+                stepFailed,
+                isBonusStep,
+                isForCurrentStepOnly,
+                shouldShowBonusObjective,
+                _,
+                allSpellInfo,
+                weightedProgress,
+                rewardQuestID,
+                widgetSetID = pcall(C_Scenario.GetStepInfo, stepID)
+        end
+
+        if not ok then
+            return nil, nil, 0, false, false, false, nil, nil, nil, nil, nil, nil
+        end
 
         return SafeString(stageName, nil),
             SafeString(stageDescription, nil),
@@ -206,14 +281,89 @@ local function SafeGetScenarioStepInfo(stepIndex)
             SafeBoolean(stepFailed, false),
             SafeBoolean(isBonusStep, false),
             SafeBoolean(isForCurrentStepOnly, false),
-            SafeNumber(numSpells, 0),
+            SafeBoolean(shouldShowBonusObjective, nil),
             allSpellInfo,
             SafeNumber(weightedProgress, nil),
             SafeNumber(rewardQuestID, nil),
-            SafeNumber(widgetSetID, nil)
+            SafeNumber(widgetSetID, nil),
+            useCurrentStep and nil or SafeNumber(stepID, nil)
     end
 
-    return nil, nil, 0, false, false, false, 0, nil, nil, nil, nil
+    return nil, nil, 0, false, false, false, nil, nil, nil, nil, nil, nil
+end
+
+QuestKing.GetScenarioStepInfo = SafeGetScenarioStepInfo
+
+local function SafeGetLegacyBonusStepInfo()
+    if not (C_Scenario and C_Scenario.GetBonusStepInfo) then
+        return nil, nil, 0, false, true, false, true, nil, nil, nil, nil, nil
+    end
+
+    local ok,
+        title,
+        description,
+        numCriteria,
+        stepFailed = pcall(C_Scenario.GetBonusStepInfo)
+
+    if not ok then
+        return nil, nil, 0, false, true, false, true, nil, nil, nil, nil, nil
+    end
+
+    local bonusTitle = SafeString(title, nil)
+    if not bonusTitle or bonusTitle == "" then
+        bonusTitle = SCENARIO_BONUS_OBJECTIVES or "Bonus Objectives"
+    end
+
+    return bonusTitle,
+        SafeString(description, nil),
+        SafeNumber(numCriteria, 0),
+        SafeBoolean(stepFailed, false),
+        true,
+        false,
+        true,
+        nil,
+        nil,
+        nil,
+        nil,
+        nil
+end
+
+local function GetLegacyBonusCriteriaInfo(criteriaIndex)
+    if not (C_Scenario and C_Scenario.GetBonusCriteriaInfo) then
+        return nil, nil, false, 0, 0, nil, nil, nil, nil, 0, 0, false, false, false
+    end
+
+    local ok,
+        criteriaString,
+        criteriaType,
+        criteriaCompleted,
+        quantity,
+        totalQuantity,
+        flags,
+        assetID,
+        quantityString,
+        criteriaID,
+        timeLeft,
+        criteriaFailed = pcall(C_Scenario.GetBonusCriteriaInfo, criteriaIndex)
+
+    if not ok or not criteriaString then
+        return nil, nil, false, 0, 0, nil, nil, nil, nil, 0, 0, false, false, false
+    end
+
+    return SafeString(criteriaString, ""),
+        criteriaType,
+        SafeBoolean(criteriaCompleted, false),
+        SafeNumber(quantity, 0),
+        SafeNumber(totalQuantity, 0),
+        SafeNumber(flags, nil),
+        SafeNumber(assetID, nil),
+        SafeString(quantityString, nil),
+        SafeNumber(criteriaID, nil),
+        SafeNumber(timeLeft, 0),
+        0,
+        SafeBoolean(criteriaFailed, false),
+        false,
+        false
 end
 
 local function GetScenarioInstanceInfo()
@@ -285,10 +435,24 @@ local function IsScenarioStageTextSuppressed(flags)
     return band(flags or 0, SCENARIO_FLAG_SUPRESS_STAGE_TEXT) == SCENARIO_FLAG_SUPRESS_STAGE_TEXT
 end
 
-local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
-    if C_ScenarioInfo and C_ScenarioInfo.GetCriteriaInfoByStep and stepIndex then
-        local info = C_ScenarioInfo.GetCriteriaInfoByStep(stepIndex, criteriaIndex)
-        if info then
+local function GetScenarioCriteriaInfo(stepID, criteriaIndex, useCurrentStep)
+    if not useCurrentStep and (not stepID or stepID <= 0) then
+        return nil, nil, false, 0, 0, nil, nil, nil, nil, 0, 0, false, false, false
+    end
+
+    if C_ScenarioInfo then
+        local ok, info
+        if useCurrentStep and C_ScenarioInfo.GetCriteriaInfo then
+            ok, info = pcall(C_ScenarioInfo.GetCriteriaInfo, criteriaIndex)
+        elseif not useCurrentStep and C_ScenarioInfo.GetCriteriaInfoByStep then
+            ok, info = pcall(
+                C_ScenarioInfo.GetCriteriaInfoByStep,
+                stepID,
+                criteriaIndex
+            )
+        end
+
+        if ok and type(info) == "table" then
             return SafeString(info.description, ""),
                 info.criteriaType,
                 SafeBoolean(info.completed, false),
@@ -306,28 +470,9 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
         end
     end
 
-    if C_ScenarioInfo and C_ScenarioInfo.GetCriteriaInfo then
-        local info = C_ScenarioInfo.GetCriteriaInfo(criteriaIndex)
-        if info then
-            return SafeString(info.description, ""),
-                info.criteriaType,
-                SafeBoolean(info.completed, false),
-                SafeNumber(info.quantity, 0),
-                SafeNumber(info.totalQuantity, 0),
-                SafeNumber(info.flags, nil),
-                SafeNumber(info.assetID, nil),
-                SafeString(info.quantityString, nil),
-                SafeNumber(info.criteriaID, nil),
-                SafeNumber(info.duration, 0),
-                SafeNumber(info.elapsed, 0),
-                SafeBoolean(info.failed, false),
-                SafeBoolean(info.isWeightedProgress, false),
-                SafeBoolean(info.isFormatted, false)
-        end
-    end
-
-    if C_Scenario and C_Scenario.GetCriteriaInfoByStep and stepIndex then
-        local criteriaString,
+    if C_Scenario then
+        local ok,
+            criteriaString,
             criteriaType,
             criteriaCompleted,
             quantity,
@@ -339,42 +484,48 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
             duration,
             elapsed,
             criteriaFailed,
-            isWeightedProgress = C_Scenario.GetCriteriaInfoByStep(stepIndex, criteriaIndex)
+            isWeightedProgress
 
-        if criteriaString then
-            return SafeString(criteriaString, ""),
+        if useCurrentStep and C_Scenario.GetCriteriaInfo then
+            ok,
+                criteriaString,
                 criteriaType,
-                SafeBoolean(criteriaCompleted, false),
-                SafeNumber(quantity, 0),
-                SafeNumber(totalQuantity, 0),
-                SafeNumber(flags, nil),
-                SafeNumber(assetID, nil),
-                SafeString(quantityString, nil),
-                SafeNumber(criteriaID, nil),
-                SafeNumber(duration, 0),
-                SafeNumber(elapsed, 0),
-                SafeBoolean(criteriaFailed, false),
-                SafeBoolean(isWeightedProgress, false),
-                false
+                criteriaCompleted,
+                quantity,
+                totalQuantity,
+                flags,
+                assetID,
+                quantityString,
+                criteriaID,
+                duration,
+                elapsed,
+                criteriaFailed,
+                isWeightedProgress = pcall(
+                    C_Scenario.GetCriteriaInfo,
+                    criteriaIndex
+                )
+        elseif not useCurrentStep and C_Scenario.GetCriteriaInfoByStep then
+            ok,
+                criteriaString,
+                criteriaType,
+                criteriaCompleted,
+                quantity,
+                totalQuantity,
+                flags,
+                assetID,
+                quantityString,
+                criteriaID,
+                duration,
+                elapsed,
+                criteriaFailed,
+                isWeightedProgress = pcall(
+                    C_Scenario.GetCriteriaInfoByStep,
+                    stepID,
+                    criteriaIndex
+                )
         end
-    end
 
-    if C_Scenario and C_Scenario.GetCriteriaInfo then
-        local criteriaString,
-            criteriaType,
-            criteriaCompleted,
-            quantity,
-            totalQuantity,
-            flags,
-            assetID,
-            quantityString,
-            criteriaID,
-            duration,
-            elapsed,
-            criteriaFailed,
-            isWeightedProgress = C_Scenario.GetCriteriaInfo(criteriaIndex)
-
-        if criteriaString then
+        if ok and criteriaString then
             return SafeString(criteriaString, ""),
                 criteriaType,
                 SafeBoolean(criteriaCompleted, false),
@@ -395,20 +546,29 @@ local function GetScenarioCriteriaInfo(stepIndex, criteriaIndex)
     return nil, nil, false, 0, 0, nil, nil, nil, nil, 0, 0, false, false, false
 end
 
-local function GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
+QuestKing.GetScenarioCriteriaInfo = GetScenarioCriteriaInfo
+
+local function GetScenarioButtonCriteriaInfo(
+    useLegacyBonusStep,
+    stepID,
+    criteriaIndex,
+    useCurrentStep
+)
+    if useLegacyBonusStep then
+        return GetLegacyBonusCriteriaInfo(criteriaIndex)
+    end
+
+    return GetScenarioCriteriaInfo(stepID, criteriaIndex, useCurrentStep)
+end
+
+local function GetEffectiveScenarioCriteriaCount(stepID, declaredNumCriteria, useCurrentStep)
     declaredNumCriteria = tonumber(declaredNumCriteria) or 0
-    if declaredNumCriteria > 0 then
-        return declaredNumCriteria
+    if declaredNumCriteria < 0 then
+        return 0
     end
 
-    for i = 1, 32 do
-        local description, _, _, _, _, _, _, _, criteriaID = GetScenarioCriteriaInfo(stepIndex, i)
-        if not description and not criteriaID then
-            return i - 1
-        end
-    end
-
-    return 0
+    -- ScenarioStepInfo.numCriteria is authoritative, including zero.
+    return declaredNumCriteria
 end
 
 local function ClampPercent(value)
@@ -422,32 +582,39 @@ local function ClampPercent(value)
     return value
 end
 
-local function GetCriteriaProgressText(quantity, totalQuantity, quantityString, isFormatted)
-    if isFormatted then
-        return nil
+local function GetCriteriaDisplayText(
+    criteriaString,
+    quantity,
+    totalQuantity,
+    quantityString,
+    isWeightedProgress,
+    isFormatted
+)
+    if isFormatted or isWeightedProgress then
+        return criteriaString
     end
 
     if totalQuantity and totalQuantity > 0 then
-        return format(": %d/%d", quantity or 0, totalQuantity)
+        return format("%d/%d %s", quantity or 0, totalQuantity, criteriaString)
     end
 
     if quantityString and quantityString ~= "" then
-        return ": " .. quantityString
+        return format("%s %s", quantityString, criteriaString)
     end
 
-    return nil
+    return criteriaString
 end
 
 local function GetCriteriaProgressValue(quantity, totalQuantity, isWeightedProgress)
     quantity = tonumber(quantity) or 0
     totalQuantity = tonumber(totalQuantity) or 0
 
-    if totalQuantity > 0 then
-        return min(quantity / totalQuantity, 1)
+    if isWeightedProgress then
+        return ClampPercent(quantity) / 100
     end
 
-    if isWeightedProgress and quantity > 0 then
-        return min(quantity, 1)
+    if totalQuantity > 0 then
+        return min(quantity / totalQuantity, 1)
     end
 
     return 0
@@ -459,7 +626,7 @@ local function GetScenarioResolvedStage(currentStage)
         return currentStage
     end
 
-    local stageName = SafeGetScenarioStepInfo(1)
+    local stageName = SafeGetScenarioStepInfo(nil, true)
     if stageName then
         return 1
     end
@@ -468,13 +635,18 @@ local function GetScenarioResolvedStage(currentStage)
 end
 
 local function HasScenarioTrackerData()
-    local scenarioName, currentStage, numStages = SafeGetScenarioInfo()
+    local scenarioName, currentStage, numStages, _, completed =
+        SafeGetScenarioInfo()
     if not scenarioName or scenarioName == "" then
         return false
     end
 
     currentStage = tonumber(currentStage) or 0
     numStages = tonumber(numStages) or 0
+
+    if completed then
+        return true
+    end
 
     if currentStage > 0 or numStages > 0 then
         return true
@@ -485,8 +657,8 @@ local function HasScenarioTrackerData()
     end
 
     if C_Scenario and C_Scenario.GetBonusSteps then
-        local bonusSteps = C_Scenario.GetBonusSteps()
-        if type(bonusSteps) == "table" and #bonusSteps > 0 then
+        local ok, bonusSteps = pcall(C_Scenario.GetBonusSteps)
+        if ok and type(bonusSteps) == "table" and #bonusSteps > 0 then
             return true
         end
     end
@@ -508,7 +680,10 @@ function QuestKing:RefreshShouldShowScenarioCriteria()
     local shouldShow = true
 
     if C_Scenario and C_Scenario.ShouldShowCriteria then
-        shouldShow = C_Scenario.ShouldShowCriteria() and true or false
+        local ok, result = pcall(C_Scenario.ShouldShowCriteria)
+        if ok then
+            shouldShow = result and true or false
+        end
     end
 
     self.scenarioShouldShowCriteria = shouldShow
@@ -547,8 +722,11 @@ function QuestKing:ShouldShowScenarioTracker()
         return false
     end
 
-    if C_Scenario and C_Scenario.IsInScenario and C_Scenario.IsInScenario() then
-        return true
+    if C_Scenario and C_Scenario.IsInScenario then
+        local ok, inScenario = pcall(C_Scenario.IsInScenario)
+        if ok and inScenario then
+            return true
+        end
     end
 
     if not ShouldAllowInstanceScenarioFallback() then
@@ -669,15 +847,16 @@ local function GetTooltipAnchor()
 end
 
 local function ShouldShowCompletedScenarioObjective(stepFinished)
-    if opt_showCompletedObjectives == "always" then
+    if QuestKing.ShouldShowCompletedObjective then
+        return QuestKing.ShouldShowCompletedObjective(stepFinished)
+    end
+
+    local mode = opt.showCompletedObjectives
+    if mode == "always" then
         return true
     end
 
-    if stepFinished then
-        return true
-    end
-
-    return opt_showCompletedObjectives and true or false
+    return not stepFinished and mode == true
 end
 
 local function GetQuestLogIndexByIDCompat(questID)
@@ -702,16 +881,22 @@ local function GetQuestLogIndexByIDCompat(questID)
     return nil
 end
 
-local function GetScenarioRewardQuestID(stepIndex, rewardQuestIDFromStep)
+local function GetScenarioRewardQuestID(stepID, rewardQuestIDFromStep, isBonusStep)
     rewardQuestIDFromStep = SafeNumber(rewardQuestIDFromStep, nil)
     if rewardQuestIDFromStep and rewardQuestIDFromStep ~= 0 then
         return rewardQuestIDFromStep
     end
 
-    if C_Scenario and C_Scenario.GetBonusStepRewardQuestID and stepIndex then
-        local questID = SafeNumber(C_Scenario.GetBonusStepRewardQuestID(stepIndex), nil)
-        if questID and questID ~= 0 then
-            return questID
+    if isBonusStep and C_Scenario and C_Scenario.GetBonusStepRewardQuestID and stepID then
+        local ok, rewardQuestID = pcall(
+            C_Scenario.GetBonusStepRewardQuestID,
+            stepID
+        )
+        if ok then
+            local questID = SafeNumber(rewardQuestID, nil)
+            if questID and questID ~= 0 then
+                return questID
+            end
         end
     end
 
@@ -735,6 +920,79 @@ local function AddTooltipMoneyText(tooltip, money)
     else
         tooltip:AddLine(format("%d", money), 1, 1, 1)
     end
+end
+
+local function AddLegacyBonusRewardsToTooltip(tooltip)
+    if not tooltip
+        or type(GetPartyLFGID) ~= "function"
+        or type(GetLFGDungeonRewards) ~= "function"
+        or type(GetLFGDungeonRewardInfo) ~= "function" then
+        return false
+    end
+
+    local okParty, dungeonID, randomID = pcall(GetPartyLFGID)
+    if not okParty then
+        return false
+    end
+
+    if randomID then
+        dungeonID = randomID
+    end
+
+    dungeonID = SafeNumber(dungeonID, nil)
+    if not dungeonID then
+        return false
+    end
+
+    local okRewards, _, _, _, _, _, numRewards =
+        pcall(GetLFGDungeonRewards, dungeonID)
+    if not okRewards then
+        return false
+    end
+
+    numRewards = SafeNumber(numRewards, 0) or 0
+    local addedReward = false
+
+    for i = 1, numRewards do
+        local okReward,
+            name,
+            texturePath,
+            quantity,
+            isBonusCurrency =
+            pcall(GetLFGDungeonRewardInfo, dungeonID, i)
+
+        if okReward and isBonusCurrency and name then
+            if not addedReward then
+                tooltip:AddLine(" ")
+                tooltip:AddLine(
+                    SCENARIO_BONUS_REWARD or "Bonus Reward",
+                    1,
+                    0.831,
+                    0.380
+                )
+                addedReward = true
+            end
+
+            quantity = SafeNumber(quantity, 0) or 0
+            local rewardText
+            if SCENARIO_BONUS_CURRENCY_FORMAT then
+                rewardText = format(
+                    SCENARIO_BONUS_CURRENCY_FORMAT,
+                    quantity,
+                    name
+                )
+            else
+                rewardText = format("%d %s", quantity, name)
+            end
+
+            tooltip:AddLine(rewardText, 1, 1, 1)
+            if texturePath and type(tooltip.AddTexture) == "function" then
+                tooltip:AddTexture(texturePath)
+            end
+        end
+    end
+
+    return addedReward
 end
 
 
@@ -819,6 +1077,24 @@ local function GetQuestRewardXPCompat(questID)
     return 0
 end
 
+local function IsPlayerAtEffectiveMaxLevelCompat()
+    if GameRulesUtil and type(GameRulesUtil.IsPlayerAtEffectiveMaxLevel) == "function" then
+        local ok, atMax = pcall(GameRulesUtil.IsPlayerAtEffectiveMaxLevel)
+        if ok then
+            return atMax and true or false
+        end
+    end
+
+    if type(IsPlayerAtEffectiveMaxLevel) == "function" then
+        local ok, atMax = pcall(IsPlayerAtEffectiveMaxLevel)
+        if ok then
+            return atMax and true or false
+        end
+    end
+
+    return false
+end
+
 local function GetNumQuestRewardsCompat(questID)
     if type(GetNumQuestLogRewards) == "function" then
         return SafeNumber(GetNumQuestLogRewards(questID), 0) or 0
@@ -843,13 +1119,58 @@ local function GetQuestRewardMoneyCompat(questID)
     return 0
 end
 
+local function FreeScenarioLineBars(line)
+    if not line then
+        return
+    end
+
+    if line.timerBar then
+        line.timerBar:Free()
+    end
+
+    if line.progressBar then
+        line.progressBar:Free()
+    end
+end
+
+local function AddScenarioTextLine(button, text, rightText, r, g, b, useIcon)
+    local line
+    if useIcon then
+        line = button:AddLineIcon(text, rightText, r, g, b)
+    else
+        line = button:AddLine(text, rightText, r, g, b)
+    end
+
+    FreeScenarioLineBars(line)
+    return line
+end
+
+local function AddScenarioProgressBar(button, progressKey)
+    local progressBar = button:AddProgressBar(progressKey)
+    local line = progressBar and progressBar.baseLine
+    if line and line.timerBar then
+        line.timerBar:Free()
+    end
+    return progressBar
+end
+
+local function AddScenarioTimerBar(button, duration, startTime)
+    local timerBar = button:AddTimerBar(duration, startTime)
+    local line = timerBar and timerBar.baseLine
+    if line and line.progressBar then
+        line.progressBar:Free()
+    end
+    return timerBar
+end
+
 local function AddStageDescriptionFallback(button, stageDescription, stepFinished, stepFailed)
     if not stageDescription or stageDescription == "" then
         return false
     end
 
     if stepFailed then
-        button:AddLine(
+        AddScenarioTextLine(
+            button,
             format("  %s", stageDescription),
             nil,
             opt_colors.ObjectiveFailed[1],
@@ -861,7 +1182,8 @@ local function AddStageDescriptionFallback(button, stageDescription, stepFinishe
 
     if stepFinished then
         if ShouldShowCompletedScenarioObjective(stepFinished) then
-            button:AddLine(
+            AddScenarioTextLine(
+                button,
                 format("  %s", stageDescription),
                 nil,
                 opt_colors.ObjectiveGradientComplete[1],
@@ -875,7 +1197,7 @@ local function AddStageDescriptionFallback(button, stageDescription, stepFinishe
     end
 
     local r, g, b = getObjectiveColor(0)
-    button:AddLine(format("  %s", stageDescription), nil, r, g, b)
+    AddScenarioTextLine(button, format("  %s", stageDescription), nil, r, g, b)
     return true
 end
 
@@ -903,8 +1225,8 @@ end
 -- Scenario tracker population
 -- ---------------------------------------------------------------------
 
-function QuestKing:UpdateTrackerScenarios()
-    if not self:ShouldShowScenarioTracker() then
+function QuestKing:UpdateTrackerScenarios(knownShown)
+    if not knownShown and not self:ShouldShowScenarioTracker() then
         return
     end
 
@@ -912,12 +1234,13 @@ function QuestKing:UpdateTrackerScenarios()
         currentStage,
         numStages,
         flags,
-        hasBonusStep,
-        isBonusStepComplete,
         completed,
         xp,
         money,
-        scenarioType = SafeGetScenarioInfo()
+        scenarioType,
+        areaName,
+        textureKit,
+        scenarioID = SafeGetScenarioInfo()
 
     local displayKind = GetScenarioDisplayKind(flags, scenarioType)
     local _, _, _, _, _, _, _, mapID = GetScenarioInstanceInfo()
@@ -934,68 +1257,102 @@ function QuestKing:UpdateTrackerScenarios()
     end
 
     if displayKind == "proving_grounds" and C_Scenario and C_Scenario.GetProvingGroundsInfo then
-        local _, _, _, duration = C_Scenario.GetProvingGroundsInfo()
-        if duration and duration ~= 0 then
+        local ok, _, _, _, duration = pcall(C_Scenario.GetProvingGroundsInfo)
+        if ok and duration and duration ~= 0 then
             return
         end
     end
 
-    if stepIndex <= 0 then
+    if not completed and stepIndex <= 0 then
         return
     end
 
     local header = WatchButton:GetKeyed("header", scenarioName)
-    header.title:SetText(GetScenarioDisplayHeader(stepIndex, numStages, displayKind, flags))
     header.title:SetTextColor(
         opt_colors.SectionHeader[1],
         opt_colors.SectionHeader[2],
         opt_colors.SectionHeader[3]
     )
 
-    if tonumber(numStages) and numStages > 0 and stepIndex > numStages then
+    local scenarioComplete = completed
+        or (tonumber(numStages) and numStages > 0 and stepIndex > numStages)
+
+    if scenarioComplete then
         header.title:SetText(GetScenarioCompleteHeader(displayKind))
-        return
+        if not ShouldShowCompletedScenarioObjective(true) then
+            return
+        end
+
+        if stepIndex <= 0 or (tonumber(numStages) and numStages > 0 and stepIndex > numStages) then
+            stepIndex = tonumber(numStages) or 0
+            if stepIndex <= 0 then
+                stepIndex = 1
+            end
+        end
+    else
+        header.title:SetText(GetScenarioDisplayHeader(stepIndex, numStages, displayKind, flags))
     end
 
     local button = WatchButton:GetKeyed("scenario", scenarioName)
     button.scenarioDisplayKind = displayKind
-    QuestKing.SetButtonToScenario(button, stepIndex)
+    QuestKing.SetButtonToScenario(button, stepIndex, true, false, false, scenarioComplete)
 end
 
-function QuestKing.SetButtonToScenario(button, stepIndex)
+function QuestKing.SetButtonToScenario(
+    button,
+    stepIndex,
+    useCurrentStep,
+    useLegacyBonusStep,
+    legacyBonusComplete,
+    containerComplete
+)
     button.mouseHandler = mouseHandlerScenario
 
     local scenarioName,
         currentStage,
         numStages,
         flags,
-        hasBonusStep,
-        isBonusStepComplete,
         completed,
         xp,
         money,
-        scenarioType = SafeGetScenarioInfo()
+        scenarioType,
+        areaName,
+        textureKit,
+        scenarioID = SafeGetScenarioInfo()
 
     local displayKind = GetScenarioDisplayKind(flags, scenarioType)
     local shouldShowCriteria = QuestKing:ShouldShowScenarioCriteria()
 
-    if not stepIndex then
+    if not stepIndex and not useLegacyBonusStep then
         stepIndex = GetScenarioResolvedStage(currentStage)
+        useCurrentStep = true
     end
 
-    if not stepIndex or stepIndex <= 0 then
+    if not useLegacyBonusStep and (not stepIndex or stepIndex <= 0) then
         return
     end
 
+    useCurrentStep = useCurrentStep and true or false
+    useLegacyBonusStep = useLegacyBonusStep and true or false
+
     button.stepIndex = stepIndex
     button.scenarioDisplayKind = displayKind
+    button.scenarioUseCurrentStep = useCurrentStep
+    button.scenarioUseLegacyBonusStep = useLegacyBonusStep
+    button.scenarioType = scenarioType
+    button.scenarioArea = areaName
+    button.scenarioTextureKit = textureKit
+    button.scenarioID = scenarioID
 
     local lastStepIndex = button._lastStepIndex
     local isNewStep = false
-    if lastStepIndex and stepIndex > lastStepIndex and not button.fresh then
+    if not useLegacyBonusStep
+        and lastStepIndex
+        and stepIndex > lastStepIndex
+        and not button.fresh then
         isNewStep = true
     end
-    button._lastStepIndex = stepIndex
+    button._lastStepIndex = useLegacyBonusStep and nil or stepIndex
 
     local stageName,
         stageDescription,
@@ -1003,33 +1360,87 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
         stepFailed,
         isBonusStep,
         isForCurrentStepOnly,
-        numSpells,
+        shouldShowBonusObjective,
         allSpellInfo,
         weightedProgress,
-        rewardQuestID = SafeGetScenarioStepInfo(stepIndex)
+        rewardQuestID,
+        widgetSetID,
+        resolvedStepID
+
+    if useLegacyBonusStep then
+        stageName,
+            stageDescription,
+            declaredNumCriteria,
+            stepFailed,
+            isBonusStep,
+            isForCurrentStepOnly,
+            shouldShowBonusObjective,
+            allSpellInfo,
+            weightedProgress,
+            rewardQuestID,
+            widgetSetID,
+            resolvedStepID = SafeGetLegacyBonusStepInfo()
+    else
+        stageName,
+            stageDescription,
+            declaredNumCriteria,
+            stepFailed,
+            isBonusStep,
+            isForCurrentStepOnly,
+            shouldShowBonusObjective,
+            allSpellInfo,
+            weightedProgress,
+            rewardQuestID,
+            widgetSetID,
+            resolvedStepID = SafeGetScenarioStepInfo(stepIndex, useCurrentStep)
+    end
 
     stageName = stageName or scenarioName or GetScenarioDisplayLabel(displayKind)
     stageDescription = stageDescription or ""
 
-    local numCriteria = GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
+    local criteriaStepID = useCurrentStep and nil
+        or SafeNumber(resolvedStepID, nil)
+        or SafeNumber(stepIndex, nil)
+
+    button.scenarioCriteriaStepID = criteriaStepID
+    button.scenarioIsBonusStep = isBonusStep
+    button.scenarioShouldShowBonusObjective = shouldShowBonusObjective
+
+    local numCriteria
+    if useLegacyBonusStep then
+        numCriteria = SafeNumber(declaredNumCriteria, 0) or 0
+    else
+        numCriteria = GetEffectiveScenarioCriteriaCount(
+            criteriaStepID,
+            declaredNumCriteria,
+            useCurrentStep
+        )
+    end
+
     local hasWeightedProgress = IsSafeNumber(weightedProgress)
     local weightedPercent = hasWeightedProgress and ClampPercent(weightedProgress) or nil
 
-    local stepFinished = false
+    local stepFinished = containerComplete and true or (legacyBonusComplete and true or false)
 
-    if stepFailed then
+    if not stepFinished and stepFailed then
         stepFinished = true
-    elseif numCriteria > 0 then
+    elseif not stepFinished and hasWeightedProgress then
+        stepFinished = weightedPercent >= 100
+    elseif not stepFinished and numCriteria > 0 then
         stepFinished = true
         for i = 1, numCriteria do
-            local _, _, criteriaCompleted = GetScenarioCriteriaInfo(stepIndex, i)
+            local _, _, criteriaCompleted =
+                GetScenarioButtonCriteriaInfo(
+                    useLegacyBonusStep,
+                    criteriaStepID,
+                    i,
+                    useCurrentStep
+                )
             if not criteriaCompleted then
                 stepFinished = false
                 break
             end
         end
-    elseif hasWeightedProgress then
-        stepFinished = weightedPercent >= 100
     end
 
     if stepFailed then
@@ -1058,16 +1469,34 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
     local shownLines = 0
 
     if shouldShowCriteria and hasWeightedProgress then
-        local labelText = stageDescription ~= "" and stageDescription or stageName or "Objective"
-        local progressValue = weightedPercent / 100
-        local colorValue = stepFinished and 1 or progressValue
-        local r, g, b = getObjectiveColor(colorValue)
+        if not stepFinished
+            or stepFailed
+            or ShouldShowCompletedScenarioObjective(stepFinished) then
+            local labelText = stageDescription ~= "" and stageDescription or stageName or "Objective"
+            local progressValue = weightedPercent / 100
+            local r, g, b
 
-        button:AddLine(format("  %s", labelText), nil, r, g, b)
-        shownLines = shownLines + 1
+            if stepFailed then
+                r = opt_colors.ObjectiveFailed[1]
+                g = opt_colors.ObjectiveFailed[2]
+                b = opt_colors.ObjectiveFailed[3]
+            else
+                local colorValue = stepFinished and 1 or progressValue
+                r, g, b = getObjectiveColor(colorValue)
+            end
 
-        local progressBar = button:AddProgressBar()
-        progressBar:SetPercent(weightedPercent)
+            AddScenarioTextLine(button, format("  %s", labelText), nil, r, g, b)
+            shownLines = shownLines + 1
+
+            local progressBar = AddScenarioProgressBar(
+                button,
+                format(
+                    "scenario:%s:weighted",
+                    tostring(criteriaStepID or stepIndex or 0)
+                )
+            )
+            progressBar:SetPercent(weightedPercent)
+        end
     elseif shouldShowCriteria and numCriteria > 0 then
         for i = 1, numCriteria do
             local criteriaString,
@@ -1083,37 +1512,53 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
                 elapsed,
                 criteriaFailed,
                 isWeightedProgress,
-                isFormatted = GetScenarioCriteriaInfo(stepIndex, i)
+                isFormatted = GetScenarioButtonCriteriaInfo(
+                    useLegacyBonusStep,
+                    criteriaStepID,
+                    i,
+                    useCurrentStep
+                )
 
             criteriaString = (criteriaString and criteriaString ~= "") and criteriaString or "Objective"
 
             local line
-            local progressText = GetCriteriaProgressText(quantity, totalQuantity, quantityString, isFormatted)
+            local displayText = GetCriteriaDisplayText(
+                criteriaString,
+                quantity,
+                totalQuantity,
+                quantityString,
+                isWeightedProgress,
+                isFormatted
+            )
             local progressValue = GetCriteriaProgressValue(quantity, totalQuantity, isWeightedProgress)
 
             if criteriaCompleted then
                 if ShouldShowCompletedScenarioObjective(stepFinished) then
-                    line = button:AddLine(
-                        format("  %s", criteriaString),
-                        progressText,
+                    line = AddScenarioTextLine(
+                        button,
+                        format("  %s", displayText),
+                        nil,
                         opt_colors.ObjectiveGradientComplete[1],
                         opt_colors.ObjectiveGradientComplete[2],
                         opt_colors.ObjectiveGradientComplete[3]
                     )
                 end
             elseif criteriaFailed then
-                line = button:AddLineIcon(
-                    format("  |TInterface\\RAIDFRAME\\ReadyCheck-NotReady:0|t %s", criteriaString),
-                    progressText,
+                line = AddScenarioTextLine(
+                    button,
+                    format("  |TInterface\\RAIDFRAME\\ReadyCheck-NotReady:0|t %s", displayText),
+                    nil,
                     opt_colors.ObjectiveFailed[1],
                     opt_colors.ObjectiveFailed[2],
-                    opt_colors.ObjectiveFailed[3]
+                    opt_colors.ObjectiveFailed[3],
+                    true
                 )
             else
                 local r, g, b = getObjectiveColor(progressValue)
-                line = button:AddLine(
-                    format("  %s", criteriaString),
-                    progressText,
+                line = AddScenarioTextLine(
+                    button,
+                    format("  %s", displayText),
+                    nil,
                     r, g, b
                 )
             end
@@ -1128,8 +1573,26 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
                 line._lastQuant = IsSafeNumber(quantity) and quantity or nil
             end
 
-            if IsSafeNumber(duration) and IsSafeNumber(elapsed) and duration > 0 and elapsed < duration then
-                local timerBar = button:AddTimerBar(duration, GetTime() - elapsed)
+            if line and isWeightedProgress and not criteriaCompleted and not criteriaFailed then
+                local progressBar = AddScenarioProgressBar(
+                    button,
+                    format(
+                        "scenario:%s:%s",
+                        tostring(criteriaStepID or stepIndex or 0),
+                        tostring(criteriaID or assetID or i)
+                    )
+                )
+                progressBar:SetPercent(ClampPercent(quantity))
+            end
+
+            if line
+                and not criteriaCompleted
+                and not criteriaFailed
+                and IsSafeNumber(duration)
+                and IsSafeNumber(elapsed)
+                and duration > 0
+                and elapsed < duration then
+                local timerBar = AddScenarioTimerBar(button, duration, GetTime() - elapsed)
                 timerBar:SetStatusBarColor(
                     opt_colors.ScenarioTimer[1],
                     opt_colors.ScenarioTimer[2],
@@ -1146,7 +1609,8 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
     end
 
     if shownLines == 0 and stepFinished and ShouldShowCompletedScenarioObjective(stepFinished) then
-        button:AddLine(
+        AddScenarioTextLine(
+            button,
             format("  %s", COMPLETE or "Complete"),
             nil,
             opt_colors.ObjectiveGradientComplete[1],
@@ -1156,7 +1620,8 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
     end
 
     if shownLines == 0 and not stepFinished and not shouldShowCriteria then
-        button:AddLine(
+        AddScenarioTextLine(
+            button,
             format("  %s", stageDescription ~= "" and stageDescription or stageName),
             nil,
             opt_colors.ScenarioStageTitle[1],
@@ -1175,9 +1640,9 @@ function QuestKing.SetButtonToScenario(button, stepIndex)
     end
 end
 
-function QuestKing:OnScenarioCompleted(xp, money)
-    xp = xp or 0
-    money = money or 0
+function QuestKing:OnScenarioCompleted(questID, xp, money)
+    xp = SafeNumber(xp, 0) or 0
+    money = SafeNumber(money, 0) or 0
 
     if xp > 0 or money > 0 then
         local button = nil
@@ -1185,29 +1650,32 @@ function QuestKing:OnScenarioCompleted(xp, money)
         if scenarioName then
             button = WatchButton:GetKeyedRaw("header", scenarioName)
         end
+
+        -- Blizzard's scenario tracker displays the event's XP and money
+        -- directly. The quest ID is not a substitute for either payload.
         QuestKing:AddReward(button, nil, xp, money)
     end
 end
 
 function QuestKing:OnScenarioUpdate(newStage)
-    local _, currentStage, numStages, flags, _, _, _, _, _, scenarioType = SafeGetScenarioInfo()
+    local _, currentStage, numStages, flags, _, _, _, scenarioType = SafeGetScenarioInfo()
     local inChallengeMode = GetScenarioFlags(flags, scenarioType)
 
     self:RefreshShouldShowScenarioCriteria()
 
     if newStage then
         if not inChallengeMode then
-            if currentStage <= numStages then
+            if currentStage > 1 and currentStage <= numStages then
                 PlaySoundCompat(SOUNDKIT and SOUNDKIT.UI_SCENARIO_STAGE_END, "UI_Scenario_Stage_End")
             end
 
-            if currentStage > 0 then
+            if currentStage > 1 then
                 SafePlayScenarioBanner()
             end
         end
     end
 
-    QuestKing:UpdateTracker()
+    QuestKing:UpdateTracker(false, false, "scenario")
 end
 
 -- ---------------------------------------------------------------------
@@ -1217,17 +1685,23 @@ end
 function mouseHandlerScenario:TitleButtonOnClick(mouse, down)
     local button = self.parent
     local stepIndex = button.stepIndex
+    local useCurrentStep = button.scenarioUseCurrentStep
 
     if mouse == "RightButton" then
         return
     end
 
-    if not stepIndex or stepIndex <= 0 then
+    if not useCurrentStep and (not stepIndex or stepIndex <= 0) then
         return
     end
 
-    local _, _, _, _, _, _, _, _, _, rewardQuestIDFromStep = SafeGetScenarioStepInfo(stepIndex)
-    local rewardQuestID = GetScenarioRewardQuestID(stepIndex, rewardQuestIDFromStep)
+    local _, _, _, _, isBonusStep, _, _, _, _, rewardQuestIDFromStep =
+        SafeGetScenarioStepInfo(stepIndex, useCurrentStep)
+    local rewardQuestID = GetScenarioRewardQuestID(
+        stepIndex,
+        rewardQuestIDFromStep,
+        isBonusStep
+    )
     local rewardQuestLogIndex = rewardQuestID and GetQuestLogIndexByIDCompat(rewardQuestID) or nil
 
     if rewardQuestID and Compat.OpenQuestDetails and Compat.OpenQuestDetails(rewardQuestID, rewardQuestLogIndex) then
@@ -1236,19 +1710,23 @@ function mouseHandlerScenario:TitleButtonOnClick(mouse, down)
 end
 
 function mouseHandlerScenario:TitleButtonOnEnter(motion)
-    local button = self.parent
+    local button = self.parent or self
     local stepIndex = button.stepIndex
+    local useCurrentStep = button.scenarioUseCurrentStep
+    local useLegacyBonusStep = button.scenarioUseLegacyBonusStep
+    local criteriaStepID = button.scenarioCriteriaStepID
 
     local scenarioName,
         currentStage,
         numStages,
         flags,
-        hasBonusStep,
-        isBonusStepComplete,
         completed,
         xp,
         money,
-        scenarioType = SafeGetScenarioInfo()
+        scenarioType,
+        areaName,
+        textureKit,
+        scenarioID = SafeGetScenarioInfo()
 
     local stageName,
         stageDescription,
@@ -1256,12 +1734,45 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
         stepFailed,
         isBonusStep,
         isForCurrentStepOnly,
-        numSpells,
+        shouldShowBonusObjective,
         allSpellInfo,
         weightedProgress,
-        rewardQuestIDFromStep = SafeGetScenarioStepInfo(stepIndex)
+        rewardQuestIDFromStep
 
-    local numCriteria = GetEffectiveScenarioCriteriaCount(stepIndex, declaredNumCriteria)
+    if useLegacyBonusStep then
+        stageName,
+            stageDescription,
+            declaredNumCriteria,
+            stepFailed,
+            isBonusStep,
+            isForCurrentStepOnly,
+            shouldShowBonusObjective,
+            allSpellInfo,
+            weightedProgress,
+            rewardQuestIDFromStep = SafeGetLegacyBonusStepInfo()
+    else
+        stageName,
+            stageDescription,
+            declaredNumCriteria,
+            stepFailed,
+            isBonusStep,
+            isForCurrentStepOnly,
+            shouldShowBonusObjective,
+            allSpellInfo,
+            weightedProgress,
+            rewardQuestIDFromStep = SafeGetScenarioStepInfo(stepIndex, useCurrentStep)
+    end
+
+    local numCriteria
+    if useLegacyBonusStep then
+        numCriteria = SafeNumber(declaredNumCriteria, 0) or 0
+    else
+        numCriteria = GetEffectiveScenarioCriteriaCount(
+            criteriaStepID,
+            declaredNumCriteria,
+            useCurrentStep
+        )
+    end
     local displayKind = button.scenarioDisplayKind or GetScenarioDisplayKind(flags, scenarioType)
     local displayLabel = GetScenarioDisplayLabel(displayKind)
     local tooltip = QuestKing.PrepareTooltip and QuestKing:PrepareTooltip(self, GetTooltipAnchor())
@@ -1314,61 +1825,45 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
                 criteriaID,
                 duration,
                 elapsed,
-                criteriaFailed = GetScenarioCriteriaInfo(stepIndex, i)
+                criteriaFailed,
+                isWeightedProgress,
+                isFormatted = GetScenarioButtonCriteriaInfo(
+                    useLegacyBonusStep,
+                    criteriaStepID,
+                    i,
+                    useCurrentStep
+                )
 
             criteriaString = (criteriaString and criteriaString ~= "") and criteriaString or "Objective"
+            local criteriaDisplayText = GetCriteriaDisplayText(
+                criteriaString,
+                quantity,
+                totalQuantity,
+                quantityString,
+                isWeightedProgress,
+                isFormatted
+            )
+
+            if isWeightedProgress then
+                criteriaDisplayText = format(
+                    "%s: %d%%",
+                    criteriaDisplayText,
+                    ClampPercent(quantity)
+                )
+            end
 
             if criteriaCompleted then
-                if totalQuantity and totalQuantity > 0 then
-                    tooltip:AddLine(
-                        format("- %s: %d/%d |cff808080(%s)|r", criteriaString, quantity or 0, totalQuantity, COMPLETE),
-                        0.2, 0.9, 0.2
-                    )
-                elseif quantityString and quantityString ~= "" then
-                    tooltip:AddLine(
-                        format("- %s: %s |cff808080(%s)|r", criteriaString, quantityString, COMPLETE),
-                        0.2, 0.9, 0.2
-                    )
-                else
-                    tooltip:AddLine(
-                        format("- %s |cff808080(%s)|r", criteriaString, COMPLETE),
-                        0.2, 0.9, 0.2
-                    )
-                end
+                tooltip:AddLine(
+                    format("- %s |cff808080(%s)|r", criteriaDisplayText, COMPLETE),
+                    0.2, 0.9, 0.2
+                )
             elseif criteriaFailed then
-                if totalQuantity and totalQuantity > 0 then
-                    tooltip:AddLine(
-                        format("- %s: %d/%d |cff808080(%s)|r", criteriaString, quantity or 0, totalQuantity, FAILED),
-                        1, 0.2, 0.2
-                    )
-                elseif quantityString and quantityString ~= "" then
-                    tooltip:AddLine(
-                        format("- %s: %s |cff808080(%s)|r", criteriaString, quantityString, FAILED),
-                        1, 0.2, 0.2
-                    )
-                else
-                    tooltip:AddLine(
-                        format("- %s |cff808080(%s)|r", criteriaString, FAILED),
-                        1, 0.2, 0.2
-                    )
-                end
+                tooltip:AddLine(
+                    format("- %s |cff808080(%s)|r", criteriaDisplayText, FAILED),
+                    1, 0.2, 0.2
+                )
             else
-                if totalQuantity and totalQuantity > 0 then
-                    tooltip:AddLine(
-                        format("- %s: %d/%d", criteriaString, quantity or 0, totalQuantity),
-                        1, 1, 1
-                    )
-                elseif quantityString and quantityString ~= "" then
-                    tooltip:AddLine(
-                        format("- %s: %s", criteriaString, quantityString),
-                        1, 1, 1
-                    )
-                else
-                    tooltip:AddLine(
-                        format("- %s", criteriaString),
-                        1, 1, 1
-                    )
-                end
+                tooltip:AddLine(format("- %s", criteriaDisplayText), 1, 1, 1)
             end
         end
     end
@@ -1377,18 +1872,25 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
         tooltip:AddLine(" ")
         for i = 1, #allSpellInfo do
             local spellInfo = allSpellInfo[i]
-            if spellInfo and spellInfo.spellName then
-                tooltip:AddLine(format("Spell: %s", spellInfo.spellName), 0.8, 0.9, 1)
+            local spellName = spellInfo and (spellInfo.name or spellInfo.spellName)
+            if spellName then
+                tooltip:AddLine(format("Spell: %s", spellName), 0.8, 0.9, 1)
             end
         end
     end
 
     local blankLine = false
-    local rewardQuestID = GetScenarioRewardQuestID(stepIndex, rewardQuestIDFromStep)
+    local rewardQuestID = GetScenarioRewardQuestID(
+        stepIndex,
+        rewardQuestIDFromStep,
+        isBonusStep
+    )
 
-    if rewardQuestID then
+    if useLegacyBonusStep then
+        AddLegacyBonusRewardsToTooltip(tooltip)
+    elseif rewardQuestID then
         local rewardXP = GetQuestRewardXPCompat(rewardQuestID)
-        if rewardXP > 0 then
+        if rewardXP > 0 and not IsPlayerAtEffectiveMaxLevelCompat() then
             tooltip:AddLine(" ")
             blankLine = true
             AddTooltipRewardText(tooltip, format(BONUS_OBJECTIVE_EXPERIENCE_FORMAT, rewardXP), 1, 1, 1)
@@ -1436,8 +1938,8 @@ function mouseHandlerScenario:TitleButtonOnEnter(motion)
             end
             AddTooltipMoneyText(tooltip, rewardMoney)
         end
-    else
-        if xp and xp > 0 then
+    elseif not isBonusStep then
+        if xp and xp > 0 and not IsPlayerAtEffectiveMaxLevelCompat() then
             if not blankLine then
                 tooltip:AddLine(" ")
                 blankLine = true

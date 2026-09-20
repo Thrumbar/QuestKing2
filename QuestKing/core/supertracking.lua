@@ -41,13 +41,18 @@ local function QueueTrackerRefresh(forceBuild)
         return
     end
 
+    if type(QuestKing.RequestTrackerUpdate) == "function" then
+        QuestKing:RequestTrackerUpdate(false, "supertracking", false)
+        return
+    end
+
     if type(QuestKing.QueueTrackerUpdate) == "function" then
-        QuestKing:QueueTrackerUpdate(forceBuild, false)
+        QuestKing:QueueTrackerUpdate(false, false, "supertracking")
         return
     end
 
     if type(QuestKing.UpdateTracker) == "function" then
-        QuestKing:UpdateTracker(forceBuild, false)
+        QuestKing:UpdateTracker(false, false, "supertracking")
     end
 end
 
@@ -366,6 +371,10 @@ local function FindClosestQuestInLog(preferredQuestID)
     local bestDistanceSq = huge
     local entryCount = GetQuestLogEntryCountCompat()
 
+    if type(QuestKing.RecordPerformanceMetric) == "function" then
+        QuestKing:RecordPerformanceMetric("questLogScanCount", 1)
+    end
+
     for questLogIndex = 1, entryCount do
         local info = GetQuestLogInfoCompat(questLogIndex)
         if info and not info.isHeader and not info.isHidden then
@@ -433,7 +442,7 @@ function QuestKing:SetSuperTrackedQuestID(questID)
     return true, questID
 end
 
-function QuestKing:TrackClosestQuest()
+function QuestKing:FocusClosestQuest()
     SyncSuperTrackingCache()
 
     if not CanControlQuestSuperTrack() then
@@ -463,7 +472,7 @@ function QuestKing:OnQuestAccepted(questID)
 
     if QuestHasDistance(questID) and CanControlQuestSuperTrack() then
         pendingQuestID = nil
-        self:TrackClosestQuest()
+        self:FocusClosestQuest()
     else
         pendingQuestID = questID
     end
@@ -487,22 +496,22 @@ function QuestKing:OnPOIUpdate()
 
     if CanControlQuestSuperTrack() and QuestHasDistance(pendingQuestID) then
         pendingQuestID = nil
-        self:TrackClosestQuest()
+        self:FocusClosestQuest()
         QueueTrackerRefresh(true)
     end
 end
 
-function QuestKing:PreCheckQuestTracking()
+function QuestKing:PreCheckQuestFocus()
     SyncSuperTrackingCache()
 
     if activeSuperTrackedQuestID ~= 0 and not IsQuestInLog(activeSuperTrackedQuestID) and CanControlQuestSuperTrack() then
-        self:TrackClosestQuest()
+        self:FocusClosestQuest()
         return
     end
 
     if pendingQuestID and CanControlQuestSuperTrack() and QuestHasDistance(pendingQuestID) then
         pendingQuestID = nil
-        self:TrackClosestQuest()
+        self:FocusClosestQuest()
     end
 end
 
@@ -519,7 +528,7 @@ function QuestKing:OnQuestObjectivesCompleted(questID)
     end
 end
 
-function QuestKing:PostCheckQuestTracking()
+function QuestKing:PostCheckQuestFocus()
     if not supertrackPending then
         return
     end
@@ -528,7 +537,7 @@ function QuestKing:PostCheckQuestTracking()
     SyncSuperTrackingCache()
 
     if activeSuperTrackedQuestID ~= 0 and CanControlQuestSuperTrack() then
-        local changed = self:TrackClosestQuest()
+        local changed = self:FocusClosestQuest()
         if changed then
             QueueTrackerRefresh(true)
         end
@@ -549,7 +558,7 @@ function QuestKing:OnSuperTrackedQuestChanged(newQuestID)
         QueueTrackerRefresh(true)
     elseif pendingQuestID and CanControlQuestSuperTrack() and QuestHasDistance(pendingQuestID) then
         pendingQuestID = nil
-        self:TrackClosestQuest()
+        self:FocusClosestQuest()
         QueueTrackerRefresh(true)
     end
 end

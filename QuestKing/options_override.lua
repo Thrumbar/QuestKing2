@@ -55,9 +55,9 @@ opt.hideSupersedingObjectives = true
 opt.showAvailableCampaignSteps = true
 opt.allowDrag = true
 opt.hideWatchFrameBorder = false
--- Uses QuestKing's safer root-only Blizzard tracker suppression.
-opt.disableBlizzard = true
-opt.enablePetTrackerCompatibility = false
+-- Keep Blizzard visible until QuestKing covers every tracker module. Users can
+-- still opt into whole-tracker suppression from the advanced setting.
+opt.disableBlizzard = false
 
 -- ---------------------------------------------------------------------------
 -- Tooltip handling
@@ -150,6 +150,7 @@ opt.backdropTable = opt.backdropTable or {
     },
     _backdropColor = { 0, 0, 0, 0.50 },
     _alphaStep = 0.10,
+    _titleInsetFollowsTitleHeight = true,
 }
 
 -- ---------------------------------------------------------------------------

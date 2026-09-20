@@ -35,9 +35,11 @@ Compatibility.PetTracker = PetTrackerCompat
 
 local loaderFrame = nil
 local petTrackerWatcher = nil
-local setupAttempted = false
 local petTrackerLoaded = false
 local petTrackerEnabled = false
+local autoCompleteEventQuests = Compat._autoCompleteEventQuests or {}
+
+Compat._autoCompleteEventQuests = autoCompleteEventQuests
 
 local function SafeCall(func, ...)
     if type(func) ~= "function" then
@@ -456,12 +458,204 @@ function Compat.GetQuestInfo(questLogIndex)
     return nil
 end
 
+function Compat.GetAutoQuestPopupType(questID)
+    questID = SafeNumber(questID, nil)
+    if not questID or questID <= 0 then
+        return nil
+    end
+
+    if type(_G.GetNumAutoQuestPopUps) ~= "function"
+        or type(_G.GetAutoQuestPopUp) ~= "function" then
+        return nil
+    end
+
+    local ok, count = SafeCall(_G.GetNumAutoQuestPopUps)
+    count = ok and SafeNumber(count, 0) or 0
+    if not count or count <= 0 then
+        return nil
+    end
+
+    local matchedType = nil
+
+    for index = 1, count do
+        local popupOK, popupQuestID, popupType = SafeCall(_G.GetAutoQuestPopUp, index)
+        popupQuestID = popupOK and SafeNumber(popupQuestID, nil) or nil
+
+        if popupQuestID == questID and type(popupType) == "string" then
+            if popupType == "COMPLETE" then
+                return popupType
+            end
+
+            matchedType = matchedType or popupType
+        end
+    end
+
+    return matchedType
+end
+
+function Compat.MarkQuestAutoComplete(questID)
+    questID = SafeNumber(questID, nil)
+    if not questID or questID <= 0 then
+        return false
+    end
+
+    autoCompleteEventQuests[questID] = true
+    return true
+end
+
+function Compat.ClearQuestAutoComplete(questID)
+    questID = SafeNumber(questID, nil)
+    if not questID or questID <= 0 then
+        return false
+    end
+
+    autoCompleteEventQuests[questID] = nil
+    return true
+end
+
+function Compat.IsQuestAutoCompleteEventMarked(questID)
+    questID = SafeNumber(questID, nil)
+    return questID and autoCompleteEventQuests[questID] == true or false
+end
+
+function Compat.IsQuestAutoComplete(questID, questLogIndex)
+    questID = SafeNumber(questID, nil)
+    questLogIndex = SafeNumber(questLogIndex, nil)
+
+    if questID and autoCompleteEventQuests[questID] then
+        return true
+    end
+
+    if (not questLogIndex or questLogIndex <= 0) and questID then
+        questLogIndex = Compat.GetQuestLogIndexByQuestID(questID)
+    end
+
+    if questLogIndex and questLogIndex > 0 then
+        local info = Compat.GetQuestInfo(questLogIndex)
+        if type(info) == "table" and SafeBoolean(info.isAutoComplete, false) then
+            return true
+        end
+
+        if type(_G.GetQuestLogIsAutoComplete) == "function" then
+            local ok, isAutoComplete = SafeCall(_G.GetQuestLogIsAutoComplete, questLogIndex)
+            if ok and SafeBoolean(isAutoComplete, false) then
+                return true
+            end
+        end
+    end
+
+    if questID and C_QuestLog and type(C_QuestLog.IsAutoComplete) == "function" then
+        local ok, isAutoComplete = SafeCall(C_QuestLog.IsAutoComplete, questID)
+        if ok and SafeBoolean(isAutoComplete, false) then
+            return true
+        end
+    end
+
+    return false
+end
+
+function Compat.IsQuestComplete(questID, questLogIndex)
+    questID = SafeNumber(questID, nil)
+    questLogIndex = SafeNumber(questLogIndex, nil)
+
+    if questID and C_QuestLog and type(C_QuestLog.IsComplete) == "function" then
+        local ok, isComplete = SafeCall(C_QuestLog.IsComplete, questID)
+        if ok and SafeBoolean(isComplete, false) then
+            return true
+        end
+    end
+
+    if (not questLogIndex or questLogIndex <= 0) and questID then
+        questLogIndex = Compat.GetQuestLogIndexByQuestID(questID)
+    end
+
+    if questLogIndex and questLogIndex > 0 then
+        if type(_G.GetQuestLogIsComplete) == "function" then
+            local ok, isComplete = SafeCall(_G.GetQuestLogIsComplete, questLogIndex)
+            if ok and (isComplete == true or isComplete == 1) then
+                return true
+            end
+        end
+
+        local info = Compat.GetQuestInfo(questLogIndex)
+        if type(info) == "table" and (info.isComplete == true or info.isComplete == 1) then
+            return true
+        end
+    end
+
+    return false
+end
+
+function Compat.CanCompleteQuestRemotely(questID, questLogIndex, isComplete)
+    questID = SafeNumber(questID, nil)
+    questLogIndex = SafeNumber(questLogIndex, nil)
+
+    if not questID or questID <= 0 then
+        return false
+    end
+
+    if Compat.GetAutoQuestPopupType(questID) == "COMPLETE" then
+        return true
+    end
+
+    if autoCompleteEventQuests[questID] then
+        return true
+    end
+
+    if not Compat.IsQuestAutoComplete(questID, questLogIndex) then
+        return false
+    end
+
+    if isComplete ~= nil and not IsSecretValue(isComplete) then
+        return isComplete == true or isComplete == 1
+    end
+
+    return Compat.IsQuestComplete(questID, questLogIndex)
+end
+
+function Compat.ShowQuestComplete(questID, questLogIndex)
+    if type(_G.ShowQuestComplete) ~= "function" then
+        return false
+    end
+
+    questID = SafeNumber(questID, nil)
+    questLogIndex = SafeNumber(questLogIndex, nil)
+
+    if (not questLogIndex or questLogIndex <= 0) and questID then
+        questLogIndex = Compat.GetQuestLogIndexByQuestID(questID)
+    end
+
+    if questID and C_QuestLog and type(C_QuestLog.SetSelectedQuest) == "function" then
+        SafeCall(C_QuestLog.SetSelectedQuest, questID)
+    end
+
+    if questLogIndex and type(_G.SelectQuestLogEntry) == "function" then
+        SafeCall(_G.SelectQuestLogEntry, questLogIndex)
+    end
+
+    if GetProjectFlags().isMainline then
+        if not questID or questID <= 0 then
+            return false
+        end
+
+        local ok = SafeCall(_G.ShowQuestComplete, questID)
+        return ok and true or false
+    end
+
+    if not questLogIndex or questLogIndex <= 0 then
+        return false
+    end
+
+    local ok = SafeCall(_G.ShowQuestComplete, questLogIndex)
+    return ok and true or false
+end
+
 function Compat.IsQuestWatched(questID, questLogIndex)
     questID = SafeNumber(questID, nil)
-    if questID and questID > 0 and C_QuestLog and C_QuestLog.IsQuestWatched then
-        local ok, watched = SafeCall(C_QuestLog.IsQuestWatched, questID)
+    if questID and questID > 0 and C_QuestLog and C_QuestLog.GetQuestWatchType then
+        local ok, watchType = SafeCall(C_QuestLog.GetQuestWatchType, questID)
         if ok then
-            return watched and true or false
+            return watchType ~= nil
         end
     end
 
@@ -476,33 +670,10 @@ function Compat.IsQuestWatched(questID, questLogIndex)
     return false
 end
 
-local function GetQuestWatchTypeValue(kind)
-    if Enum and Enum.QuestWatchType then
-        local value = Enum.QuestWatchType[kind or "Manual"]
-        if type(value) == "number" then
-            return value
-        end
-    end
-
-    return nil
-end
-
-function Compat.AddQuestWatch(questID, questLogIndex, watchType)
+function Compat.AddQuestWatch(questID, questLogIndex)
     questID = SafeNumber(questID, nil)
 
     if questID and questID > 0 and C_QuestLog and C_QuestLog.AddQuestWatch then
-        local normalizedWatchType = watchType
-        if type(normalizedWatchType) == "string" then
-            normalizedWatchType = GetQuestWatchTypeValue(normalizedWatchType)
-        end
-
-        if normalizedWatchType ~= nil then
-            local ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID, normalizedWatchType)
-            if ok then
-                return wasWatched ~= false
-            end
-        end
-
         local ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID)
         if ok then
             return wasWatched ~= false
@@ -655,59 +826,57 @@ function PetTrackerCompat.IsEnabled()
 end
 
 function PetTrackerCompat.SetupPetTrackerCompatibility()
-    if setupAttempted then
-        return petTrackerEnabled
-    end
-
-    setupAttempted = true
     petTrackerLoaded = AddOnCompat.IsAddOnLoaded("PetTracker")
+    petTrackerEnabled = petTrackerLoaded
 
-    if not petTrackerLoaded then
-        petTrackerEnabled = false
-        return false
+    -- The dedicated adapter creates its own PetTracker.Tracker instance under
+    -- a QuestKing-owned section. QuestKing never reparents, restacks, hides,
+    -- or mutates PetTracker's Blizzard Objective Tracker module. PetTracker's
+    -- own Zone Tracker option is the single visibility control; the obsolete
+    -- QuestKing compatibility value is intentionally ignored.
+    local adapter = QuestKing and QuestKing.PetTrackerAdapter
+    if type(adapter) == "table" and type(adapter.Refresh) == "function" then
+        pcall(adapter.Refresh, adapter)
     end
-
-    if not opt.enablePetTrackerCompatibility then
-        petTrackerEnabled = false
-        return false
-    end
-
-    -- Intentionally conservative.
-    -- QuestKing does not reparent or restack PetTracker frames here because
-    -- that approach is a taint risk on modern ObjectiveTracker/Edit Mode clients.
-    -- This compatibility layer only records state and offers a future-safe hook point.
-    petTrackerEnabled = true
 
     if QuestKing and type(QuestKing.RequestBlizzardTrackerVisualRefresh) == "function" then
         QuestKing:RequestBlizzardTrackerVisualRefresh()
     end
 
-    return true
+    return petTrackerEnabled
+end
+
+function PetTrackerCompat.RefreshPetTrackerCompatibility()
+    return PetTrackerCompat.SetupPetTrackerCompatibility()
 end
 
 local function TrySetupPetTrackerCompatibility()
-    PetTrackerCompat.SetupPetTrackerCompatibility()
+    PetTrackerCompat.RefreshPetTrackerCompatibility()
 end
 
-if AddOnCompat.IsAddOnLoaded("PetTracker") then
-    petTrackerLoaded = true
-    TrySetupPetTrackerCompatibility()
-else
-    loaderFrame = CreateFrame("Frame")
-    loaderFrame:RegisterEvent("ADDON_LOADED")
-    loaderFrame:RegisterEvent("PLAYER_LOGIN")
-    loaderFrame:SetScript("OnEvent", function(_, event, arg1)
-        if event == "ADDON_LOADED" and arg1 == "PetTracker" then
-            petTrackerLoaded = true
-            TrySetupPetTrackerCompatibility()
-        elseif event == "PLAYER_LOGIN" then
-            petTrackerLoaded = AddOnCompat.IsAddOnLoaded("PetTracker")
-            if petTrackerLoaded then
-                TrySetupPetTrackerCompatibility()
-            end
+loaderFrame = CreateFrame("Frame")
+loaderFrame:RegisterEvent("ADDON_LOADED")
+loaderFrame:RegisterEvent("PLAYER_LOGIN")
+loaderFrame:SetScript("OnEvent", function(self, event, arg1)
+    if event == "ADDON_LOADED" then
+        if arg1 ~= "PetTracker" then
+            return
         end
-    end)
-end
+
+        petTrackerLoaded = true
+        TrySetupPetTrackerCompatibility()
+        self:UnregisterEvent("ADDON_LOADED")
+        return
+    end
+
+    petTrackerLoaded = AddOnCompat.IsAddOnLoaded("PetTracker")
+    TrySetupPetTrackerCompatibility()
+    self:UnregisterEvent("PLAYER_LOGIN")
+
+    if petTrackerLoaded then
+        self:UnregisterEvent("ADDON_LOADED")
+    end
+end)
 
 petTrackerWatcher = loaderFrame
 PetTrackerCompat.LoaderFrame = petTrackerWatcher

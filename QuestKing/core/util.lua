@@ -62,9 +62,16 @@ local TOOLTIP_BACKDROP = {
     },
 }
 
+local MAINLINE_TOOLTIP_WIDTH = 320
+local MAINLINE_TOOLTIP_PADDING = 10
+local MAINLINE_TOOLTIP_LINE_SPACING = 2
+local MAINLINE_TOOLTIP_MIN_LINE_HEIGHT = 12
+local MAINLINE_TOOLTIP_ICON_SIZE = 14
+
 local trackerVisualHooksInstalled = false
 local trackerVisualEventsRegistered = false
 local trackerVisualRefreshQueued = false
+local trackerVisualRecoveryScheduled = false
 local trackerVisualStateFrame = CreateFrame("Frame")
 
 local function GetOptions()
@@ -154,6 +161,52 @@ QuestKing.IsCataclysmClassic = IS_CATACLYSM_CLASSIC
 QuestKing.IsMistsClassic = IS_MISTS_CLASSIC
 QuestKing.IsClassicFamily = IS_CLASSIC_FAMILY
 
+local VALID_FONT_LAYERS = {
+    BACKGROUND = true,
+    BORDER = true,
+    ARTWORK = true,
+    OVERLAY = true,
+    HIGHLIGHT = true,
+}
+
+function QuestKing.GetFontLayer()
+    local options = GetOptions()
+    local layer = options and options.fontLayer
+    if type(layer) == "string" and VALID_FONT_LAYERS[layer] then
+        return layer
+    end
+
+    return "OVERLAY"
+end
+
+function QuestKing.ApplyFontLayer(fontString)
+    if not fontString or type(fontString.SetDrawLayer) ~= "function" then
+        return false
+    end
+
+    fontString:SetDrawLayer(QuestKing.GetFontLayer())
+    return true
+end
+
+-- Applies the documented three-state completed-objective policy consistently:
+--   false    = never show completed objective rows
+--   true     = show them only while their quest/scenario step is incomplete
+--   "always" = show them even after the quest/scenario step is complete
+function QuestKing.ShouldShowCompletedObjective(containerComplete)
+    local options = GetOptions()
+    local mode = options and options.showCompletedObjectives
+
+    if mode == "always" then
+        return true
+    end
+
+    if containerComplete then
+        return false
+    end
+
+    return mode == true
+end
+
 
 --[[
     Retail / Midnight tooltip taint note
@@ -168,9 +221,12 @@ QuestKing.IsClassicFamily = IS_CLASSIC_FAMILY
     EmbeddedItemTooltip_UpdateSize and make Blizzard's own width/height math
     fail when GetWidth/GetHeight returns secret values.
 
-    The safe fix is isolation: QuestKing only sanitizes values it owns and only
-    styles its own private tooltip. Blizzard's GameTooltip, map POI tooltips,
-    widget setup, and embedded reward tooltip sizing are left to Blizzard code.
+    The safe fix is complete ownership isolation. On Mainline, QuestKing uses
+    an addon-owned Frame and FontStrings rather than GameTooltipTemplate. This
+    prevents QuestKing hover and cleanup work from entering Blizzard's shared
+    GameTooltip, comparison-tooltip, embedded-tooltip, or UIWidget state.
+    Classic-family clients retain GameTooltipTemplate because they require the
+    legacy tooltip population methods and do not expose secret values.
 ]]
 local function InstallTextWithStateWidgetGuard()
     return false
@@ -257,7 +313,9 @@ local function SafeGetQuestInfoByIndex(questLogIndex)
                 isHidden = SafeBoolean(info.isHidden, false),
                 isTask = SafeBoolean(info.isTask, false),
                 campaignID = SafeNumber(info.campaignID, 0) or 0,
-                isCampaign = SafeBoolean(info.isCampaign, false),
+                isCampaign = info.isCampaign ~= nil
+                    and SafeBoolean(info.isCampaign, false)
+                    or nil,
                 isOnMap = SafeBoolean(info.isOnMap, false),
                 startEvent = SafeBoolean(info.startEvent, false),
                 isStory = SafeBoolean(info.isStory, false),
@@ -284,7 +342,7 @@ local function SafeGetQuestInfoByIndex(questLogIndex)
                 isHidden = false,
                 isTask = false,
                 campaignID = 0,
-                isCampaign = false,
+                isCampaign = nil,
                 isOnMap = false,
                 startEvent = SafeBoolean(startEvent, false),
                 isStory = false,
@@ -299,15 +357,27 @@ local function SafeGetQuestInfoByIndex(questLogIndex)
 end
 
 local function SafeIsAutoComplete(questLogIndex, questID)
-    if type(questID) == "number" and CQL and CQL.IsAutoComplete then
-        local ok, isAutoComplete = pcall(CQL.IsAutoComplete, questID)
-        if ok then
-            return isAutoComplete and true or false
+    local compatibility = QuestKing.Compatibility and QuestKing.Compatibility.Common
+    if compatibility and type(compatibility.IsQuestAutoComplete) == "function" then
+        return compatibility.IsQuestAutoComplete(questID, questLogIndex) and true or false
+    end
+
+    if type(questLogIndex) == "number" and CQL and CQL.GetInfo then
+        local ok, info = pcall(CQL.GetInfo, questLogIndex)
+        if ok and type(info) == "table" and info.isAutoComplete then
+            return true
         end
     end
 
     if type(questLogIndex) == "number" and type(_G.GetQuestLogIsAutoComplete) == "function" then
         local ok, isAutoComplete = pcall(_G.GetQuestLogIsAutoComplete, questLogIndex)
+        if ok then
+            return isAutoComplete and true or false
+        end
+    end
+
+    if type(questID) == "number" and CQL and CQL.IsAutoComplete then
+        local ok, isAutoComplete = pcall(CQL.IsAutoComplete, questID)
         if ok then
             return isAutoComplete and true or false
         end
@@ -808,7 +878,15 @@ local function InstallTrackerVisualHooks()
     trackerVisualHooksInstalled = trackerVisualHooksInstalled or hookedAnything
 end
 
-local function OnTrackerVisualStateEvent()
+local function OnTrackerVisualStateEvent(_, event, loadedAddonName)
+    if event == "ADDON_LOADED"
+        and loadedAddonName ~= addonName
+        and loadedAddonName ~= "Blizzard_ObjectiveTracker"
+        and loadedAddonName ~= "Blizzard_QuestWatch"
+        and loadedAddonName ~= "Blizzard_AchievementUI" then
+        return
+    end
+
     InstallTrackerVisualHooks()
     RequestBlizzardTrackerVisualRefresh()
 end
@@ -845,7 +923,8 @@ function QuestKing:DisableBlizzard()
     InstallTrackerVisualHooks()
     ScheduleBlizzardTrackerVisualRefresh(0)
 
-    if C_Timer and C_Timer.After then
+    if not trackerVisualRecoveryScheduled and C_Timer and C_Timer.After then
+        trackerVisualRecoveryScheduled = true
         C_Timer.After(0.5, OnTrackerVisualStateEvent)
         C_Timer.After(2, OnTrackerVisualStateEvent)
     end
@@ -917,8 +996,420 @@ function QuestKing.GetTimeStringFromSecondsShort(timeAmount)
     return format("%d:%.2d", minutes, seconds)
 end
 
+local function HasMainlineTooltipFont(fontString)
+    if not fontString or type(fontString.GetFont) ~= "function" then
+        return false
+    end
+
+    local ok, fontFile, fontHeight = pcall(fontString.GetFont, fontString)
+    return ok
+        and type(fontFile) == "string"
+        and fontFile ~= ""
+        and IsSafeNumber(fontHeight)
+        and fontHeight > 0
+end
+
+local function SetMainlineTooltipFontStringFont(fontString, isHeader)
+    if not fontString then
+        return false
+    end
+
+    local fontObject
+    if isHeader then
+        fontObject = _G.GameTooltipHeaderText or _G.GameFontNormal
+    else
+        fontObject = _G.GameTooltipText or _G.GameFontHighlightSmall
+    end
+
+    if fontObject and type(fontString.SetFontObject) == "function" then
+        pcall(fontString.SetFontObject, fontString, fontObject)
+        if HasMainlineTooltipFont(fontString) then
+            return true
+        end
+    end
+
+    local fallbackFont
+    local fallbackSize
+    if isHeader then
+        fallbackFont = "Interface\\AddOns\\QuestKing\\fonts\\SourceSansPro-Semibold.ttf"
+        fallbackSize = 13
+    else
+        fallbackFont = "Interface\\AddOns\\QuestKing\\fonts\\SourceSansPro-Regular.ttf"
+        fallbackSize = 12
+    end
+
+    if type(fontString.SetFont) == "function" then
+        pcall(fontString.SetFont, fontString, fallbackFont, fallbackSize)
+    end
+
+    return HasMainlineTooltipFont(fontString)
+end
+
+local function SetMainlineTooltipLineFont(line, isHeader)
+    if not line or not line.left or not line.right then
+        return false
+    end
+
+    local leftReady = SetMainlineTooltipFontStringFont(line.left, isHeader)
+    local rightReady = SetMainlineTooltipFontStringFont(line.right, isHeader)
+    return leftReady and rightReady
+end
+
+local function AcquireMainlineTooltipLine(tooltip, isHeader)
+    local index = tooltip.lineCount + 1
+    local line = tooltip.lines[index]
+
+    if not line then
+        line = {
+            left = tooltip:CreateFontString(nil, "ARTWORK"),
+            right = tooltip:CreateFontString(nil, "ARTWORK"),
+            icon = tooltip:CreateTexture(nil, "ARTWORK"),
+        }
+
+        line.left:SetJustifyH("LEFT")
+        line.left:SetJustifyV("TOP")
+        line.right:SetJustifyH("RIGHT")
+        line.right:SetJustifyV("TOP")
+        line.icon:SetSize(MAINLINE_TOOLTIP_ICON_SIZE, MAINLINE_TOOLTIP_ICON_SIZE)
+        line.icon:Hide()
+
+        tooltip.lines[index] = line
+    end
+
+    if not SetMainlineTooltipLineFont(line, isHeader) then
+        line.left:Hide()
+        line.right:Hide()
+        line.icon:Hide()
+        return nil
+    end
+
+    tooltip.lineCount = index
+    line.left:Show()
+    line.right:Hide()
+    line.icon:Hide()
+    line.left:ClearAllPoints()
+    line.right:ClearAllPoints()
+    line.icon:ClearAllPoints()
+    line.left:SetText("")
+    line.right:SetText("")
+    line.left:SetWidth(MAINLINE_TOOLTIP_WIDTH - (MAINLINE_TOOLTIP_PADDING * 2))
+    line.right:SetWidth(0)
+    line.hasRightText = false
+    line.hasIcon = false
+    line.wrapText = true
+    line.isHeader = isHeader and true or false
+    line.height = MAINLINE_TOOLTIP_MIN_LINE_HEIGHT
+
+    return line
+end
+
+local function GetMainlineTooltipFontStringHeight(fontString)
+    if not fontString or not fontString.GetStringHeight then
+        return MAINLINE_TOOLTIP_MIN_LINE_HEIGHT
+    end
+
+    local ok, height = pcall(fontString.GetStringHeight, fontString)
+    height = ok and SafeNumber(height, nil) or nil
+    if height == nil or height < MAINLINE_TOOLTIP_MIN_LINE_HEIGHT then
+        return MAINLINE_TOOLTIP_MIN_LINE_HEIGHT
+    end
+
+    return height
+end
+
+local function LayoutMainlineTooltip(tooltip)
+    if not tooltip or not tooltip.isQuestKingTextTooltip then
+        return
+    end
+
+    local contentHeight = 0
+    local contentWidth = MAINLINE_TOOLTIP_WIDTH - (MAINLINE_TOOLTIP_PADDING * 2)
+
+    for index = 1, tooltip.lineCount do
+        local line = tooltip.lines[index]
+        local leftOffset = line.hasIcon and (MAINLINE_TOOLTIP_ICON_SIZE + 4) or 0
+        local lineTopOffset = MAINLINE_TOOLTIP_PADDING + contentHeight
+
+        line.left:ClearAllPoints()
+        line.right:ClearAllPoints()
+        line.icon:ClearAllPoints()
+
+        line.left:SetPoint(
+            "TOPLEFT",
+            tooltip,
+            "TOPLEFT",
+            MAINLINE_TOOLTIP_PADDING + leftOffset,
+            -lineTopOffset
+        )
+
+        if line.hasRightText then
+            line.left:SetWidth(190 - leftOffset)
+            line.right:SetWidth(contentWidth - 198)
+            line.right:SetPoint(
+                "TOPRIGHT",
+                tooltip,
+                "TOPRIGHT",
+                -MAINLINE_TOOLTIP_PADDING,
+                -lineTopOffset
+            )
+        else
+            line.left:SetWidth(contentWidth - leftOffset)
+            line.right:SetWidth(0)
+        end
+
+        if line.hasIcon then
+            line.icon:SetPoint("TOPLEFT", line.left, "TOPLEFT", -leftOffset, 0)
+            line.icon:Show()
+        else
+            line.icon:Hide()
+        end
+
+        local lineHeight = GetMainlineTooltipFontStringHeight(line.left)
+        if line.hasRightText then
+            local rightHeight = GetMainlineTooltipFontStringHeight(line.right)
+            if rightHeight > lineHeight then
+                lineHeight = rightHeight
+            end
+        end
+        if line.hasIcon and MAINLINE_TOOLTIP_ICON_SIZE > lineHeight then
+            lineHeight = MAINLINE_TOOLTIP_ICON_SIZE
+        end
+
+        line.height = lineHeight
+        contentHeight = contentHeight + lineHeight
+        if index < tooltip.lineCount then
+            contentHeight = contentHeight + MAINLINE_TOOLTIP_LINE_SPACING
+        end
+    end
+
+    if tooltip.lineCount == 0 then
+        contentHeight = MAINLINE_TOOLTIP_MIN_LINE_HEIGHT
+    end
+
+    tooltip:SetWidth(MAINLINE_TOOLTIP_WIDTH)
+    tooltip:SetHeight(contentHeight + (MAINLINE_TOOLTIP_PADDING * 2))
+end
+
+local function ClearMainlineTooltipLines(tooltip)
+    if not tooltip or not tooltip.lines then
+        return
+    end
+
+    for index = 1, #tooltip.lines do
+        local line = tooltip.lines[index]
+        if SetMainlineTooltipLineFont(line, false) then
+            line.left:SetText("")
+            line.right:SetText("")
+        end
+        line.left:Hide()
+        line.right:Hide()
+        line.icon:SetTexture(nil)
+        line.icon:Hide()
+        line.hasRightText = false
+        line.hasIcon = false
+    end
+
+    tooltip.lineCount = 0
+    LayoutMainlineTooltip(tooltip)
+end
+
+local function AddMainlineTooltipLine(tooltip, text, r, g, b, wrapText, isHeader)
+    text = SafeString(text, nil)
+    if text == nil then
+        return false
+    end
+
+    local line = AcquireMainlineTooltipLine(tooltip, isHeader)
+    if not line then
+        return false
+    end
+
+    line.wrapText = wrapText ~= false
+    line.left:SetText(text)
+    line.left:SetTextColor(
+        SafeNumber(r, 1) or 1,
+        SafeNumber(g, 1) or 1,
+        SafeNumber(b, 1) or 1
+    )
+    line.left:SetWordWrap(line.wrapText)
+    line.right:SetWordWrap(line.wrapText)
+    LayoutMainlineTooltip(tooltip)
+    return true
+end
+
+local function AddMainlineTooltipDoubleLine(
+    tooltip,
+    leftText,
+    rightText,
+    leftR,
+    leftG,
+    leftB,
+    rightR,
+    rightG,
+    rightB,
+    wrapText
+)
+    leftText = SafeString(leftText, nil)
+    rightText = SafeString(rightText, nil)
+    if leftText == nil and rightText == nil then
+        return false
+    end
+
+    local line = AcquireMainlineTooltipLine(tooltip, false)
+    if not line then
+        return false
+    end
+
+    line.hasRightText = true
+    line.wrapText = wrapText ~= false
+    line.left:SetText(leftText or "")
+    line.right:SetText(rightText or "")
+    line.left:SetTextColor(
+        SafeNumber(leftR, 1) or 1,
+        SafeNumber(leftG, 1) or 1,
+        SafeNumber(leftB, 1) or 1
+    )
+    line.right:SetTextColor(
+        SafeNumber(rightR, 1) or 1,
+        SafeNumber(rightG, 1) or 1,
+        SafeNumber(rightB, 1) or 1
+    )
+    line.left:SetWordWrap(line.wrapText)
+    line.right:SetWordWrap(line.wrapText)
+    line.right:Show()
+    LayoutMainlineTooltip(tooltip)
+    return true
+end
+
+local function AddMainlineTooltipTexture(tooltip, texture)
+    if texture == nil or IsSecretValue(texture) then
+        return false
+    end
+
+    if type(texture) ~= "string" and type(texture) ~= "number" then
+        return false
+    end
+
+    local line = tooltip.lines and tooltip.lines[tooltip.lineCount]
+    if not line then
+        return false
+    end
+
+    local ok = pcall(line.icon.SetTexture, line.icon, texture)
+    if not ok then
+        return false
+    end
+
+    line.hasIcon = true
+    LayoutMainlineTooltip(tooltip)
+    return true
+end
+
+local function AnchorMainlineTooltip(tooltip, owner, anchor)
+    if not tooltip or not owner then
+        return
+    end
+
+    anchor = SafeString(anchor, "ANCHOR_RIGHT") or "ANCHOR_RIGHT"
+    tooltip:ClearAllPoints()
+
+    if anchor == "ANCHOR_LEFT" then
+        tooltip:SetPoint("RIGHT", owner, "LEFT", -8, 0)
+    elseif anchor == "ANCHOR_TOP" then
+        tooltip:SetPoint("BOTTOM", owner, "TOP", 0, 8)
+    elseif anchor == "ANCHOR_BOTTOM" then
+        tooltip:SetPoint("TOP", owner, "BOTTOM", 0, -8)
+    elseif anchor == "ANCHOR_CURSOR" and type(_G.GetCursorPosition) == "function" then
+        local ok, cursorX, cursorY = pcall(_G.GetCursorPosition)
+        cursorX = ok and SafeNumber(cursorX, nil) or nil
+        cursorY = ok and SafeNumber(cursorY, nil) or nil
+
+        local parentScale = 1
+        if UIParent and UIParent.GetEffectiveScale then
+            local scaleOk, scale = pcall(UIParent.GetEffectiveScale, UIParent)
+            parentScale = scaleOk and SafeNumber(scale, 1) or 1
+        end
+        if parentScale <= 0 then
+            parentScale = 1
+        end
+
+        if cursorX ~= nil and cursorY ~= nil then
+            tooltip:SetPoint(
+                "BOTTOMLEFT",
+                UIParent,
+                "BOTTOMLEFT",
+                (cursorX / parentScale) + 16,
+                (cursorY / parentScale) - 8
+            )
+        else
+            tooltip:SetPoint("LEFT", owner, "RIGHT", 8, 0)
+        end
+    else
+        tooltip:SetPoint("LEFT", owner, "RIGHT", 8, 0)
+    end
+end
+
+local function CreateMainlineTooltip()
+    local tooltip = CreateFrame("Frame", nil, UIParent)
+    tooltip.isQuestKingTextTooltip = true
+    tooltip.lines = {}
+    tooltip.lineCount = 0
+    tooltip:SetFrameStrata("TOOLTIP")
+    tooltip:SetClampedToScreen(true)
+    tooltip:SetWidth(MAINLINE_TOOLTIP_WIDTH)
+
+    tooltip.background = tooltip:CreateTexture(nil, "BACKGROUND")
+    tooltip.background:SetAllPoints(tooltip)
+    tooltip.background:SetColorTexture(0, 0, 0, 0.95)
+
+    tooltip.borderTop = tooltip:CreateTexture(nil, "BORDER")
+    tooltip.borderTop:SetPoint("TOPLEFT", tooltip, "TOPLEFT", 0, 0)
+    tooltip.borderTop:SetPoint("TOPRIGHT", tooltip, "TOPRIGHT", 0, 0)
+    tooltip.borderTop:SetHeight(1)
+    tooltip.borderTop:SetColorTexture(0.35, 0.35, 0.35, 1)
+
+    tooltip.borderBottom = tooltip:CreateTexture(nil, "BORDER")
+    tooltip.borderBottom:SetPoint("BOTTOMLEFT", tooltip, "BOTTOMLEFT", 0, 0)
+    tooltip.borderBottom:SetPoint("BOTTOMRIGHT", tooltip, "BOTTOMRIGHT", 0, 0)
+    tooltip.borderBottom:SetHeight(1)
+    tooltip.borderBottom:SetColorTexture(0.35, 0.35, 0.35, 1)
+
+    tooltip.borderLeft = tooltip:CreateTexture(nil, "BORDER")
+    tooltip.borderLeft:SetPoint("TOPLEFT", tooltip, "TOPLEFT", 0, 0)
+    tooltip.borderLeft:SetPoint("BOTTOMLEFT", tooltip, "BOTTOMLEFT", 0, 0)
+    tooltip.borderLeft:SetWidth(1)
+    tooltip.borderLeft:SetColorTexture(0.35, 0.35, 0.35, 1)
+
+    tooltip.borderRight = tooltip:CreateTexture(nil, "BORDER")
+    tooltip.borderRight:SetPoint("TOPRIGHT", tooltip, "TOPRIGHT", 0, 0)
+    tooltip.borderRight:SetPoint("BOTTOMRIGHT", tooltip, "BOTTOMRIGHT", 0, 0)
+    tooltip.borderRight:SetWidth(1)
+    tooltip.borderRight:SetColorTexture(0.35, 0.35, 0.35, 1)
+
+    tooltip.ClearLines = ClearMainlineTooltipLines
+    tooltip.AddLine = AddMainlineTooltipLine
+    tooltip.AddDoubleLine = AddMainlineTooltipDoubleLine
+    tooltip.AddTexture = AddMainlineTooltipTexture
+    tooltip.SetText = function(self, text, r, g, b)
+        ClearMainlineTooltipLines(self)
+        return AddMainlineTooltipLine(self, text, r, g, b, true, true)
+    end
+
+    ClearMainlineTooltipLines(tooltip)
+    tooltip:Hide()
+    return tooltip
+end
+
 local function ApplyTooltipVisualStyle(tooltip)
     if not tooltip then
+        return
+    end
+
+    if tooltip.isQuestKingTextTooltip then
+        if tooltip.background then
+            tooltip.background:SetColorTexture(0, 0, 0, 0.95)
+            tooltip.background:Show()
+        end
         return
     end
 
@@ -1088,6 +1579,14 @@ local function ResetPrivateTooltipState(tooltip)
         tooltip:Hide()
     end
 
+    if tooltip.isQuestKingTextTooltip then
+        ClearMainlineTooltipLines(tooltip)
+        tooltip:ClearAllPoints()
+        tooltip:SetScale(1)
+        ApplyTooltipVisualStyle(tooltip)
+        return
+    end
+
     ClearTooltipBlizzardState(tooltip)
 
     if tooltip.ClearLines then
@@ -1107,8 +1606,211 @@ local function ResetPrivateTooltipState(tooltip)
     ApplyTooltipVisualStyle(tooltip)
 end
 
+local function GetTooltipLineColor(color, defaultR, defaultG, defaultB)
+    if color == nil or IsSecretValue(color) then
+        return defaultR, defaultG, defaultB
+    end
+
+    local ok, r, g, b = pcall(function()
+        if type(color.GetRGB) == "function" then
+            return color:GetRGB()
+        end
+
+        return color.r, color.g, color.b
+    end)
+
+    if not ok then
+        return defaultR, defaultG, defaultB
+    end
+
+    r = SafeNumber(r, defaultR)
+    g = SafeNumber(g, defaultG)
+    b = SafeNumber(b, defaultB)
+
+    return r, g, b
+end
+
+local function AddPrivateTooltipDataLine(tooltip, lineData)
+    if not tooltip or type(lineData) ~= "table" or IsSecretValue(lineData) then
+        return false
+    end
+
+    local leftText = SafeString(lineData.leftText, nil)
+    local rightText = SafeString(lineData.rightText, nil)
+    local wrapText = SafeBoolean(lineData.wrapText, true)
+
+    if leftText == nil and rightText == nil then
+        local lineType = SafeNumber(lineData.type, nil)
+        local blankLineType = Enum
+            and Enum.TooltipDataLineType
+            and Enum.TooltipDataLineType.Blank
+            or nil
+
+        if blankLineType == nil or lineType ~= blankLineType then
+            return false
+        end
+
+        leftText = " "
+    end
+
+    leftText = leftText or ""
+
+    local leftR, leftG, leftB = GetTooltipLineColor(
+        lineData.leftColor,
+        1,
+        1,
+        1
+    )
+
+    if rightText ~= nil and type(tooltip.AddDoubleLine) == "function" then
+        local rightR, rightG, rightB = GetTooltipLineColor(
+            lineData.rightColor,
+            1,
+            1,
+            1
+        )
+        local ok, added = pcall(
+            tooltip.AddDoubleLine,
+            tooltip,
+            leftText,
+            rightText,
+            leftR,
+            leftG,
+            leftB,
+            rightR,
+            rightG,
+            rightB,
+            wrapText
+        )
+        return ok and added == true
+    end
+
+    if type(tooltip.AddLine) ~= "function" then
+        return false
+    end
+
+    local ok, added = pcall(
+        tooltip.AddLine,
+        tooltip,
+        leftText,
+        leftR,
+        leftG,
+        leftB,
+        wrapText
+    )
+    return ok and added == true
+end
+
+local function PopulatePrivateTooltipFromData(tooltip, tooltipData)
+    if not IS_MAINLINE
+        or not tooltip
+        or type(tooltipData) ~= "table"
+        or IsSecretValue(tooltipData) then
+        return false
+    end
+
+    local lines = tooltipData.lines
+    if type(lines) ~= "table" or IsSecretValue(lines) then
+        return false
+    end
+
+    local countOk, lineCount = pcall(function()
+        return #lines
+    end)
+    lineCount = countOk and SafeNumber(lineCount, nil) or nil
+    if lineCount == nil or lineCount < 1 then
+        return false
+    end
+
+    local addedLine = false
+    for index = 1, lineCount do
+        local ok, added = pcall(function()
+            return AddPrivateTooltipDataLine(tooltip, lines[index])
+        end)
+        if ok and added then
+            addedLine = true
+        end
+    end
+
+    return addedLine
+end
+
+local function GetMainlineTooltipData(getterName, ...)
+    if not IS_MAINLINE then
+        return nil
+    end
+
+    local tooltipInfo = _G.C_TooltipInfo
+    local getter = tooltipInfo and tooltipInfo[getterName]
+    if type(getter) ~= "function" then
+        return nil
+    end
+
+    local ok, tooltipData = pcall(getter, ...)
+    if not ok
+        or type(tooltipData) ~= "table"
+        or IsSecretValue(tooltipData) then
+        return nil
+    end
+
+    return tooltipData
+end
+
+function QuestKing:PopulatePrivateTooltipFromHyperlink(tooltip, hyperlink)
+    hyperlink = SafeString(hyperlink, nil)
+    if hyperlink == nil then
+        return false
+    end
+
+    return PopulatePrivateTooltipFromData(
+        tooltip,
+        GetMainlineTooltipData("GetHyperlink", hyperlink)
+    )
+end
+
+function QuestKing:PopulatePrivateTooltipFromItemID(tooltip, itemID)
+    itemID = SafeNumber(itemID, nil)
+    if itemID == nil or itemID <= 0 then
+        return false
+    end
+
+    return PopulatePrivateTooltipFromData(
+        tooltip,
+        GetMainlineTooltipData("GetItemByID", itemID)
+    )
+end
+
+function QuestKing:PopulatePrivateTooltipFromQuestLogSpecialItem(tooltip, questLogIndex)
+    questLogIndex = SafeNumber(questLogIndex, nil)
+    if questLogIndex == nil or questLogIndex <= 0 then
+        return false
+    end
+
+    return PopulatePrivateTooltipFromData(
+        tooltip,
+        GetMainlineTooltipData("GetQuestLogSpecialItem", questLogIndex)
+    )
+end
+
 function QuestKing:GetTooltip()
     local tooltip = self.privateTooltip
+
+    if IS_MAINLINE then
+        if tooltip and tooltip.isQuestKingTextTooltip then
+            ApplyTooltipVisualStyle(tooltip)
+            return tooltip
+        end
+
+        if tooltip and tooltip.Hide then
+            tooltip:Hide()
+        end
+
+        tooltip = CreateMainlineTooltip()
+        ApplyTooltipVisualStyle(tooltip)
+        self.privateTooltip = tooltip
+        return tooltip
+    end
+
     if tooltip and tooltip.IsObjectType and tooltip:IsObjectType("GameTooltip") then
         ApplyTooltipVisualStyle(tooltip)
         return tooltip
@@ -1137,7 +1839,12 @@ function QuestKing:PrepareTooltip(owner, anchor)
     ResetPrivateTooltipState(tooltip)
 
     local options = GetOptions()
-    tooltip:SetOwner(owner, anchor or ((options and options.tooltipAnchor) or "ANCHOR_RIGHT"))
+    local tooltipAnchor = anchor or ((options and options.tooltipAnchor) or "ANCHOR_RIGHT")
+    if tooltip.isQuestKingTextTooltip then
+        AnchorMainlineTooltip(tooltip, owner, tooltipAnchor)
+    else
+        tooltip:SetOwner(owner, tooltipAnchor)
+    end
 
     if tooltip.ClearLines then
         tooltip:ClearLines()
