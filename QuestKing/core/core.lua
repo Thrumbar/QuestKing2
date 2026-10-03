@@ -523,6 +523,10 @@ local function UpdateTrackerTitleText(displayMode, numAchievements, acceptedQues
 end
 
 local function LayoutRequestedButtons(postCombat)
+    if WatchButton.PrepareCombatOrder then
+        WatchButton:PrepareCombatOrder()
+    end
+
     local requestOrder = WatchButton.requestOrder or {}
     local requestCount = WatchButton.requestCount or 0
     local lastShown = nil
@@ -569,8 +573,11 @@ local function LayoutRequestedButtons(postCombat)
                     button:ClearAllPoints()
 
                     if anchorKind == "first" then
-                        if Tracker and Tracker.titlebar then
-                            button:SetPoint("TOPLEFT", Tracker.titlebar, "BOTTOMLEFT", 0, -1)
+                        if Tracker and Tracker.scrollChild then
+                            button:SetPoint(
+                                "TOPLEFT", Tracker.scrollChild, "TOPLEFT",
+                                Tracker.scrollContentLeftInset or 0, -1
+                            )
                         end
                     elseif anchorKind == "section" then
                         button:SetPoint("TOPLEFT", lastShown, "BOTTOMLEFT", 0, -4)
@@ -587,10 +594,9 @@ local function LayoutRequestedButtons(postCombat)
                 end
             end
 
-            -- Item rows remain ordinary, unprotected pooled rows. Their text,
-            -- line geometry, and progress bars can update while the secure
-            -- button's own anchor and the row's external anchor stay deferred.
-            if not protected then
+            -- Active ordinary rows can render while protected geometry stays
+            -- deferred. Retired rows keep their last display and reserved slot.
+            if not protected and not button._combatLayoutRetired then
                 button:Render()
             end
 

@@ -2224,6 +2224,35 @@ local function ShowAbandonQuestConfirmationCompat(questID)
     return ok and shown and true or false
 end
 
+local pendingAbandonQuestID
+
+local function QueueAbandonQuestConfirmation(questID)
+    if pendingAbandonQuestID then
+        return false
+    end
+
+    if not CanAbandonQuestCompat(questID) then
+        return false
+    end
+
+    local timer = _G.C_Timer
+    if not (timer and type(timer.After) == "function") then
+        return ShowAbandonQuestConfirmationCompat(questID)
+    end
+
+    pendingAbandonQuestID = questID
+    timer.After(0, function()
+        local queuedQuestID = pendingAbandonQuestID
+        pendingAbandonQuestID = nil
+
+        if queuedQuestID then
+            ShowAbandonQuestConfirmationCompat(queuedQuestID)
+        end
+    end)
+
+    return true
+end
+
 local questContextMenu
 local lastQuestContextMenuQuestID
 local lastQuestContextMenuOpenTime = 0
@@ -2382,7 +2411,7 @@ local function EnsureQuestContextMenu()
 
         local canAbandon = CanAbandonQuestCompat(questID)
         AddQuestContextMenuButton(ABANDON_QUEST or "Abandon Quest", function()
-            ShowAbandonQuestConfirmationCompat(questID)
+            QueueAbandonQuestConfirmation(questID)
         end, not canAbandon, nil)
     end, "MENU")
 

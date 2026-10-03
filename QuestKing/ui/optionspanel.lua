@@ -62,6 +62,7 @@ local managedOptionKeys = {
     enableBackdrop = true,
     trackerBackgroundAlpha = true,
     buttonWidth = true,
+    watchFrameMaxHeight = true,
     lineHeight = true,
     titleHeight = true,
     font = true,
@@ -90,6 +91,7 @@ local presentationRefreshKeys = {
     trackerAlpha = true,
     trackerScale = true,
     buttonWidth = true,
+    watchFrameMaxHeight = true,
     titleHeight = true,
     font = true,
     fontChallengeTimer = true,
@@ -920,9 +922,10 @@ local function BuildPanel()
     y = AddCheck("enableBackdrop", "Enable simple backdrop", "Uses QuestKing's simple tracker backdrop path.", y)
     y = AddCheck("hideWatchFrameBorder", "Hide watch frame border", "Hides only the outer QuestKing watch frame border. Background fill, tracker text, and buttons stay visible.", y)
     y = AddSlider("trackerBackgroundAlpha", "Quest Frame Background Alpha", "Controls only the QuestKing quest frame background opacity. Tracker text and buttons keep the Tracker Alpha setting.", 0.00, 1.00, 0.05, 2, "%.2f", y)
+    y = AddSlider("watchFrameMaxHeight", "Watch Frame Maximum Height", "The watch frame grows up to this height, then scrolls. It also stays within the available screen height.", 160, 900, 10, 0, "%d", y)
 
     y = AddSection("Quest Text & Rows", "Adjusts the size and spacing of quest titles, objective lines, and tracker row width.", y - 8)
-    y = AddSlider("buttonWidth", "Button Width", "Width of each QuestKing tracker row.", 180, 360, 5, 0, "%d", y)
+    y = AddSlider("buttonWidth", "Watch Frame Width", "Width of quest rows, plus a narrow space for the scrollbar.", 180, 360, 5, 0, "%d", y)
     y = AddSlider("lineHeight", "Line Height", "Height of each objective line.", 12, 28, 1, 0, "%d", y)
     y = AddSlider("titleHeight", "Title Height", "Height of the quest title line.", 12, 30, 1, 0, "%d", y)
     local standardFont = _G.STANDARD_TEXT_FONT or [[Fonts\FRIZQT__.TTF]]

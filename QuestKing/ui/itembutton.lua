@@ -8,6 +8,11 @@ local tonumber = tonumber
 local type = type
 
 local itemButtonPool = {}
+local function GetItemButtonParent()
+    local tracker = QuestKing.Tracker
+    return tracker.scrollChild or tracker
+end
+
 local RANGE_UPDATE_TIME = TOOLTIP_UPDATE_TIME or 0.2
 local ITEM_BUTTON_TEMPLATE = "QuestKingItemButtonTemplate"
 local SECURE_MODIFIED_CLICK_PREFIXES = {
@@ -321,6 +326,8 @@ local function ConfigureSecureItemUse(itemButton, questLogIndex, itemLink, itemI
     -- SecureActionButtonTemplate owns the protected use. Use a plain item:id
     -- token instead of a full item link. Full links route through item-name
     -- parsing on current clients and can taint C_Item.UseItemByName().
+    -- Match AnyUp regardless of the action-bar key-down preference.
+    SafeSetAttribute(itemButton, "useOnKeyDown", false)
     SafeSetAttribute(itemButton, "type1", "item")
     SafeSetAttribute(itemButton, "item", item)
     SafeSetAttribute(itemButton, "item1", item)
@@ -450,14 +457,12 @@ local function AcquireItemButton(baseButton)
     if #itemButtonPool > 0 then
         itemButton = tremove(itemButtonPool)
     else
-        itemButton = CreateFrame("Button", nil, QuestKing.Tracker, ITEM_BUTTON_TEMPLATE)
+        itemButton = CreateFrame("Button", nil, GetItemButtonParent(), ITEM_BUTTON_TEMPLATE)
     end
 
-    -- Keep secure action buttons under the stable tracker. Reparenting one to
-    -- a recyclable watch row makes that row protected and prevents combat-time
-    -- mouse-state changes when the pool later reuses it for another row type.
-    if itemButton.GetParent and itemButton:GetParent() ~= QuestKing.Tracker then
-        itemButton:SetParent(QuestKing.Tracker)
+    -- The scroll child is stable; a pooled watch row must remain unprotected.
+    if itemButton.GetParent and itemButton:GetParent() ~= GetItemButtonParent() then
+        itemButton:SetParent(GetItemButtonParent())
     end
 
     baseButton.itemButton = itemButton
@@ -556,8 +561,8 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
         return itemButton
     end
 
-    if itemButton.GetParent and itemButton:GetParent() ~= QuestKing.Tracker then
-        itemButton:SetParent(QuestKing.Tracker)
+    if itemButton.GetParent and itemButton:GetParent() ~= GetItemButtonParent() then
+        itemButton:SetParent(GetItemButtonParent())
     end
     itemButton:ClearAllPoints()
     ApplyItemButtonZOrder(itemButton, self)
@@ -601,8 +606,8 @@ function QuestKing.WatchButton:RemoveItemButton()
 
     itemButton:Hide()
     itemButton:ClearAllPoints()
-    if itemButton.GetParent and itemButton:GetParent() ~= QuestKing.Tracker then
-        itemButton:SetParent(QuestKing.Tracker)
+    if itemButton.GetParent and itemButton:GetParent() ~= GetItemButtonParent() then
+        itemButton:SetParent(GetItemButtonParent())
     end
 
     ClearButtonState(itemButton)

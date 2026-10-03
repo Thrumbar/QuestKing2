@@ -27,6 +27,7 @@ opt.fontLayer           = "OVERLAY"     -- Draw layer for font strings
 
 -- Core sizing
 opt.buttonWidth         = 230           -- width of each watch button (title + lines)
+opt.watchFrameMaxHeight = 520           -- maximum tracker height; overflowing rows scroll
 opt.lineHeight          = 16            -- height per objective line
 opt.titleHeight         = 14            -- height of the title line
 

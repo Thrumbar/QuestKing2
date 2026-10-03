@@ -340,7 +340,7 @@ local function CreateSection()
         return nil
     end
 
-    local frame = CreateFrame("Frame", nil, tracker)
+    local frame = CreateFrame("Frame", nil, tracker.scrollChild or tracker)
     frame:Hide()
 
     local header = CreateFrame("Button", nil, frame)
@@ -490,6 +490,11 @@ local function AnchorSection(tracker)
     local lastRow = GetLastRequestedRow()
     if lastRow then
         section:SetPoint("TOPLEFT", lastRow, "BOTTOMLEFT", 0, -SECTION_GAP)
+    elseif tracker.scrollChild then
+        section:SetPoint(
+            "TOPLEFT", tracker.scrollChild, "TOPLEFT",
+            tracker.scrollContentLeftInset or 0, -1
+        )
     else
         section:SetPoint("TOPLEFT", tracker.titlebar, "BOTTOMLEFT", 0, -1)
     end

@@ -1,8 +1,8 @@
-## Interface: 120100, 120007
+## Interface: 120105, 120100
 ## Title: QuestKing2 = Reborn
 ## Author: Original: Barjack (up to WotLK) Current: Thrumbar
-## Version: 3.0.50
-## Notes: Lightweight objective tracker replacement for Retail, MoP Classic, Classic Era, and Classic TBC.
+## Version: 3.1.1
+## Notes: Lightweight objective tracker replacement for Retail, WoW Forever, MoP Classic, Classic Era, and Classic TBC.
 ## X-Curse-Project-ID: 1516209
 ## SavedVariables: QuestKingDB
 ## SavedVariablesPerCharacter: QuestKingDBPerChar

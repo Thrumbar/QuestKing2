@@ -72,6 +72,13 @@ local WatchButton = setmetatable({}, { __index = WatchButtonPrototype })
 WatchButton.__index = WatchButton
 QuestKing.WatchButton = WatchButton
 
+function WatchButton.OnMouseWheel(_, delta)
+    local tracker = QuestKing.Tracker
+    if tracker and tracker.ScrollBy then
+        tracker:ScrollBy(-delta)
+    end
+end
+
 local function GetButtonWidth()
     local width = tonumber(opt.buttonWidth) or 230
     if width < 120 then
@@ -162,6 +169,9 @@ do
     local requestOrder = {}
     local previousRequestOrder = {}
     local usedByType = {}
+    local combatRequestOrder = {}
+    local combatOrderGeneration = 0
+    local combatOrderActive = false
     WatchButton.usedPool = usedPool
     WatchButton.freePool = freePool
     WatchButton.requestOrder = requestOrder
@@ -214,6 +224,79 @@ do
             previousRequestOrder[i] = nil
         end
         WatchButton.previousRequestCount = 0
+    end
+
+    function WatchButton:PrepareCombatOrder()
+        if not IsInCombatLockdownSafe() then
+            if combatOrderActive then
+                for i = 1, #usedPool do
+                    local button = usedPool[i]
+                    button._combatLayoutRetained = nil
+                    button._combatLayoutRetired = nil
+                    button._combatOrderGeneration = nil
+                end
+                combatOrderActive = false
+            end
+            return false
+        end
+
+        local retainLayout = false
+        for i = 1, #usedPool do
+            local button = usedPool[i]
+            if button._combatLayoutRetained
+                or button.itemButton ~= nil
+                or IsProtectedFrame(button) then
+                retainLayout = true
+                break
+            end
+        end
+        if not retainLayout then
+            return false
+        end
+
+        if QuestKing.StartCombatTimer then
+            QuestKing:StartCombatTimer()
+        end
+
+        combatOrderGeneration = combatOrderGeneration + 1
+        combatOrderActive = true
+        local generation = combatOrderGeneration
+        local count = 0
+        local requestedCount = WatchButton.requestCount or 0
+
+        -- Keep displayed slots while secure rows cannot move or be released.
+        -- New ordinary rows append below them; logical quest requests stay live.
+        for i = 1, WatchButton.previousRequestCount or 0 do
+            local button = previousRequestOrder[i]
+            if button and button:IsShown() then
+                count = count + 1
+                combatRequestOrder[count] = button
+                button._combatOrderGeneration = generation
+                button._combatLayoutRetained = true
+                button._combatLayoutRetired = button.wasRequested ~= true
+            end
+        end
+
+        for i = 1, requestedCount do
+            local button = requestOrder[i]
+            if button and button._combatOrderGeneration ~= generation then
+                count = count + 1
+                combatRequestOrder[count] = button
+                button._combatOrderGeneration = generation
+                button._combatLayoutRetained = true
+                button._combatLayoutRetired = false
+            end
+        end
+
+        for i = 1, count do
+            requestOrder[i] = combatRequestOrder[i]
+            combatRequestOrder[i] = nil
+        end
+        for i = count + 1, #requestOrder do
+            requestOrder[i] = nil
+        end
+        WatchButton.requestCount = count
+        return true
     end
 
     function WatchButton:FreeUnused()
@@ -362,7 +445,8 @@ do
     end
 
     function WatchButton:Wipe()
-        if IsInCombatLockdownSafe() and (self.itemButton ~= nil or IsProtectedFrame(self)) then
+        if IsInCombatLockdownSafe()
+            and (self._combatLayoutRetained or self.itemButton ~= nil or IsProtectedFrame(self)) then
             if QuestKing.StartCombatTimer then
                 QuestKing:StartCombatTimer()
             end
@@ -423,6 +507,9 @@ do
         self._layoutAnchorKind = nil
         self._layoutGeneration = nil
         self._appliedItemLayout = nil
+        self._combatLayoutRetained = nil
+        self._combatLayoutRetired = nil
+        self._combatOrderGeneration = nil
 
         self._challengeMedalTimes = nil
         self._challengeTime = nil
@@ -592,7 +679,7 @@ do
         local lineHeight = GetLineHeight()
         local titleHeight = GetTitleHeight()
 
-        local button = CreateFrame("Button", name, QuestKing.Tracker, BACKDROP_TEMPLATE)
+        local button = CreateFrame("Button", name, QuestKing.Tracker.scrollChild or QuestKing.Tracker, BACKDROP_TEMPLATE)
         button.name = name
         button:SetWidth(buttonWidth)
         button:SetHeight(lineHeight)
@@ -621,6 +708,8 @@ do
         button:SetScript("OnClick", WatchButton.ButtonOnClick)
         button:SetScript("OnEnter", WatchButton.ButtonOnEnter)
         button:SetScript("OnLeave", WatchButton.ButtonOnLeave)
+        button:EnableMouseWheel(true)
+        button:SetScript("OnMouseWheel", WatchButton.OnMouseWheel)
 
         local buttonPulser = button:CreateTexture()
         buttonPulser:SetAllPoints(button)
@@ -686,6 +775,8 @@ do
         titleButton:SetScript("OnClick", WatchButton.TitleButtonOnClick)
         titleButton:SetScript("OnEnter", WatchButton.TitleButtonOnEnter)
         titleButton:SetScript("OnLeave", WatchButton.TitleButtonOnLeave)
+        titleButton:EnableMouseWheel(true)
+        titleButton:SetScript("OnMouseWheel", WatchButton.OnMouseWheel)
         button.titleButton = titleButton
 
         local tex = titleButton:CreateTexture()
@@ -1157,6 +1248,10 @@ end
 function WatchButton:TitleButtonOnEnter(motion)
     local button = self.parent
 
+    if not button or button._combatLayoutRetired then
+        return
+    end
+
     if button.mouseHandler and button.mouseHandler.TitleButtonOnEnter then
         button.mouseHandler.TitleButtonOnEnter(self, motion)
         return
@@ -1169,6 +1264,10 @@ end
 
 function WatchButton:TitleButtonOnClick(mouse, down)
     local button = self.parent
+
+    if not button or button._combatLayoutRetired then
+        return
+    end
 
     if button.mouseHandler and button.mouseHandler.TitleButtonOnClick then
         button.mouseHandler.TitleButtonOnClick(self, mouse, down)
@@ -1191,6 +1290,10 @@ end
 function WatchButton:ButtonOnEnter(motion)
     local button = self
 
+    if button._combatLayoutRetired then
+        return
+    end
+
     if button.mouseHandler and button.mouseHandler.TitleButtonOnEnter then
         button.mouseHandler.TitleButtonOnEnter(self, motion)
         return
@@ -1203,6 +1306,10 @@ end
 
 function WatchButton:ButtonOnClick(mouse, down)
     local button = self
+
+    if button._combatLayoutRetired then
+        return
+    end
 
     if button.mouseHandler and button.mouseHandler.ButtonOnClick then
         button.mouseHandler.ButtonOnClick(self, mouse, down)

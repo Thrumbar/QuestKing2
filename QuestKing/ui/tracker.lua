@@ -12,6 +12,9 @@ local TITLEBAR_TEXT_GAP = 4
 local DEFAULT_TITLEBAR_TEXT = "Unlocked - Drag titlebar"
 local BUTTON_SIZE = 15
 local BUTTON_ART_SIZE = 22
+local SCROLL_LEFT_GUTTER = 44
+local SCROLL_BAR_SPACE = 16
+local SCROLL_BOTTOM_MARGIN = 12
 
 local VALID_DISPLAY_MODES = {
     combined = true,
@@ -29,6 +32,14 @@ local wipe = wipe
 
 local function GetOptions()
     return QuestKing.options or {}
+end
+
+local function GetWatchFrameMaxHeight()
+    local height = tonumber(GetOptions().watchFrameMaxHeight) or 520
+    if height ~= height then
+        return 520
+    end
+    return math.max(160, math.min(900, height))
 end
 
 local function EnsureColorTriplet(color, fallbackR, fallbackG, fallbackB)
@@ -553,6 +564,68 @@ local function HasCompleteLayoutControls(tracker)
         and tracker.modeButton ~= nil
 end
 
+function Tracker:InitScrollArea()
+    if self.scrollFrame then
+        return
+    end
+
+    local scrollFrame = CreateFrame("ScrollFrame", nil, self)
+    scrollFrame:SetPoint("TOPLEFT", self.titlebar, "BOTTOMLEFT", -SCROLL_LEFT_GUTTER, 0)
+    scrollFrame:SetSize((tonumber(GetOptions().buttonWidth) or 230) + SCROLL_LEFT_GUTTER, 1)
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(_, delta)
+        self:ScrollBy(-delta)
+    end)
+
+    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollChild:SetSize(scrollFrame:GetWidth(), 1)
+    scrollFrame:SetScrollChild(scrollChild)
+
+    local scrollBar = CreateFrame("Slider", nil, self)
+    scrollBar:SetOrientation("VERTICAL")
+    scrollBar:SetPoint("TOPLEFT", scrollFrame, "TOPRIGHT", 4, 0)
+    scrollBar:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMRIGHT", 4, 0)
+    scrollBar:SetWidth(10)
+    scrollBar:SetMinMaxValues(0, 1)
+    scrollBar:SetValueStep(1)
+    scrollBar:SetValue(0)
+
+    local track = scrollBar:CreateTexture(nil, "BACKGROUND")
+    track:SetAllPoints(scrollBar)
+    track:SetColorTexture(0, 0, 0, 0.5)
+
+    scrollBar:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Vertical")
+    local thumb = scrollBar:GetThumbTexture()
+    thumb:SetSize(16, 24)
+    scrollBar:EnableMouseWheel(true)
+    scrollBar:SetScript("OnMouseWheel", function(_, delta)
+        self:ScrollBy(-delta)
+    end)
+    scrollBar:SetScript("OnValueChanged", function(bar, value)
+        if self._updatingScrollBar then
+            return
+        end
+        if not self:ScrollTo((self._scrollRange or 0) - value) then
+            self._updatingScrollBar = true
+            bar:SetValue((self._scrollRange or 0) - (self._scrollOffset or 0))
+            self._updatingScrollBar = nil
+        end
+    end)
+    scrollBar:Hide()
+
+    self.scrollFrame = scrollFrame
+    self.scrollChild = scrollChild
+    self.scrollBar = scrollBar
+    self.scrollContentLeftInset = SCROLL_LEFT_GUTTER
+    self._scrollOffset = 0
+
+    self:RegisterEvent("UI_SCALE_CHANGED")
+    self:RegisterEvent("DISPLAY_SIZE_CHANGED")
+    self:SetScript("OnEvent", function(tracker)
+        tracker:UpdateViewport(tracker._contentHeight or 0)
+    end)
+end
+
 function Tracker:RefreshLayoutMetrics()
     local opt = GetOptions()
     local width = tonumber(opt.buttonWidth) or 230
@@ -574,10 +647,15 @@ function Tracker:RefreshLayoutMetrics()
         QuestKing:RecordPerformanceMetric("layoutMetricPassCount", 1)
     end
 
-    self:SetWidth(width)
+    self:SetWidth(width + SCROLL_BAR_SPACE)
+
+    if self.scrollFrame then
+        self.scrollFrame:SetWidth(width + SCROLL_LEFT_GUTTER)
+        self.scrollChild:SetWidth(width + SCROLL_LEFT_GUTTER)
+    end
 
     if self.titlebar then
-        self.titlebar:SetWidth(width)
+        self.titlebar:SetWidth(width + SCROLL_BAR_SPACE)
         self.titlebar:SetHeight(titleHeight)
     end
 
@@ -625,7 +703,7 @@ function Tracker:Init()
 
     self:SetClampedToScreen(true)
     self:SetFrameStrata("MEDIUM")
-    self:SetWidth(tonumber(opt.buttonWidth) or 230)
+    self:SetWidth((tonumber(opt.buttonWidth) or 230) + SCROLL_BAR_SPACE)
     self:SetHeight(tonumber(opt.titleHeight) or 18)
 
     if not self.titlebar then
@@ -665,6 +743,7 @@ function Tracker:Init()
         self.modeButton = CreateTitlebarButton(self.titlebar, GetModeLabel(QuestKingDBPerChar.displayMode), Tracker.ModeButtonOnClick)
     end
 
+    self:InitScrollArea()
     self:ApplyTrackerBackground()
 
     self:ApplyTitlebarState()
@@ -906,45 +985,128 @@ local function SetTrackerHeight(tracker, height, preserveHeaderPosition)
     end
 end
 
-function Tracker:Resize(lastShown)
-    local titleHeight = tonumber(GetOptions().titleHeight) or 18
+function Tracker:ScrollTo(offset)
+    if not self.scrollFrame or IsInCombatLockdownSafe() then
+        return false
+    end
 
+    local range = self._scrollRange or 0
+    offset = tonumber(offset) or 0
+    offset = math.max(0, math.min(range, offset))
+    if offset ~= offset then
+        offset = 0
+    end
+
+    if offset ~= self._scrollOffset then
+        self.scrollFrame:SetVerticalScroll(offset)
+        self._scrollOffset = offset
+    end
+
+    if self.scrollBar then
+        self._updatingScrollBar = true
+        self.scrollBar:SetValue(range - offset)
+        self._updatingScrollBar = nil
+    end
+    return true
+end
+
+function Tracker:ScrollBy(direction)
+    if direction == 0 or not direction then
+        return false
+    end
+
+    local lineHeight = tonumber(GetOptions().lineHeight) or 16
+    local step = math.max(30, lineHeight * 3)
+    return self:ScrollTo((self._scrollOffset or 0) + direction * step)
+end
+
+function Tracker:UpdateViewport(contentHeight)
+    if not self.scrollFrame or DeferProtectedPresentation(self) then
+        return false
+    end
+
+    contentHeight = math.max(0, tonumber(contentHeight) or 0)
+    local titleHeight = tonumber(GetOptions().titleHeight) or 18
+    local maxHeight = GetWatchFrameMaxHeight()
+
+    local trackerScale = self:GetEffectiveScale()
+    local uiScale = UIParent:GetEffectiveScale()
+    local top = GetTrackerHeaderTop(self)
+    local bottom = UIParent:GetBottom()
+    if trackerScale and trackerScale > 0 and uiScale and uiScale > 0 and top and bottom then
+        local available = (top * trackerScale - bottom * uiScale
+            - SCROLL_BOTTOM_MARGIN * uiScale) / trackerScale
+        maxHeight = math.min(maxHeight, available)
+    end
+
+    local visibleHeight = math.min(contentHeight, math.max(1, maxHeight - titleHeight))
+    local frameHeight = titleHeight + visibleHeight
+    local previousContentHeight = self._contentHeight
+    local previousVisibleHeight = self._visibleContentHeight
+    local previousRange = self._scrollRange
+    self._contentHeight = contentHeight
+    self._visibleContentHeight = visibleHeight
+
+    if previousContentHeight ~= contentHeight then
+        self.scrollChild:SetHeight(math.max(1, contentHeight))
+    end
+    if previousVisibleHeight ~= visibleHeight then
+        self.scrollFrame:SetHeight(math.max(1, visibleHeight))
+    end
+
+    if math.abs(self:GetHeight() - frameHeight) > 0.001 then
+        SetTrackerHeight(self, frameHeight, true)
+    end
+
+    local range = math.max(0, contentHeight - visibleHeight)
+    local offset = math.min(self._scrollOffset or 0, range)
+    self._scrollRange = range
+
+    if previousRange ~= range or offset ~= self._scrollOffset then
+        self._updatingScrollBar = true
+        if previousRange ~= range then
+            self.scrollBar:SetMinMaxValues(0, math.max(1, range))
+            self.scrollBar:SetShown(range > 0.5)
+        end
+        self.scrollBar:SetValue(range - offset)
+        self._updatingScrollBar = nil
+    end
+
+    if previousContentHeight ~= contentHeight
+        or previousVisibleHeight ~= visibleHeight
+        or offset ~= self._scrollOffset then
+        self.scrollFrame:SetVerticalScroll(offset)
+    end
+    self._scrollOffset = offset
+
+    if self.advancedBackground and self.advancedBackgroundHideWhenEmpty then
+        self.advancedBackground:SetShown(contentHeight > 0)
+    end
+
+    return true
+end
+
+function Tracker:Resize(lastShown)
     if DeferProtectedPresentation(self) then
         return false
     end
 
     self:RefreshLayoutMetrics()
 
-    local preserveHeaderPosition = self._preserveHeaderPositionOnNextResize == true
     self._preserveHeaderPositionOnNextResize = nil
 
     if not lastShown or not lastShown.IsShown or not lastShown:IsShown() then
-        SetTrackerHeight(self, titleHeight, preserveHeaderPosition)
-
-        if self.advancedBackground and self.advancedBackgroundHideWhenEmpty then
-            self.advancedBackground:Hide()
-        end
-        return
+        return self:UpdateViewport(0)
     end
 
-    local titleTop = (self.titlebar and self.titlebar.GetTop and self.titlebar:GetTop()) or self:GetTop()
+    local contentTop = self.scrollChild and self.scrollChild:GetTop()
     local lastBottom = lastShown:GetBottom()
 
-    if not titleTop or not lastBottom then
-        SetTrackerHeight(self, titleHeight, preserveHeaderPosition)
-    else
-        local height = titleTop - lastBottom + TRACKER_BOTTOM_PADDING
-        if height < titleHeight then
-            height = titleHeight
-        end
-        SetTrackerHeight(self, height, preserveHeaderPosition)
+    if not contentTop or not lastBottom then
+        return self:UpdateViewport(0)
     end
 
-    if self.advancedBackground and self.advancedBackgroundHideWhenEmpty then
-        self.advancedBackground:Show()
-    end
-
-    return true
+    return self:UpdateViewport(contentTop - lastBottom + TRACKER_BOTTOM_PADDING)
 end
 
 function Tracker:SetPresetPosition()
@@ -1209,6 +1371,7 @@ function Tracker:ApplyPresentationSettings()
     self:CheckDrag()
     self:RefreshLayoutMetrics()
     self:ApplyTrackerBackground()
+    self:UpdateViewport(self._contentHeight or 0)
 
     return true
 end

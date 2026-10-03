@@ -150,8 +150,8 @@ local function GetWorldElapsedTimerEnum(name, legacyFallback)
 end
 
 local WORLD_ELAPSED_TIMER_TYPE_NONE = GetWorldElapsedTimerEnum("None", LE_WORLD_ELAPSED_TIMER_TYPE_NONE or 0)
-local WORLD_ELAPSED_TIMER_TYPE_PROVING_GROUND = GetWorldElapsedTimerEnum("ProvingGround", LE_WORLD_ELAPSED_TIMER_TYPE_PROVING_GROUND or 1)
-local WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE = GetWorldElapsedTimerEnum("ChallengeMode", LE_WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE or 2)
+local WORLD_ELAPSED_TIMER_TYPE_PROVING_GROUND = GetWorldElapsedTimerEnum("ProvingGround", LE_WORLD_ELAPSED_TIMER_TYPE_PROVING_GROUND or 2)
+local WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE = GetWorldElapsedTimerEnum("ChallengeMode", LE_WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE or 1)
 
 local function StopPulseAnimation(challengeBar)
     local anim = challengeBar and challengeBar.barPulserAnim
@@ -395,48 +395,56 @@ local function GetActiveChallengeMapInfo()
     return mapID, nil, nil
 end
 
+local function NormalizeLegacyChallengeMedalTimes(firstValue, secondValue, thirdValue)
+    local source = type(firstValue) == "table"
+        and firstValue
+        or { firstValue, secondValue, thirdValue }
+    local times = {}
+
+    for index = 1, #source do
+        local medalTime = SafeNumber(source[index], nil)
+        if medalTime then
+            times[#times + 1] = medalTime
+        end
+    end
+
+    if #times > 0 then
+        return times
+    end
+
+    return nil
+end
+
 local function GetLegacyChallengeMedalTimes(mapID)
     if not mapID then
         return nil
     end
 
     if C_ChallengeMode and type(C_ChallengeMode.GetChallengeModeMapTimes) == "function" then
-        local ok, bronzeTime, silverTime, goldTime = SafeCall(C_ChallengeMode.GetChallengeModeMapTimes, mapID)
-        if ok and bronzeTime then
-            local times = {}
-
-            if SafeNumber(bronzeTime, nil) then
-                times[#times + 1] = bronzeTime
-            end
-            if SafeNumber(silverTime, nil) then
-                times[#times + 1] = silverTime
-            end
-            if SafeNumber(goldTime, nil) then
-                times[#times + 1] = goldTime
-            end
-
-            if #times > 0 then
+        local ok, firstValue, secondValue, thirdValue =
+            SafeCall(C_ChallengeMode.GetChallengeModeMapTimes, mapID)
+        if ok then
+            local times = NormalizeLegacyChallengeMedalTimes(
+                firstValue,
+                secondValue,
+                thirdValue
+            )
+            if times then
                 return times
             end
         end
     end
 
     if type(GetChallengeModeMapTimes) == "function" then
-        local ok, bronzeTime, silverTime, goldTime = SafeCall(GetChallengeModeMapTimes, mapID)
-        if ok and bronzeTime then
-            local times = {}
-
-            if SafeNumber(bronzeTime, nil) then
-                times[#times + 1] = bronzeTime
-            end
-            if SafeNumber(silverTime, nil) then
-                times[#times + 1] = silverTime
-            end
-            if SafeNumber(goldTime, nil) then
-                times[#times + 1] = goldTime
-            end
-
-            if #times > 0 then
+        local ok, firstValue, secondValue, thirdValue =
+            SafeCall(GetChallengeModeMapTimes, mapID)
+        if ok then
+            local times = NormalizeLegacyChallengeMedalTimes(
+                firstValue,
+                secondValue,
+                thirdValue
+            )
+            if times then
                 return times
             end
         end
@@ -596,19 +604,24 @@ local function PlayLegacyMedalTransitionSound(previousIndex, newIndex)
         return
     end
 
-    if previousIndex == 3 and newIndex == 2 then
+    if not newIndex then
         PlaySoundCompat(
-            SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDAL_EXPIRES_GOLD_TO_SILVER,
+            SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDALEXPIRE,
+            "UI_Challenges_MedalExpires"
+        )
+    elseif previousIndex == 3 then
+        PlaySoundCompat(
+            SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDALEXPIRE_GOLDTOSILVER,
             "UI_Challenges_MedalExpires_GoldtoSilver"
         )
-    elseif previousIndex == 2 and newIndex == 1 then
+    elseif previousIndex == 2 then
         PlaySoundCompat(
-            SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDAL_EXPIRES_SILVER_TO_BRONZE,
+            SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDALEXPIRE_SILVERTOBRONZE,
             "UI_Challenges_MedalExpires_SilvertoBronze"
         )
-    elseif previousIndex and not newIndex then
+    else
         PlaySoundCompat(
-            SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDAL_EXPIRES,
+            SOUNDKIT and SOUNDKIT.UI_CHALLENGES_MEDALEXPIRE,
             "UI_Challenges_MedalExpires"
         )
     end
@@ -638,7 +651,7 @@ local function UpdateLegacyChallengeState(challengeBar, elapsedTime)
         if medalTime and elapsedTime < medalTime then
             currentMedalIndex = index
             currentMedalEnd = medalTime
-            currentMedalStart = SafeNumber(medalTimes[index - 1], 0) or 0
+            currentMedalStart = SafeNumber(medalTimes[index + 1], 0) or 0
             break
         end
     end
@@ -794,17 +807,23 @@ local function ResolveTimerDetails(timerID)
 
     if timerType == WORLD_ELAPSED_TIMER_TYPE_CHALLENGE_MODE then
         local mapID, _, timeLimit = GetActiveChallengeMapInfo()
+        local hasModernKeystoneAPI = C_ChallengeMode
+            and type(C_ChallengeMode.GetActiveKeystoneInfo) == "function"
 
-        if mapID and timeLimit and timeLimit > 0 then
+        if hasModernKeystoneAPI and mapID and timeLimit and timeLimit > 0 then
             return "modern_challenge", mapID, elapsedTime, timeLimit
         end
 
-        local legacyMapID = mapID
-        if not legacyMapID and type(GetInstanceInfo) == "function" then
+        local legacyMapID
+        if type(GetInstanceInfo) == "function" then
             local okInstance, _, _, _, _, _, _, _, instanceMapID = SafeCall(GetInstanceInfo)
             if okInstance then
                 legacyMapID = SafeNumber(instanceMapID, nil)
             end
+        end
+
+        if not legacyMapID then
+            legacyMapID = mapID
         end
 
         if legacyMapID then
