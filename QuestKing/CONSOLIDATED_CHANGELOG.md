@@ -1,34 +1,5 @@
 # QuestKing Consolidated Changelog
 
-## 3.1.1 hotfix — Classic quest-item clicks
-
-- Corrected the quest-item button's click setting to match its mouse-release
-  registration. This fixes a reproduced no-action path when the client's
-  action-bar key-down preference is enabled.
-- Set the button's own `useOnKeyDown` attribute to false during the existing
-  out-of-combat secure-item configuration; action-bar settings stay unchanged.
-- Retained secure item use, modifier-click behavior, pooled-button reuse,
-  combat deferral, the combat row retention fix, and native abandon dialogs.
-- Preserved all TOCs, libraries, XML, assets, dependencies, and SavedVariables.
-- Reproduced the input failure with the five supplied Blizzard secure handlers;
-  passed 46 targeted checks and compiled all 25 Lua files with Lua 5.1.
-- Live retesting on the reported Classic Era 1.15.9 build 70003 remains required.
-
-## 3.1.1 reliability continuation — Combat row retention
-
-- Fixed a reproducible layout collision when an item quest row cannot be
-  removed during combat but remaining rows reflow into its occupied slot.
-- Preserve the displayed row order while item or protected rows remain;
-  append newly requested ordinary rows below the retained slots.
-- Keep retained rows out of the reusable pool until combat ends and ignore
-  retired row/title clicks and hover dispatch.
-- Continue active quest text updates through the existing refresh coordinator;
-  restore logical ordering and release retired rows after combat without reload.
-- Retained Blizzard's native abandon dialog, scrolling, six TOCs, XML, assets,
-  dependencies, and all other production Lua unchanged.
-- Verified 25 Lua files with Lua 5.1 and passed 12 targeted simulated behavior
-  checks. Status: release candidate; live combat/taint checks remain required.
-
 ## 3.1.1 Phase 8 cleanup — Native abandon confirmation restored
 
 - Confirmed that the reported unprompted abandonment originated in another
@@ -539,3 +510,22 @@ byte-for-byte unchanged from Feature Coverage Phase 6.
 ### Acceptance result
 
 `PARTIAL — cross-client live performance validation required`
+
+## 3.1.1 hotfix — Forever ObjectiveTracker suppression (2026-10-04)
+
+- Recognizes the modern ObjectiveTracker by its frame/container capabilities,
+  including when the container mixin loads before the frame exists.
+- Applies the existing Mainline alpha-only suppression to Forever's modern
+  tracker independently of the client project ID. Avoids installing legacy
+  Show/update hooks or changing its mouse and parent-alpha settings.
+- Defers suppression for the modern tracker and its anonymous headers/children
+  during combat, then uses the existing post-combat refresh to reconcile it.
+- Preserves the legacy Classic quest-watch path, including management fields
+  shared by current Era/TBC frames, and keeps refresh requests coalesced.
+- Updates only `core/util.lua` and the existing validation documents. Retains
+  all TOCs, version metadata, libraries, XML, assets, and other production code.
+- Offline result: 12 suppression checks passed and all 25 Lua files parsed with
+  Lua 5.4. The changed syntax remains Lua 5.1-compatible; a Lua 5.1 interpreter
+  and a live WoW client were unavailable.
+- Release candidate: the log does not identify the nil callback, and the live
+  Forever build 70205 is newer than the supplied source snapshot 70124.

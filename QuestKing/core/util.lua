@@ -725,19 +725,31 @@ local function IsModernManagedTrackerFrame(frame)
     return false
 end
 
-local function ApplySuppressionToTrackerRoot(frame, hide)
+local function UsesModernBlizzardTracker()
+    if IS_MAINLINE then
+        return true
+    end
+
+    local tracker = SafeGetGlobalFrame("ObjectiveTrackerFrame")
+    if tracker and IsModernManagedTrackerFrame(tracker) then
+        return true
+    end
+
+    -- The container mixin can load before its frame is created.
+    local containerMixin = _G.ObjectiveTrackerContainerMixin
+    return type(containerMixin) == "table"
+        and type(containerMixin.Update) == "function"
+        and type(containerMixin.MarkDirty) == "function"
+end
+
+local function ApplySuppressionToTrackerRoot(frame, hide, modernTracker)
     if not frame then
         return
     end
 
     local legacyHardHide = IsLegacyHardHideTrackerFrame(frame)
-    local modernManaged = IsModernManagedTrackerFrame(frame)
-
-    -- Retail / Midnight: keep suppression to one visual alpha write only.
-    -- Do not call Show/Hide, EnableMouse, SetIgnoreParentAlpha, or any Blizzard
-    -- tracker update hook path from QuestKing on Mainline. The world-map reward
-    -- tooltip stack is too sensitive to addon-tainted Blizzard execution.
-    if IS_MAINLINE then
+    -- Forever uses the same managed tracker regardless of its project ID.
+    if modernTracker then
         SafeSetAlpha(frame, hide and 0 or 1)
         return
     end
@@ -766,16 +778,16 @@ end
 local function ApplyBlizzardTrackerVisualState()
     local hide = ShouldHideBlizzardTracker()
     local inCombat = type(_G.InCombatLockdown) == "function" and _G.InCombatLockdown()
+    local modernTracker = UsesModernBlizzardTracker()
     local trackerFrames = GetBlizzardTrackerRootFrames()
 
     for index = 1, #trackerFrames do
         local frame = trackerFrames[index]
 
-        if inCombat and IsModernManagedTrackerFrame(frame) then
-            -- Mainline-style managed frames are left alone during combat. The
-            -- queued PLAYER_REGEN_ENABLED refresh below reapplies suppression.
+        if inCombat and (modernTracker or IsModernManagedTrackerFrame(frame)) then
+            -- Include anonymous headers and children in combat deferral.
         else
-            ApplySuppressionToTrackerRoot(frame, hide)
+            ApplySuppressionToTrackerRoot(frame, hide, modernTracker)
         end
     end
 end
@@ -843,12 +855,8 @@ local function InstallTrackerObjectMethodHook(object, methodName, key)
 end
 
 local function InstallTrackerVisualHooks()
-    -- Mainline/Retail world-map reward tooltips are very sensitive to addon
-    -- taint on Blizzard-owned execution paths. Do not hook Blizzard tracker
-    -- Show/Update/Manager methods on Mainline; suppression is re-applied from
-    -- QuestKing-owned events instead. Classic-family clients keep the legacy
-    -- hooks because their watch frames are not the same protected managed UI.
-    if IS_MAINLINE then
+    -- Keep managed tracker execution owned by Blizzard on Retail and Forever.
+    if UsesModernBlizzardTracker() then
         return
     end
 
