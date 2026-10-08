@@ -9,10 +9,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: questking-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   package:
-    name: Package and publish QuestKing2 = Reborn
+    name: Validate, package, and publish QuestKing2 = Reborn
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -20,13 +25,101 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Package and publish
+      - name: Validate addon source and changelog
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("QuestKing")
+          if not (root / "QuestKing.toc").is_file():
+              raise SystemExit("Expected QuestKing/QuestKing.toc at the repository root.")
+          if not (root / "CONSOLIDATED_CHANGELOG.md").is_file():
+              raise SystemExit("Missing QuestKing/CONSOLIDATED_CHANGELOG.md.")
+
+          files = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
+          for toc in sorted(root.glob("*.toc")):
+              for line in toc.read_text(encoding="utf-8-sig").splitlines():
+                  entry = line.strip()
+                  if not entry or entry.startswith("#"):
+                      continue
+                  entry = entry.replace("\\", "/")
+                  if entry not in files:
+                      raise SystemExit(f"Missing file or incorrect capitalization: {toc}: {entry}")
+          print("Source manifests and consolidated changelog validated.")
+          PY
+
+      - name: Check CurseForge publishing secret
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
+        run: |
+          if [[ -z "$CF_API_TOKEN" ]]; then
+            echo "::error::Set the repository Actions secret CF_API_KEY to your CurseForge upload token."
+            exit 1
+          fi
+
+      - name: Build package without uploading
         uses: BigWigsMods/packager@v2
         with:
           args: >-
-            -S
+            -d -u
             -p 1516209
-            -n "QuestKing2-Reborn-{project-version}{nolib}{classic}:QuestKing2 = Reborn {project-version}{classic}{nolib}"
+            -n "QuestKing2-Reborn-{project-version}{nolib}{classic}:QuestKing2-Reborn-{project-version}{classic}{nolib}"
+
+      - name: Validate packaged addon
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          archives = sorted(Path(".release").glob("*.zip"))
+          if len(archives) != 1:
+              raise SystemExit(f"Expected one addon ZIP; found {len(archives)}.")
+
+          source = Path("QuestKing")
+          with zipfile.ZipFile(archives[0]) as archive:
+              damaged = archive.testzip()
+              if damaged:
+                  raise SystemExit(f"Damaged ZIP member: {damaged}")
+              names = {i.filename for i in archive.infolist() if not i.is_dir()}
+              if any(not n.startswith("QuestKing/") or n.startswith("QuestKing/QuestKing/") for n in names):
+                  raise SystemExit("Incorrect addon ZIP root; expected one QuestKing/ folder.")
+              expected_tocs = {p.as_posix() for p in source.glob("*.toc")}
+              packaged_tocs = {n for n in names if n.endswith(".toc")}
+              if expected_tocs != packaged_tocs:
+                  raise SystemExit("The packaged TOC set differs from the supplied addon.")
+              for toc_name in sorted(expected_tocs):
+                  if archive.read(toc_name) != Path(toc_name).read_bytes():
+                      raise SystemExit(f"Packager altered a protected manifest: {toc_name}")
+                  for line in archive.read(toc_name).decode("utf-8-sig").splitlines():
+                      entry = line.strip()
+                      if entry and not entry.startswith("#"):
+                          entry = "QuestKing/" + entry.replace("\\", "/")
+                          if entry not in names:
+                              raise SystemExit(f"Missing packaged load file: {entry}")
+              if "QuestKing/CONSOLIDATED_CHANGELOG.md" not in names:
+                  raise SystemExit("The consolidated changelog is missing from the package.")
+          print(f"Validated {archives[0]} and all {len(expected_tocs)} unchanged TOCs.")
+          PY
+
+      - name: Save validated package
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuestKing2-Reborn-${{ github.run_number }}
+          path: .release/*.zip
+          if-no-files-found: error
+
+      - name: Publish validated package
+        if: github.event_name == 'push'
+        uses: BigWigsMods/packager@v2
+        with:
+          args: >-
+            -c -o -u
+            -p 1516209
+            -n "QuestKing2-Reborn-{project-version}{nolib}{classic}:QuestKing2-Reborn-{project-version}{classic}{nolib}"
         env:
-          CF_API_KEY: ${{ secrets.CF_API_KEY }}
-          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+          CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
+          GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}

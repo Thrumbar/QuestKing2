@@ -1,10 +1,18 @@
 package-as: QuestKing
 
 manual-changelog:
-  filename: QuestKing/QuestKing_3.0.50_Consolidated_Changelog.md
+  filename: QuestKing/CONSOLIDATED_CHANGELOG.md
   markup-type: markdown
 
+move-folders:
+  QuestKing/QuestKing: QuestKing
+
 enable-nolib-creation: no
+enable-toc-creation: no
+
+# Preserve the supplied loader manifests exactly.
+plain-copy:
+  - '*.toc'
 
 ignore:
   - .github
@@ -17,3 +25,6 @@ ignore:
   - '*.rar'
   - README-MAINTAINER.md
   - QuestKingSounds
+  - QuestKing/DIGANOSTIC_OPTIONS_README.md
+  - QuestKing/RELEASE_READINESS_REPORT.md
+  - QuestKing/SUPPLIED_PATCH_VALIDATION.md
