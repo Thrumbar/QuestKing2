@@ -26,6 +26,8 @@ local PANEL_TITLE = "QuestKing"
 local PANEL_NAME = "QuestKingOptionsPanel"
 local PANEL_WIDTH = 620
 local PANEL_HEIGHT = 1560
+local DIAGNOSTIC_TITLE = "Diganostic"
+local DIAGNOSTIC_PANEL_NAME = PANEL_NAME .. "Diganostic"
 
 local optionDefinitions = {}
 local controls = {}
@@ -34,6 +36,10 @@ local panel = nil
 local scrollChild = nil
 local settingsCategory = nil
 local settingsCategoryID = nil
+local diagnosticPanel = nil
+local diagnosticCategory = nil
+local diagnosticCategoryID = nil
+local OpenDiagnosticOptions = nil
 local registered = false
 local suppressionWarningShown = false
 
@@ -1014,6 +1020,16 @@ local function BuildPanel()
         Print("Tracker refreshed.")
     end)
 
+    local diagnosticButton = CreateFrame("Button", PANEL_NAME .. "DiganosticButton", scrollChild, "UIPanelButtonTemplate")
+    diagnosticButton:SetPoint("LEFT", refreshButton, "RIGHT", 12, 0)
+    diagnosticButton:SetSize(150, 24)
+    diagnosticButton:SetText(DIAGNOSTIC_TITLE)
+    diagnosticButton:SetScript("OnClick", function()
+        if OpenDiagnosticOptions then
+            OpenDiagnosticOptions()
+        end
+    end)
+
     scrollChild:SetHeight(math.max(PANEL_HEIGHT, math.abs(y) + 110))
 
     panel.OnRefresh = RefreshControls
@@ -1030,9 +1046,136 @@ local function BuildPanel()
     return panel
 end
 
+local function RefreshDiagnosticControls()
+    if not diagnosticPanel then
+        return
+    end
+
+    local ok, profile = SafeCallMethod(QuestKing, "GetPerformanceProfile")
+    local available = ok and type(profile) == "table"
+        and type(QuestKing.ParseSlash) == "function"
+    local enabled = available and profile.enabled == true
+
+    if not available then
+        diagnosticPanel.statusText:SetText("Profiling: Unavailable")
+    elseif enabled then
+        diagnosticPanel.statusText:SetText("Profiling: |cff66ff66On|r")
+    else
+        diagnosticPanel.statusText:SetText("Profiling: Off")
+    end
+
+    for index = 1, #diagnosticPanel.controls do
+        local button = diagnosticPanel.controls[index]
+        local usable = available
+        if button.action == "on" then
+            usable = available and not enabled
+        elseif button.action == "off" then
+            usable = enabled
+        end
+
+        if usable then
+            button:Enable()
+        else
+            button:Disable()
+        end
+    end
+end
+
+local function RunDiagnosticAction(action)
+    if type(QuestKing.ParseSlash) ~= "function" then
+        Print("Performance profiling is not available.")
+        RefreshDiagnosticControls()
+        return
+    end
+
+    local ok, err = pcall(QuestKing.ParseSlash, "perf " .. action)
+    if not ok then
+        SafeError(err)
+    end
+
+    RefreshDiagnosticControls()
+end
+
+local function BuildDiagnosticPanel()
+    if diagnosticPanel then
+        return diagnosticPanel
+    end
+
+    diagnosticPanel = CreateFrame("Frame", DIAGNOSTIC_PANEL_NAME, UIParent)
+    diagnosticPanel.name = DIAGNOSTIC_TITLE
+    diagnosticPanel.parent = PANEL_TITLE
+    diagnosticPanel.controls = {}
+    diagnosticPanel:Hide()
+
+    local scrollFrame = CreateFrame("ScrollFrame", DIAGNOSTIC_PANEL_NAME .. "ScrollFrame", diagnosticPanel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", diagnosticPanel, "TOPLEFT", 0, -4)
+    scrollFrame:SetPoint("BOTTOMRIGHT", diagnosticPanel, "BOTTOMRIGHT", -28, 4)
+
+    local content = CreateFrame("Frame", DIAGNOSTIC_PANEL_NAME .. "ScrollChild", scrollFrame)
+    content:SetSize(PANEL_WIDTH, 460)
+    scrollFrame:SetScrollChild(content)
+
+    CreateText(content, DIAGNOSTIC_TITLE, "GameFontNormalLarge", CONTENT_LEFT, -18)
+    CreateWrappedText(
+        content,
+        "Start profiling, reproduce the tracker problem, then show the "
+            .. "status before stopping. Results appear in chat.",
+        "GameFontHighlightSmall",
+        CONTENT_LEFT,
+        -52,
+        CONTENT_WIDTH
+    )
+    diagnosticPanel.statusText = CreateText(content, "Profiling: Off", "GameFontNormal", CONTENT_LEFT, -104)
+
+    local actions = {
+        { action = "on", label = "Start Profiling", description = "Clears the counters and starts a new recording." },
+        { action = "status", label = "Show Status", description = "Prints refresh counts, scans, layout work, and update times in chat." },
+        { action = "reset", label = "Reset Counters", description = "Clears the counters without changing whether profiling is running." },
+        { action = "off", label = "Stop Profiling", description = "Stops recording and keeps the counters available for Show Status." },
+    }
+
+    for index = 1, #actions do
+        local definition = actions[index]
+        local y = -142 - ((index - 1) * 60)
+        local button = CreateFrame("Button", DIAGNOSTIC_PANEL_NAME .. "Action" .. index, content, "UIPanelButtonTemplate")
+        button:SetPoint("TOPLEFT", content, "TOPLEFT", CONTENT_LEFT, y)
+        button:SetSize(150, 26)
+        button:SetText(definition.label)
+        button.action = definition.action
+        button:SetScript("OnClick", function(self)
+            RunDiagnosticAction(self.action)
+        end)
+        table_insert(diagnosticPanel.controls, button)
+
+        CreateWrappedText(content, definition.description, "GameFontHighlightSmall", CONTENT_LEFT + 166, y - 4, CONTENT_WIDTH - 166)
+    end
+
+    CreateWrappedText(
+        content,
+        "Profiling is off by default. Counters are kept for this session "
+            .. "and are cleared by reloading or restarting the game.",
+        "GameFontHighlightSmall",
+        CONTENT_LEFT,
+        -392,
+        CONTENT_WIDTH
+    )
+
+    diagnosticPanel.OnRefresh = RefreshDiagnosticControls
+    diagnosticPanel.OnCommit = function() end
+    diagnosticPanel.OnDefault = function() end
+    diagnosticPanel.refresh = RefreshDiagnosticControls
+    diagnosticPanel.default = diagnosticPanel.OnDefault
+    diagnosticPanel:SetScript("OnShow", RefreshDiagnosticControls)
+    RefreshDiagnosticControls()
+
+    return diagnosticPanel
+end
+
 local function RegisterSettingsApi()
     local settings = _G.Settings
-    if type(settings) ~= "table" or type(settings.RegisterCanvasLayoutCategory) ~= "function" then
+    if type(settings) ~= "table"
+        or type(settings.RegisterCanvasLayoutCategory) ~= "function"
+        or type(settings.RegisterCanvasLayoutSubcategory) ~= "function" then
         return false
     end
 
@@ -1048,6 +1191,11 @@ local function RegisterSettingsApi()
         settingsCategoryID = category:GetID()
     end
 
+    diagnosticCategory = settings.RegisterCanvasLayoutSubcategory(category, BuildDiagnosticPanel(), DIAGNOSTIC_TITLE)
+    if diagnosticCategory and type(diagnosticCategory.GetID) == "function" then
+        diagnosticCategoryID = diagnosticCategory:GetID()
+    end
+
     if type(settings.RegisterAddOnCategory) == "function" then
         settings.RegisterAddOnCategory(category)
     end
@@ -1061,6 +1209,7 @@ local function RegisterLegacyInterfaceOptions()
     end
 
     _G.InterfaceOptions_AddCategory(BuildPanel())
+    _G.InterfaceOptions_AddCategory(BuildDiagnosticPanel())
     return true
 end
 
@@ -1094,6 +1243,30 @@ local function OpenOptions()
 
     if _G.SettingsPanel and type(_G.SettingsPanel.Open) == "function" then
         _G.SettingsPanel:Open()
+    end
+end
+
+OpenDiagnosticOptions = function()
+    if not registered then
+        OpenOptions()
+    end
+
+    RefreshDiagnosticControls()
+
+    local settings = _G.Settings
+    if diagnosticCategoryID and type(settings) == "table" and type(settings.OpenToCategory) == "function" then
+        settings.OpenToCategory(diagnosticCategoryID)
+        return
+    end
+
+    if diagnosticCategory and type(settings) == "table" and type(settings.OpenToCategory) == "function" then
+        settings.OpenToCategory(diagnosticCategory)
+        return
+    end
+
+    if diagnosticPanel and type(_G.InterfaceOptionsFrame_OpenToCategory) == "function" then
+        _G.InterfaceOptionsFrame_OpenToCategory(diagnosticPanel)
+        _G.InterfaceOptionsFrame_OpenToCategory(diagnosticPanel)
     end
 end
 

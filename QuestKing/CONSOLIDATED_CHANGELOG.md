@@ -529,3 +529,209 @@ byte-for-byte unchanged from Feature Coverage Phase 6.
   and a live WoW client were unavailable.
 - Release candidate: the log does not identify the nil callback, and the live
   Forever build 70205 is newer than the supplied source snapshot 70124.
+
+
+## 3.1.1 — Diganostic options submenu (2026-10-06)
+
+- Added the requested **Diganostic** child category beneath QuestKing in the
+  native Settings panel, with a legacy Interface Options child category fallback.
+- Added Start Profiling, Show Status, Reset Counters, and Stop Profiling buttons
+  using the existing `/qk perf on|status|reset|off` command handler.
+- Added a Diganostic shortcut on the main QuestKing options page and an On/Off
+  indicator. Start and Stop buttons follow the current profiling state.
+- Preserved existing measurements, session-only counters, and slash commands.
+  Stopping retains results; resetting preserves whether recording is enabled.
+- Kept diagnostic controls separate from saved display settings and added no
+  polling, refresh timers, protected action hooks, or tracker rebuild requests.
+- Left every TOC, library, XML, asset, and unrelated Lua source unchanged.
+- Validation: syntax checks passed for all 25 Lua files with Lua 5.4; the added
+  code uses Lua 5.1-compatible syntax. Mocked modern and legacy settings tests
+  passed using the supplied core profiler and slash-command implementation.
+- Status: **PARTIAL — in-game validation required** for native panel rendering
+  and use in the supported WoW clients.
+
+
+## 3.1.1 — Classic quest item button hotfix (2026-10-06)
+
+- Fixed the secure item button's mouse-up action when the client action-bar
+  setting expects mouse-down. The button now explicitly uses mouse-up without
+  changing the player's action-bar setting.
+- Captured special quest-item data while Classic quest headers are expanded
+  for collection, preserving the item icon after those headers are restored.
+- Kept secure item use tied to the item ID and stored the stable quest ID,
+  allowing an accepted quest's item to remain usable without a visible log
+  index or a manual watch toggle under Automatic / All Accepted population.
+- Revalidated live log indices before range, cooldown, and tooltip lookups;
+  retained item-ID cooldown/range and item-link tooltip fallbacks when a
+  collapsed Classic header hides the quest index.
+- Added targeted active-item refresh to the existing bag-update handler.
+  Icon, charge, and removal changes request a render only when item data
+  changes; this path does not rescan objectives or add bag polling.
+- Preserved combat deferral, pooled-button cleanup, completion visibility,
+  chat-link clicks, Watched Only population, and the Diganostic options.
+- Preserved all six TOCs, assets, and libraries. Updated three Lua files and
+  the item-button XML; appended this entry and the hotfix validation report.
+- Validation: 19 offline checks passed, including three baseline reproductions,
+  secure click dispatch against all six supplied client snapshots, and actual
+  Lua 5.1 parsing of all 25 Lua files. Both XML files parsed successfully.
+- Status: **PARTIAL — runtime validation required** on the affected Classic
+  client; offline tests do not establish live protected-action or taint behavior.
+
+
+## 3.1.1 — Classic quest-log refresh hotfix candidate (2026-10-06)
+
+- Matched Blizzard's internal header-update form for QuestKing's temporary
+  quest-log expansion and restoration. Both calls now pass the same second
+  argument used by QuestMapFrame_ResetFilters in all six supplied snapshots.
+- Targets the reported MoP Classic repeated quest-log refresh pattern:
+  1,725 QUEST_LOG_UPDATE events, 1,726 refreshes, and 1,723 objective-data reads.
+  Event attribution is confirmed; native header-notification behavior still
+  requires live validation.
+- Preserved genuine quest-event handlers, the 50 ms refresh coordinator,
+  collapsed-header restoration, Classic quest-item collection, and combat
+  reconciliation. Added no event-drop window, polling, or refresh timer.
+- Added elapsed recording time, refreshes per second, event counts by name,
+  and request counts by reason to the existing /qk perf status report and
+  Diganostic Show Status button. Duration freezes when recording stops.
+- Preserved profiler start/reset/stop semantics and added no saved settings.
+- Changed three Lua files and appended the existing validation documents.
+  All TOCs, libraries, XML, assets, and unrelated production files are unchanged.
+- Validation: all 25 Lua files compiled under actual Lua 5.1; 18 profiler
+  checks and eight modeled header/event scenarios passed. Both XML files
+  parsed and all six TOCs retained their original bytes and exact load paths.
+- Status: **Release candidate — PARTIAL; native MoP validation required.**
+  Modeled notifications do not prove the C-engine meaning of the header flag
+  or that the live event stream originated in QuestKing.
+
+
+## 2026-10-06 — Classic indexed objective-reader revision
+
+- The reported MoP retest of the preceding header-call candidate failed the
+  refresh-frequency gate: 4,264 refreshes and 4,247 QUEST_LOG_UPDATE events
+  during 486.41 seconds. The earlier Era capture was healthy, but does not
+  establish a MoP fix.
+- Classic quest reads now use verified log indices and Blizzard WatchFrame's
+  GetNumQuestLeaderBoards/GetQuestLogLeaderBoard path before the namespaced
+  objective getter. A successful zero count remains authoritative. Failed or
+  unavailable reads retain fallback, including quests without a usable index.
+- Reused the existing matching-index resolver for both supplied and resolved
+  indices. Indexed money reads now match the supplied Classic tracker too.
+- Retained native objective text, completion, hidden-objective rows, and numeric
+  progress from trailing x/y text where available. Classic progress-bar metadata
+  can use the existing percentage getter; structured fields absent from native
+  text remain unavailable through the indexed backend.
+- Added profiler counts for regular quest-reader backend calls and temporary
+  header expand/restore calls. These are attempted calls, not emitted-event
+  counts, and do not include separate popup/bonus-objective readers.
+- No event filtering, delayed suppression, protected-frame changes, polling,
+  TOC edits, library edits, or new production files were introduced.
+- Verification: 25 Lua files compile in Lua 5.1; 21 profiler checks, 28
+  objective/event checks, and eight header/event scenarios pass under stated
+  game-engine assumptions. Native notification behavior remains unproved.
+- Status: **Release candidate — PARTIAL; native MoP retest required.** The
+  objective-getter notification behavior in offline tests is a model, not
+  proof of the native event source.
+
+
+## 2026-10-06 — Achievement refresh eligibility revision
+
+- The latest activity capture includes multiple completed quests: 805 refreshes
+  in 1,373.58 seconds (0.586/second), with a 0.59 ms mean refresh body. The
+  earlier quest-event flood has eased; different activity and recording lengths
+  prevent treating these runs as a controlled performance comparison.
+- Achievement requests account for 1,225 of 1,694 requests (72.3%) while
+  achievement scans remain 0/0. Request totals precede coalescing and cannot
+  identify the number of achievement-only executed refreshes.
+- Broad achievement progress events now invalidate cached display data without
+  requesting presentation when achievement rows are hidden or a valid native
+  tracked-list snapshot is empty and no stale rows need removal. Visible tracked
+  progress, unknown snapshots, pending list changes, and stale-row cleanup still
+  request updates. All tracking-list and startup/world synchronization remains.
+- Added Classic's native GetTrackedAchievements bulk reader, retaining every
+  vararg result. Modern GetTrackedIDs remains first choice where available.
+  Entire results are validated; failed reads preserve the previous cache and
+  make refresh filtering fail open. Existing indexed compatibility fallbacks
+  remain conservative and do not establish native empty-list readiness.
+- Changed only buttons/achievement.lua beyond the preceding indexed reader
+  revision, and appended the three existing Markdown records. Earlier quest,
+  item, combat, profiler, header-restoration, and event handling are retained.
+  No new polling, timer, hook, production file, SavedVariable, TOC, or library
+  change was introduced.
+- Verification: 42 achievement regression checks passed in
+  actual Lua 5.1 with complete addon modules and mocked engine APIs. All six
+  supplied native tracked-list call patterns match, all 25 Lua files compile,
+  both XML files parse, and all six TOCs remain byte-identical.
+- Status: **Release candidate — PARTIAL; native retest required.** This revision
+  has not run inside WoW here. Live tracked progress and idle settling remain
+  the acceptance gate.
+
+
+## 2026-10-06 — Cached quest header-access preflight
+
+- Latest native MoP report: 324 refreshes in 548.72 seconds (0.590/second),
+  0.62 ms mean / 2.14 ms maximum refresh body, 345 indexed and zero modern
+  regular objective reads, no achievement requests, and 294 balanced header
+  expand/restore attempts. Of 339 quest events, 314 are QUEST_LOG_UPDATE.
+  The overall refresh rate is similar to the preceding activity capture;
+  native idle settling and the cause of log notifications remain unproven.
+- Cached quest-data and item-data scans now try validated direct access before
+  expanding headers. If every required ordinary row already has a matching
+  live index, no header mutation is requested. Classic's legacy title getter,
+  when present, must also report the same quest ID at that index.
+- Inaccessible or mismatched rows retain the existing expansion/restoration
+  fallback. Each scan resolves indices again after any expansion; preflight
+  stores no index and changes no row. Full population scans still expand
+  headers to discover new and unwatched accepted quests.
+- Task and available-campaign rows do not require ordinary log access. Item
+  preflight additionally ignores rows without display data, matching its
+  existing callback. Real quest events and data invalidation remain intact.
+- Changed only buttons/quest.lua beyond the achievement revision, with entries
+  appended to the existing three Markdown records. Previous achievement,
+  indexed objective, item, combat, and profiler changes are retained. No TOC,
+  library, XML, asset, production-file, hook, timer, or SavedVariable change.
+- Verification: 35 header-access regression scenarios
+  passed with full Lua 5.1 modules and mocked engine/UI behavior. Native
+  Classic WatchFrame direct-read patterns match all three supplied Classic
+  snapshots. All 25 packaged Lua files compile and both XML files parse.
+  One explicit modeled limitation remains: required inaccessible-row expansion
+  can sustain feedback when the engine ignores the header flag. No check failed.
+- Status: **Release candidate — PARTIAL; native MoP retest required.** Benefits
+  depend on actual index accessibility. Required expansion beneath collapsed
+  headers may remain; modeled feedback results do not establish native cause.
+
+
+## 2026-10-08 — Supertracking path refresh eligibility
+
+- Native captures from the preceding header-access revision show zero tracker
+  requests and refreshes during timed idle on Era, BCC, MoP, Forever, and PTR.
+  Retail's zero-second baseline is inconclusive. MoP activity records 144
+  refreshes in 995.29 seconds (0.145/second), with 16 balanced header pairs.
+  Different activity and durations do not establish a controlled speedup.
+- Retail and PTR activity remain noisy: 5,518 refreshes in 1,448.79 seconds
+  (3.809/second) and 2,660 in 1,626.72 seconds (1.635/second). Supertracking
+  accounts for 96.22% and 96.12% of requests before coalescing. Those captures
+  do not distinguish changed events, path events, or focus-module requests.
+- Replaced the unconditional path-event refresh with eligibility based on
+  committed quest/type identity and existing pending or invalid focus recovery.
+  Confirmed unchanged path geometry needs no tracker layout. Unknown reads,
+  genuine focus changes, and needed Pre/Post checks retain the cached refresh.
+  Focus setters remain in their existing execution paths.
+- Focus comparisons now use a separate presentation snapshot; ordinary getters
+  and setters cannot consume a change before its notification. PreCheck stages
+  the snapshot, and a successful tracker generation commits it before PostCheck.
+  Render failures retain the previous snapshot and recovery opportunity.
+- Added independent changed-event, path-event, and path-request profiler counts.
+  These do not alter quest-event denominators. Existing quest, achievement,
+  objective-reader, item, header-restoration, combat, and event paths remain.
+- This revision changes core/core.lua, core/events.lua, core/supertracking.lua,
+  and core/slashcommand.lua, with append-only entries in the three existing
+  records. No TOC, library, XML, asset, SavedVariable, polling, timer, hook, or
+  production-file addition was made.
+- Verification: 41 full-module scenarios and 25 profiler checks pass in actual
+  Lua 5.1 with mocked engine/UI services; all 25 packaged Lua files compile,
+  both XML files parse, and all six TOCs remain byte-identical. A modeled
+  1,000-event sequence across separate coordinator flushes drops from 1,000
+  additional requests/refreshes to zero while all path events are counted.
+- Status: **Release candidate — PARTIAL; native Retail/PTR retest required.**
+  Modeled event reductions do not prove the native event source or resulting
+  rate. Uncertain or invalid focus can still require path-driven recovery.

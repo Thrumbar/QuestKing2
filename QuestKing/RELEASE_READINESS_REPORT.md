@@ -638,3 +638,368 @@ interface `20505` to `20506`; it adds no runtime path, hook, event, or polling.
 ### Final verdict
 
 `Release candidate`
+
+
+## 3.1.1 Classic quest item button hotfix — 2026-10-06
+
+### Scope and base
+
+This hotfix uses `QuestKing_3.1.1_Diganostic_Options_Full.zip` as its complete
+base. The reported issue is on Classic: an item works in bags, fails when
+clicked in QuestKing, and its icon can require a watch toggle to appear.
+The earlier sections of this report describe earlier releases.
+
+Input archive SHA-256:
+`e38c5884675a0bc217ce8959ac5cc3e136d10a1ff4ebee4f43c3c8246bf8bfd9`.
+
+### Review verdict
+
+| Review focus | Source finding | Correction |
+|---|---|---|
+| Protected actions | XML registers AnyUp, but every supplied SecureTemplates.lua can select mouse-down through ActionButtonUseKeyDown. | Explicit false useOnKeyDown attribute; retain the inherited secure item handler. |
+| Classic API and identity | Item lookup occurs after expanded quest headers are restored; a displayed quest can then lack a valid visible log index. | Capture item data during the population scan; retain quest/item IDs and validate live indices before native lookups. |
+| Refresh cost and recovery | BAG_UPDATE_DELAYED refreshes only quest-start popups, so active-item changes can wait for another quest/watch event. | Refresh item metadata in the existing handler and render only on a change, sharing any popup refresh. |
+
+The missing-icon reproduction proves the collapsed-header path. It does not
+prove that every delayed icon has the same cause, or that the client's native
+item API requires a quest to be watched. The patch does not alter watch lists
+or infer quest associations from bag quest-starter metadata.
+
+### Changed files
+
+- `ui/itembutton.xml`: initializes the secure click phase to mouse-up.
+- `ui/itembutton.lua`: permits cached item data without a visible log index;
+  maintains stable quest identity, native index validation, item-ID fallbacks,
+  combat deferral, chat links, and pool cleanup.
+- `buttons/quest.lua`: captures item data inside the existing expanded-header
+  scan, renders that data after header restoration, and provides the targeted
+  item-metadata refresh and verified index resolver. The index predicate is
+  shared rather than allocating a new closure for each range check.
+- `core/events.lua`: checks active item metadata on the existing delayed bag
+  event. An item-only change requests a cached render without invalidating
+  objectives; a simultaneous popup change uses the same refresh request.
+- `CONSOLIDATED_CHANGELOG.md` and `RELEASE_READINESS_REPORT.md`: appended the
+  hotfix entry and this verification record.
+
+All other supplied files are retained byte-for-byte, including all six TOCs
+and the complete diagnostic-options implementation. There are no new libraries,
+production files, SavedVariables, repeating timers, or bag scans.
+
+### Offline validation
+
+Nineteen checks passed in Lua 5.1. These include three reproductions of the
+supplied base's failure paths, the corrected visibility/click/refresh checks,
+and syntax parsing of all 25 addon Lua sources. Both XML files are well formed.
+
+The behavior checks execute the complete changed addon Lua modules in a
+mocked Classic environment. The secure-dispatch checks execute the actual
+item parser, item action, and click-phase functions from each supplied client
+snapshot, with the protected C item-use endpoint mocked. Both action-bar click
+settings dispatch the corrected item once. Modified chat-link and right-click
+inputs do not dispatch item use.
+
+The regression cases also cover:
+
+- an unwatched accepted quest inside a collapsed zone header;
+- acquisition, unchanged item data, charge changes, and item removal on bag
+  events, without objective scans in the targeted item refresh;
+- one refresh request for simultaneous popup and active-item changes;
+- retained header states and unchanged watch lists;
+- no header polling or recurring missing-index refresh requests;
+- reordered quest indices without reading another quest's item;
+- combat deferral of secure reassignment, removal, and creation;
+- post-combat reconciliation and reuse without a previous item's attributes;
+- show-item-when-complete visibility semantics;
+- Watched Only population;
+- tooltip and chat-link operation without a visible quest index.
+
+### Client snapshot matrix
+
+| Branch | Supplied build | Secure dispatch in Lua 5.1 | API/source review | Live client |
+|---|---|---|---|---|
+| Classic Era | 1.15.9.69722 | PASS, both click settings | PASS | Not run |
+| Burning Crusade Classic | 2.5.6.69795 | PASS, both click settings | PASS | Not run |
+| Mists Classic | 5.5.4.70032 | PASS, both click settings | PASS | Not run |
+| Retail | 12.1.0.69933 | PASS, both click settings | PASS | Not run |
+| Retail PTR | 12.1.5.70077 | PASS, both click settings | PASS | Not run |
+| WoW Forever | 1.60.1, build 70235 | PASS, both click settings | PASS | Not run |
+
+The source checks verify the click-phase attribute and the existing special-item
+contracts, plus the C_Container.GetItemCooldown and C_Item.IsItemInRange fallback
+signatures. No new Cataclysm source snapshot was supplied, so this hotfix does
+not claim a new Cataclysm runtime or source-matrix pass.
+
+### In-game acceptance procedure
+
+1. Close WoW, replace the QuestKing folder using the full hotfix archive, and
+   restart. Keep the existing saved settings.
+2. On the affected Classic client, set **Tracker Quest Population** to
+   **Automatic** or **All Accepted**. Accept a quest with a usable item without
+   manually watching it. Confirm the icon appears beside its displayed quest.
+3. Collapse the quest's zone header in Blizzard's quest log. Confirm the icon
+   remains present and usable from QuestKing with a valid target and location.
+4. Repeat item use with the action-bar mouse-down setting enabled and disabled.
+   Confirm each click uses the item once and restore the preferred setting.
+5. Move the item between bags, obtain/use additional charges where applicable,
+   and remove the item. Confirm its icon/count updates without a watch toggle.
+6. Use an already configured quest-item button in combat. Confirm no blocked
+   action. Any new icon or protected reassignment discovered during combat must
+   reconcile when combat ends without reload.
+7. Confirm tooltip, Shift-click chat link, completed-quest item visibility,
+   scrolling, and a second quest's item after the first row is removed.
+8. If using **Watched Only**, confirm untracked quests remain excluded and
+   tracked quests still show their item. Diagnostic controls must still work.
+
+### Acceptance result and limitations
+
+`PARTIAL — runtime validation required` / `Release candidate`.
+
+A live WoW client was unavailable. Hardware input authorization, server-side
+quest-item readiness, actual bag effects, secure ancestry, and taint cannot be
+proven by an offline Lua runtime. Test the affected Classic quest before
+considering the reported issue resolved in game.
+
+
+## Classic quest-log refresh hotfix candidate — 2026-10-06
+
+The current package matches Blizzard's internal header-update calls and
+extends the existing profiler status with elapsed duration, event breakdowns,
+and request reasons. Its implementation base is the supplied 3.1.1 Classic
+Quest Item Hotfix Full archive; no TOC/version/library changes were made.
+
+All 25 Lua files compiled under actual Lua 5.1. Eighteen profiler checks and
+eight modeled header/event scenarios passed; six supplied native header-call
+patterns matched. The model assumes native suppression by the second header
+argument, which remains unproven without an active WoW client.
+
+**Release status: Release candidate — PARTIAL; native runtime validation
+required.** The mandatory next gate is reproducing the reported MoP completion
+and turn-in case with a remaining quest beneath a collapsed Blizzard header,
+then confirming counters settle during a measured 60-second idle interval.
+Real objective, combat, population, and quest-item behavior must remain
+correct. See the appended section of SUPPLIED_PATCH_VALIDATION.md for exact
+steps and limits. Prior cross-version observations do not validate this
+candidate's native API behavior.
+
+
+## Current revision — Classic indexed objective reader — 2026-10-06
+
+**Release candidate — PARTIAL; not release ready.** This entry supersedes the
+preceding candidate's pending MoP gate: the reported MoP retest failed with
+4,264 refreshes in 486.41 seconds and 4,247 QUEST_LOG_UPDATE events.
+
+Offline verification passed: 25 Lua files compile in Lua 5.1, 21 profiler
+checks and 28 objective/event checks pass, and eight header/event scenarios
+pass under their stated engine assumptions. The objective model also retains
+one explicit header-notification limitation. Native runtime gates remain
+open.
+
+The revision keeps real event handling and changes normal Classic objective
+reads to Blizzard WatchFrame's verified-index backend. Successful zero counts
+are authoritative, and errors/unavailable indices retain fallback. Indexed
+money reads follow the same native source. New profiler lines identify reader
+backend use and temporary header calls. They do not assert which endpoint
+emitted a native event. See SUPPLIED_PATCH_VALIDATION.md for reproduction and
+acceptance steps.
+
+| Branch | Supplied build | Current offline gate | Current native gate |
+| --- | --- | --- | --- |
+| Classic Era | 1.15.9.69722 | Indexed native call pattern verified; Lua syntax checked | Pending for this revision. Preceding candidate's 1,251.97-second capture had 26 refreshes and 8 log updates. |
+| BCC | 2.5.6.69795 | Indexed native call pattern verified; Lua syntax checked | Pending for this revision. Earlier counters describe older builds. |
+| MoP Classic | 5.5.4.70032 | Indexed native call pattern verified; mocked routing checked | Preceding candidate FAIL; this revision pending. |
+| Retail | 12.1.0.69933 | Mainline getter path retained; Lua syntax checked | Pending. |
+| Retail PTR | 12.1.5.70077 | Mainline getter path retained; Lua syntax checked | Pending. |
+| WoW Forever | 1.60.1 build 70235 | Existing Mainline routing retained; Lua syntax checked | Pending. |
+| Cataclysm Classic | No new snapshot supplied | Shared Lua syntax checked; no new source-contract claim | Pending. |
+
+No event filtering, secure frame changes, new polling/timers, SavedVariables,
+TOC changes, library changes, or new production files are included. The
+existing header-state restoration and quest-item capture are retained.
+Legacy text supplies numeric flash metadata when recognizable counts exist;
+metadata absent from that text requires live locale/quest coverage. Native
+WoW timing, taint, hardware item use, and combat visual correctness cannot be
+proven by the offline runtime.
+
+Input implementation archive SHA-256:
+`ba6023f015b2d6bfb4be6a40662c96e1a6bebb5f34e5e6a0916eef5b95e10166`.
+Final output archive hashes are supplied beside the ZIPs in the SHA256 text
+file; an archive cannot contain its own final checksum.
+
+
+## Current revision — Achievement refresh eligibility — 2026-10-06
+
+**Release candidate — PARTIAL; not release ready.** This section is the current
+verification record and supersedes the preceding revision's pending retest
+description. The user reported multiple completed quests in 1,373.58 seconds,
+with 805 refreshes (0.586/second) and a 0.59 ms mean refresh body. This is a
+healthier activity capture, not a controlled idle acceptance test. Its missing
+reader/header lines do not by themselves identify the installed source.
+
+Achievement calls are 1,225 of 1,694 refresh requests (72.3%) despite zero
+achievement scans. The source confirms unnecessary broad progress presentation
+when there are no visible achievement rows. The new guard retains data
+invalidation and queues whenever tracked visible content, unknown/pending
+state, or stale rows require it. Every tracking-list, hook, startup, and world
+synchronization remains unconditional.
+
+The API review also confirmed the missing Classic GetTrackedAchievements bulk
+reader. Complete valid native results now establish cache readiness; failures
+retain the prior cache and fail open. Modern GetTrackedIDs remains first choice
+when available. Existing indexed fallbacks do not establish empty readiness.
+
+The three-expert panel challenged empty-cache assumptions, startup races,
+hidden-state reopening, partial native results, and protected-action scope.
+The final runtime review found no blocker within this narrow change. Offline
+verification passed 42 actual-module achievement cases, all
+six supplied native tracked-list call patterns, Lua 5.1 compilation of all 25
+Lua files, XML parsing of both files, exact resolution of all 162 TOC entries,
+and complete ZIP/source equality. Prior quest/profiler implementation bytes and
+their documented validation limits are retained.
+
+| Branch | Supplied build | Current source/package gate | Native gate for this revision |
+| --- | --- | --- | --- |
+| Classic Era | 1.15.9.69722 | Bulk vararg pattern verified; static package PASS | Pending. |
+| BCC | 2.5.6.69795 | Bulk vararg pattern verified; static package PASS | Pending. |
+| MoP Classic | 5.5.4.70032 | Bulk vararg pattern verified; static package PASS | Latest activity improved; eligibility guard pending. |
+| Retail | 12.1.0.69933 | Modern array pattern verified; static package PASS | Pending. |
+| Retail PTR | 12.1.5.70077 | Modern array pattern verified; static package PASS | Pending. |
+| WoW Forever | 1.60.1 build 70235 | Modern array pattern verified; static package PASS | Pending. |
+| Cataclysm Classic | No standalone new snapshot | Lua/package syntax checked; no new branch-runtime claim | Pending. |
+
+This revision changes one Lua file beyond the indexed-reader candidate and
+updates the three existing Markdown records. Relative to the supplied input,
+the Changed Files ZIP contains four complete Lua and three complete Markdown
+replacements. The Full ZIP retains all 45 source files. All TOCs, libraries,
+XML, assets, and other files remain byte-identical to the supplied input.
+
+Acceptance requires the separate no-tracked idle/activity intervals, visible
+tracked progress, untracking, hidden-mode reopening, startup restoration, and
+continued real quest/item/combat behavior listed in SUPPLIED_PATCH_VALIDATION.md.
+Native timing, engine notifications, taint, and protected input behavior cannot
+be established by mocked engine APIs. No new timer, polling, hook,
+SavedVariable, production file, protected mutation, or quest-event filtering
+is introduced.
+
+Input implementation archive SHA-256 remains
+`ba6023f015b2d6bfb4be6a40662c96e1a6bebb5f34e5e6a0916eef5b95e10166`.
+Current output hashes are supplied in the adjacent SHA256 text file.
+
+
+## Current revision — Cached quest header-access preflight — 2026-10-06
+
+**Release candidate — PARTIAL; not release ready.** The latest explicitly
+identified MoP last-patch capture records 324 refreshes in 548.72 seconds,
+0.590 refreshes/second, a 0.62 ms mean refresh body, 345 indexed/zero modern
+regular objective reads, and no achievement requests. The overall refresh
+frequency remains similar to the preceding activity capture. Native header
+attempts are 294 expand / 294 restore; 314 of 339 quest events are log updates.
+These correlated counters do not establish native event causation or idle
+settling. The sample includes quest activity and no combat quest events.
+
+The three-expert panel approved a conservative optimization rather than an
+indexing assumption: cached display/item scans check whether their exact
+eligible rows already have matching live indices before expanding headers.
+The legacy title getter, when present, must agree on quest identity at that
+index. Preflight stores no index or row state. Callbacks resolve again, and
+inaccessible rows preserve expansion/restoration. Full population discovery
+continues to expand headers, including new and unwatched quests.
+
+The runtime review approved the exact implementation after challenging stale
+indices, hidden quests, and item/combat behavior. 35
+actual-module Lua 5.1 regression scenarios passed with engine/UI mocks;
+Classic native display-read patterns matched all three supplied Classic
+snapshots. Package validation passed for all 25 Lua files, both XML files,
+all 162 TOC load entries, ZIP integrity/source equality, and byte preservation
+outside the four Lua and three Markdown replacement files. Prior achievement
+code and its 42-check verification record are retained exactly.
+One explicit modeled limitation remains when required inaccessible-row
+expansion posts delayed log events despite the header flag; zero checks failed.
+
+| Branch | Source/package result | Native result for this revision |
+| --- | --- | --- |
+| Era 1.15.9.69722 | Direct-read pattern verified; syntax/paths PASS | Pending. |
+| BCC 2.5.6.69795 | Direct-read pattern verified; syntax/paths PASS | Pending. |
+| MoP 5.5.4.70032 | Direct-read pattern verified; syntax/paths PASS | Last-patch data recorded above; new preflight pending. |
+| Retail 12.1.0.69933 | Syntax/paths PASS; no index-independence claim | Pending. |
+| PTR 12.1.5.70077 | Syntax/paths PASS; no index-independence claim | Pending. |
+| Forever 1.60.1 build 70235 | Syntax/paths PASS; no index-independence claim | Pending. |
+| Cataclysm Classic | No standalone new snapshot; Lua/package syntax checked | Pending. |
+
+Native acceptance requires separate 60-second idle captures with open and
+collapsed Blizzard headers, identifying whether a collapsed header contains
+displayed quests, plus genuine objective, item, combat, population, and tracked
+achievement checks. Required header access may remain and the patch does not
+claim complete loop elimination. A WoW client is unavailable here; mocks cannot
+prove native notification timing, secure input, taint, or visual restoration.
+
+All six TOCs, libraries, XML, assets, and other supplied files remain
+byte-identical. No new hook, timer, polling, SavedVariable, production file,
+protected mutation, or event filter was added. Current input and output
+checksums are supplied in the adjacent SHA256 text file.
+
+
+## Current revision — Supertracking path eligibility — 2026-10-08
+
+**Release candidate — PARTIAL; native Retail/PTR validation required.**
+This entry supersedes preceding frequency-gate statuses using the supplied
+six-client captures of the last header-access package. It does not accept
+unobserved UI, taint, combat, option, or scenario behavior from counters alone.
+
+| Client / build | Prior revision native idle | Prior revision activity | Current correction gate |
+| --- | --- | --- | --- |
+| Era 1.15.9.69722 | PASS — 193.48 s, zero requests/refreshes | 59 refreshes / 3,169.55 s; 0.019/s | Shared Lua syntax and modeled legacy focus pass; native focus behavior pending |
+| BCC 2.5.6.69795 | PASS — 329.77 s, zero requests/refreshes | 47 / 1,564.48 s; 0.030/s | Shared Lua syntax and modeled legacy focus pass; native focus behavior pending |
+| MoP 5.5.4.70032 | PASS — 481.11 s, zero requests/refreshes | 144 / 995.29 s; 0.145/s; 16 balanced header pairs | Earlier quiet-idle gate satisfied; shared focus correction native validation pending |
+| Forever 1.60.1.70235 | PASS — 674.99 s, zero requests/refreshes | 226 / 4,683.98 s; 0.048/s | Supplied API contract pass; shared focus correction native validation pending |
+| Retail 12.1.0.69933 | Inconclusive — duration 0.00 s | FAIL frequency — 5,518 / 1,448.79 s; 3.809/s | Path correction passes source/model gates; timed idle and activity retest required |
+| PTR 12.1.5.70077 | PASS — 431.70 s, zero requests/refreshes | FAIL frequency — 2,660 / 1,626.72 s; 1.635/s | Path correction passes source/model gates; activity/focus retest required |
+| Cataclysm Classic | No new capture or snapshot | Not established | Shared Lua syntax only; no advertised loader changes |
+
+MoP's idle includes one indexed read outside any recorded refresh; this is not
+evidence of an idle refresh loop. Activity differs across captures and the
+lower observed rate is not a controlled speedup result. All six captures have
+balanced header calls and no achievement requests. The preceding quest,
+objective-reader, item, header-access, and achievement implementations are
+retained byte-for-byte in this revision.
+
+Retail/PTR supertracking shares are 96.22% and 96.12% of requests before
+coalescing. The reason combined native changed/path events and focus-module
+requests, so the capture cannot assign all executed refreshes to a path event.
+Source proves that the old path handler always queued presentation. The tracker
+has no navigation-geometry consumer, but path-driven pending focus recovery
+must remain available.
+
+The candidate gates unchanged path notifications using a separate committed
+quest/type identity and existing Pre/Post eligibility. Getter/setter cache
+updates cannot consume the presentation comparison. A successful generation
+commits the staged state before PostCheck; failed renders retain their recovery
+opportunity. Focus mutations, genuine quest events, and combat reconciliation
+remain in existing paths. Three independent counters distinguish native changed
+and path events from path requests without altering quest-event ratios.
+
+Offline verification: **41 full-module scenarios and 25 profiler checks pass
+in actual Lua 5.1**. Seven complete modules execute with mocked engine/UI
+services. A 1,000-event modeled sequence across separate flushes produces zero
+additional candidate requests/refreshes versus 1,000/1,000 previously. Focus
+repaint, pending/contested recovery, real combat objective data, uncertain-read
+fallback, renderer-abort recovery, and profiler output pass their modeled
+assertions. These results do not prove native event cause, rate, frame safety,
+or rendered behavior.
+
+All 25 Lua files compile, both XML files parse, and six TOCs retain 162 exact-case
+load entries and identical original bytes. Full ZIP retains 45 files; Changed
+Files ZIP contains nine complete replacements relative to the authoritative
+input. Existing documentation is appended only; no libraries, assets, loaders,
+SavedVariables, polling, timers, hooks, or new production files are changed.
+The three-expert panel accepted the source-supported correction after fixing
+the render-commit recovery seam. All package bytes match the reviewed source.
+
+Next native gate: install this replacement and provide separate Retail/PTR
+idle and activity captures, including the new `supertracking events changed=…
+path=… path requests=…` line. Keep the normal quest activity and verify explicit
+focus changes, pending distance recovery, waypoint/offer contention, bonus/world
+focus icons, combat progress, item alignment, and post-combat reconciliation.
+Full steps and scoped acceptance criteria are in the appended section of
+SUPPLIED_PATCH_VALIDATION.md. Earlier unobserved feature/branch gates remain
+open. Uncertain or inaccessible focus may still request recovery on each path
+notification. This package is not marked release ready.

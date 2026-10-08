@@ -125,6 +125,37 @@ local function GetProfileTimeMilliseconds()
     return nil
 end
 
+local function GetPerformanceClockSeconds()
+    if type(_G.GetTimePreciseSec) == "function" then
+        local ok, value = pcall(_G.GetTimePreciseSec)
+        if ok and type(value) == "number" then
+            return value
+        end
+    end
+
+    if type(_G.GetTime) == "function" then
+        local ok, value = pcall(_G.GetTime)
+        if ok and type(value) == "number" then
+            return value
+        end
+    end
+
+    return nil
+end
+
+local function UpdatePerformanceElapsedTime()
+    if not Performance.enabled then
+        return
+    end
+
+    local now = GetPerformanceClockSeconds()
+    local started = Performance.startedAtSeconds
+    if type(now) == "number" and type(started) == "number" then
+        local elapsed = now - started
+        Performance.elapsedSeconds = elapsed > 0 and elapsed or 0
+    end
+end
+
 local function ResetPerformanceProfile()
     local enabled = Performance.enabled == true
 
@@ -138,6 +169,8 @@ local function ResetPerformanceProfile()
 
     Performance.enabled = enabled
     Performance.startedAtMilliseconds = GetProfileTimeMilliseconds()
+    Performance.startedAtSeconds = GetPerformanceClockSeconds()
+    Performance.elapsedSeconds = 0
     Performance.refreshRequestCount = 0
     Performance.coalescedRequestCount = 0
     Performance.trackerRefreshCount = 0
@@ -145,6 +178,13 @@ local function ResetPerformanceProfile()
     Performance.cachedPopulationRefreshCount = 0
     Performance.questLogScanCount = 0
     Performance.objectiveScanCount = 0
+    Performance.indexedObjectiveReadCount = 0
+    Performance.modernObjectiveReadCount = 0
+    Performance.questHeaderExpandCount = 0
+    Performance.questHeaderRestoreCount = 0
+    Performance.superTrackingChangedEventCount = 0
+    Performance.superTrackingPathEventCount = 0
+    Performance.superTrackingPathRefreshRequestCount = 0
     Performance.achievementListScanCount = 0
     Performance.achievementCriteriaScanCount = 0
     Performance.autoCompleteRequestCount = 0
@@ -163,6 +203,7 @@ local function ResetPerformanceProfile()
     Performance.maxRefreshMilliseconds = 0
     Performance.lastRefreshMilliseconds = 0
     Performance.questEvents = {}
+    Performance.refreshReasons = {}
 end
 
 if Performance.refreshRequestCount == nil then
@@ -200,10 +241,12 @@ function QuestKing:RecordPerformanceQuestEvent(eventName)
 end
 
 function QuestKing:SetPerformanceProfilingEnabled(enabled)
-    Performance.enabled = enabled and true or false
-    if Performance.enabled then
-        ResetPerformanceProfile()
+    if enabled then
         Performance.enabled = true
+        ResetPerformanceProfile()
+    else
+        UpdatePerformanceElapsedTime()
+        Performance.enabled = false
     end
 
     return Performance.enabled
@@ -215,6 +258,7 @@ function QuestKing:ResetPerformanceProfile()
 end
 
 function QuestKing:GetPerformanceProfile()
+    UpdatePerformanceElapsedTime()
     return Performance
 end
 
@@ -523,10 +567,6 @@ local function UpdateTrackerTitleText(displayMode, numAchievements, acceptedQues
 end
 
 local function LayoutRequestedButtons(postCombat)
-    if WatchButton.PrepareCombatOrder then
-        WatchButton:PrepareCombatOrder()
-    end
-
     local requestOrder = WatchButton.requestOrder or {}
     local requestCount = WatchButton.requestCount or 0
     local lastShown = nil
@@ -594,9 +634,10 @@ local function LayoutRequestedButtons(postCombat)
                 end
             end
 
-            -- Active ordinary rows can render while protected geometry stays
-            -- deferred. Retired rows keep their last display and reserved slot.
-            if not protected and not button._combatLayoutRetired then
+            -- Item rows remain ordinary, unprotected pooled rows. Their text,
+            -- line geometry, and progress bars can update while the secure
+            -- button's own anchor and the row's external anchor stay deferred.
+            if not protected then
                 button:Render()
             end
 
@@ -779,6 +820,7 @@ local function RunTrackerUpdate(
 
     LayoutRequestedButtons(postCombat)
 
+    SafeCallMethod(QuestKing, "CommitPresentedSuperTrackingState")
     SafeCallMethod(QuestKing, "PostCheckQuestFocus")
 
     local hooks = QuestKing.updateHooks or {}
@@ -841,6 +883,16 @@ end
 
 function QuestKing:QueueTrackerUpdate(forceBuild, postCombat, reason)
     self:RecordPerformanceMetric("refreshRequestCount", 1)
+
+    if Performance.enabled then
+        local reasonName = type(reason) == "string" and reason or "unspecified"
+        local reasons = Performance.refreshReasons
+        if type(reasons) ~= "table" then
+            reasons = {}
+            Performance.refreshReasons = reasons
+        end
+        reasons[reasonName] = (tonumber(reasons[reasonName]) or 0) + 1
+    end
 
     if trackerUpdatePending or trackerUpdateFlushQueued then
         self:RecordPerformanceMetric("coalescedRequestCount", 1)

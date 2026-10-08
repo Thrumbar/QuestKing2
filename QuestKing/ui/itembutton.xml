@@ -5,6 +5,10 @@
     <Button name="QuestKingItemButtonTemplate" inherits="SecureActionButtonTemplate" virtual="true">
         <Size x="26" y="26"/>
 
+        <Attributes>
+            <Attribute name="useOnKeyDown" type="boolean" value="false"/>
+        </Attributes>
+
         <Layers>
             <Layer level="ARTWORK">
                 <FontString parentKey="HotKey" inherits="NumberFontNormalSmallGray" justifyH="LEFT" text="RANGE_INDICATOR">

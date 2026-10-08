@@ -13,6 +13,12 @@ local pendingQuestID = nil
 local supertrackPending = false
 local activeSuperTrackedQuestID = 0
 local activeSuperTrackingType = nil
+local presentedSuperTrackedQuestID = 0
+local presentedSuperTrackingType = nil
+local presentedSuperTrackingStateKnown = false
+local refreshSuperTrackedQuestID = 0
+local refreshSuperTrackingType = nil
+local refreshSuperTrackingStateKnown = false
 
 local function NormalizeQuestID(questID)
     questID = tonumber(questID)
@@ -68,29 +74,34 @@ local function GetHighestPrioritySuperTrackingTypeCompat()
     if C_SuperTrack and C_SuperTrack.GetHighestPrioritySuperTrackingType then
         local ok, trackingType = SafePCall(C_SuperTrack.GetHighestPrioritySuperTrackingType)
         if ok then
-            return trackingType
+            return trackingType, trackingType == nil or type(trackingType) == "number"
         end
+
+        return nil, false
     end
 
-    return nil
+    -- Legacy clients may have quest focus without a tracking-type API.
+    return nil, true
 end
 
 local function GetSuperTrackedQuestIDCompat()
     if C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID then
         local ok, questID = SafePCall(C_SuperTrack.GetSuperTrackedQuestID)
         if ok then
-            return NormalizeQuestID(questID)
+            return NormalizeQuestID(questID), questID == nil
+                or (type(questID) == "number" and questID >= 0)
         end
     end
 
     if type(_G.GetSuperTrackedQuestID) == "function" then
         local ok, questID = SafePCall(_G.GetSuperTrackedQuestID)
         if ok then
-            return NormalizeQuestID(questID)
+            return NormalizeQuestID(questID), questID == nil
+                or (type(questID) == "number" and questID >= 0)
         end
     end
 
-    return 0
+    return 0, false
 end
 
 local function SetSuperTrackedQuestIDCompat(questID)
@@ -297,9 +308,16 @@ local function QuestHasDistance(questID)
 end
 
 local function SyncSuperTrackingCache()
-    activeSuperTrackedQuestID = GetSuperTrackedQuestIDCompat()
-    activeSuperTrackingType = GetHighestPrioritySuperTrackingTypeCompat()
-    return activeSuperTrackedQuestID, activeSuperTrackingType
+    local questID, questIDKnown = GetSuperTrackedQuestIDCompat()
+    local trackingType, trackingTypeKnown = GetHighestPrioritySuperTrackingTypeCompat()
+    activeSuperTrackedQuestID = questID
+    activeSuperTrackingType = trackingType
+    return questID, trackingType, questIDKnown and trackingTypeKnown
+end
+
+local function CaptureRefreshSuperTrackingState()
+    refreshSuperTrackedQuestID, refreshSuperTrackingType, refreshSuperTrackingStateKnown =
+        SyncSuperTrackingCache()
 end
 
 local function IsQuestSuperTrackingContested()
@@ -506,6 +524,7 @@ function QuestKing:PreCheckQuestFocus()
 
     if activeSuperTrackedQuestID ~= 0 and not IsQuestInLog(activeSuperTrackedQuestID) and CanControlQuestSuperTrack() then
         self:FocusClosestQuest()
+        CaptureRefreshSuperTrackingState()
         return
     end
 
@@ -513,6 +532,16 @@ function QuestKing:PreCheckQuestFocus()
         pendingQuestID = nil
         self:FocusClosestQuest()
     end
+
+    -- Getters and setters update the active cache outside a tracker refresh.
+    -- Keep a separate identity for the focus actually used by the next rows.
+    CaptureRefreshSuperTrackingState()
+end
+
+function QuestKing:CommitPresentedSuperTrackingState()
+    presentedSuperTrackedQuestID = refreshSuperTrackedQuestID
+    presentedSuperTrackingType = refreshSuperTrackingType
+    presentedSuperTrackingStateKnown = refreshSuperTrackingStateKnown
 end
 
 function QuestKing:OnQuestObjectivesCompleted(questID)
@@ -547,18 +576,46 @@ end
 function QuestKing:OnSuperTrackedQuestChanged(newQuestID)
     newQuestID = NormalizeQuestID(newQuestID)
 
-    local previousQuestID = activeSuperTrackedQuestID
-    SyncSuperTrackingCache()
+    local _, _, stateKnown = SyncSuperTrackingCache()
 
     if newQuestID ~= 0 then
         activeSuperTrackedQuestID = newQuestID
     end
 
-    if previousQuestID ~= activeSuperTrackedQuestID then
+    if not stateKnown
+        or not presentedSuperTrackingStateKnown
+        or presentedSuperTrackedQuestID ~= activeSuperTrackedQuestID
+        or presentedSuperTrackingType ~= activeSuperTrackingType then
         QueueTrackerRefresh(true)
     elseif pendingQuestID and CanControlQuestSuperTrack() and QuestHasDistance(pendingQuestID) then
         pendingQuestID = nil
         self:FocusClosestQuest()
         QueueTrackerRefresh(true)
     end
+end
+
+function QuestKing:OnSuperTrackingPathUpdated()
+    local questID, trackingType, stateKnown = SyncSuperTrackingCache()
+    local needsRefresh = not stateKnown
+        or not presentedSuperTrackingStateKnown
+        or presentedSuperTrackedQuestID ~= questID
+        or presentedSuperTrackingType ~= trackingType
+        or supertrackPending
+
+    if not needsRefresh and CanControlQuestSuperTrack() then
+        needsRefresh = (questID ~= 0 and not IsQuestInLog(questID))
+            or (pendingQuestID ~= nil and QuestHasDistance(pendingQuestID))
+    end
+
+    if not needsRefresh then
+        return false
+    end
+
+    -- Path geometry is not displayed by the tracker. Only queue the existing
+    -- refresh when identity or Pre/Post focus recovery needs its work.
+    if type(self.RecordPerformanceMetric) == "function" then
+        self:RecordPerformanceMetric("superTrackingPathRefreshRequestCount", 1)
+    end
+    QueueTrackerRefresh(false)
+    return true
 end

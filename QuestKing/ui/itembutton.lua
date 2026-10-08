@@ -75,6 +75,15 @@ local function IsInCombatLockdownCompat()
     return type(InCombatLockdown) == "function" and InCombatLockdown() or false
 end
 
+local function ResolveItemQuestLogIndex(itemButton)
+    local questLogIndex = itemButton.questLogIndex
+    if itemButton.questID and type(QuestKing.ResolveQuestLogIndexForItem) == "function" then
+        questLogIndex = QuestKing:ResolveQuestLogIndexForItem(itemButton.questID, questLogIndex)
+        itemButton.questLogIndex = questLogIndex
+    end
+    return questLogIndex
+end
+
 local function GetQuestLogSpecialItemInfoCompat(questLogIndex)
     if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
         return nil, nil, nil, nil
@@ -90,13 +99,17 @@ local function GetQuestLogSpecialItemInfoCompat(questLogIndex)
     return nil, nil, nil, nil
 end
 
-local function GetQuestLogSpecialItemCooldownCompat(questLogIndex)
-    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
-        return 0, 0, 0
+local function GetQuestLogSpecialItemCooldownCompat(questLogIndex, itemID)
+    if type(questLogIndex) == "number" and questLogIndex > 0
+        and type(GetQuestLogSpecialItemCooldown) == "function" then
+        local ok, start, duration, enable = pcall(GetQuestLogSpecialItemCooldown, questLogIndex)
+        if ok then
+            return start, duration, enable
+        end
     end
 
-    if type(GetQuestLogSpecialItemCooldown) == "function" then
-        local ok, start, duration, enable = pcall(GetQuestLogSpecialItemCooldown, questLogIndex)
+    if itemID and C_Container and type(C_Container.GetItemCooldown) == "function" then
+        local ok, start, duration, enable = pcall(C_Container.GetItemCooldown, itemID)
         if ok then
             return start, duration, enable
         end
@@ -105,15 +118,20 @@ local function GetQuestLogSpecialItemCooldownCompat(questLogIndex)
     return 0, 0, 0
 end
 
-local function IsQuestLogSpecialItemInRangeCompat(questLogIndex)
-    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
-        return nil
-    end
-
-    if type(IsQuestLogSpecialItemInRange) == "function" then
+local function IsQuestLogSpecialItemInRangeCompat(questLogIndex, itemID)
+    if type(questLogIndex) == "number" and questLogIndex > 0
+        and type(IsQuestLogSpecialItemInRange) == "function" then
         local ok, inRange = pcall(IsQuestLogSpecialItemInRange, questLogIndex)
         if ok then
             return inRange
+        end
+    end
+
+    if itemID and C_Item and type(C_Item.IsItemInRange) == "function" then
+        local ok, inRange = pcall(C_Item.IsItemInRange, itemID, "target")
+        if ok and not (QuestKing.IsSecretValue and QuestKing.IsSecretValue(inRange))
+            and type(inRange) == "boolean" then
+            return inRange and 1 or 0
         end
     end
 
@@ -326,8 +344,6 @@ local function ConfigureSecureItemUse(itemButton, questLogIndex, itemLink, itemI
     -- SecureActionButtonTemplate owns the protected use. Use a plain item:id
     -- token instead of a full item link. Full links route through item-name
     -- parsing on current clients and can taint C_Item.UseItemByName().
-    -- Match AnyUp regardless of the action-bar key-down preference.
-    SafeSetAttribute(itemButton, "useOnKeyDown", false)
     SafeSetAttribute(itemButton, "type1", "item")
     SafeSetAttribute(itemButton, "item", item)
     SafeSetAttribute(itemButton, "item1", item)
@@ -340,7 +356,7 @@ local function ConfigureSecureItemUse(itemButton, questLogIndex, itemLink, itemI
     end
 
     if type(itemButton.SetID) == "function" then
-        pcall(itemButton.SetID, itemButton, questLogIndex)
+        pcall(itemButton.SetID, itemButton, questLogIndex or 0)
     end
 
     return true
@@ -375,12 +391,14 @@ local function ClearButtonState(itemButton)
     end
 
     itemButton.questLogIndex = nil
+    itemButton.questID = nil
     itemButton.charges = nil
     itemButton.rangeTimer = nil
     itemButton.itemLink = nil
     itemButton.itemID = nil
     itemButton.baseButton = nil
     itemButton._pendingQuestLogIndex = nil
+    itemButton._pendingQuestID = nil
     itemButton._pendingItemLink = nil
     itemButton._stateRefreshPending = nil
 
@@ -485,11 +503,11 @@ local function ResetRangeIndicator(itemButton)
 end
 
 local function UpdateRangeIndicator(itemButton)
-    if not itemButton or not itemButton.questLogIndex or not itemButton.HotKey then
+    if not itemButton or not itemButton.HotKey then
         return
     end
 
-    local valid = IsQuestLogSpecialItemInRangeCompat(itemButton.questLogIndex)
+    local valid = IsQuestLogSpecialItemInRangeCompat(ResolveItemQuestLogIndex(itemButton), itemButton.itemID)
     if valid == 0 then
         itemButton.HotKey:Show()
         itemButton.HotKey:SetVertexColor(1.0, 0.1, 0.1)
@@ -527,8 +545,11 @@ local function ResizeItemButton(itemButton, displayedObj)
     itemButton:SetAlpha(GetCurrentItemButtonAlpha())
 end
 
-function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, charges, displayedObj)
-    if type(questLogIndex) ~= "number" or questLogIndex <= 0 or not link or not itemTexture then
+function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, charges, displayedObj, questID)
+    questID = questID or self.questID
+    local hasQuestID = type(questID) == "number" and questID > 0
+    local hasQuestLogIndex = type(questLogIndex) == "number" and questLogIndex > 0
+    if (not hasQuestLogIndex and not hasQuestID) or not link or not itemTexture then
         return nil
     end
 
@@ -541,9 +562,12 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
     if inCombat then
         local currentQuestLogIndex = itemButton.questLogIndex
         local currentItemLink = itemButton.itemLink
+        local sameQuest = hasQuestID and itemButton.questID == questID
+            or not hasQuestID and currentQuestLogIndex == questLogIndex
 
-        if currentQuestLogIndex ~= questLogIndex or currentItemLink ~= link then
+        if not sameQuest or currentItemLink ~= link then
             itemButton._pendingQuestLogIndex = questLogIndex
+            itemButton._pendingQuestID = questID
             itemButton._pendingItemLink = link
             if QuestKing.StartCombatTimer then
                 QuestKing:StartCombatTimer()
@@ -551,6 +575,7 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
             return itemButton
         end
 
+        itemButton.questLogIndex = questLogIndex
         itemButton.charges = charges
         itemButton.rangeTimer = itemButton.rangeTimer or 0
         itemButton._stateRefreshPending = nil
@@ -568,9 +593,11 @@ function QuestKing.WatchButton:SetItemButton(questLogIndex, link, itemTexture, c
     ApplyItemButtonZOrder(itemButton, self)
 
     itemButton._pendingQuestLogIndex = nil
+    itemButton._pendingQuestID = nil
     itemButton._pendingItemLink = nil
     itemButton._stateRefreshPending = nil
     itemButton.questLogIndex = questLogIndex
+    itemButton.questID = questID
     itemButton.charges = charges
     itemButton.rangeTimer = 0
     itemButton.itemLink = link
@@ -631,7 +658,14 @@ function QuestKing_QuestObjectiveItem_OnUpdate(self, elapsed)
 
     self.rangeTimer = RANGE_UPDATE_TIME
 
-    local link, itemTexture, charges = GetQuestLogSpecialItemInfoCompat(self.questLogIndex)
+    local questLogIndex = ResolveItemQuestLogIndex(self)
+    if not questLogIndex then
+        -- Keep the captured item usable without polling collapsed quest headers.
+        UpdateRangeIndicator(self)
+        return
+    end
+
+    local link, itemTexture, charges = GetQuestLogSpecialItemInfoCompat(questLogIndex)
     if not link or not itemTexture then
         if not self._stateRefreshPending then
             self._stateRefreshPending = true
@@ -651,6 +685,7 @@ function QuestKing_QuestObjectiveItem_OnUpdate(self, elapsed)
     if self.itemLink ~= link then
         if IsInCombatLockdownCompat() then
             self._pendingQuestLogIndex = self.questLogIndex
+            self._pendingQuestID = self.questID
             self._pendingItemLink = link
             if QuestKing.StartCombatTimer then
                 QuestKing:StartCombatTimer()
@@ -666,11 +701,14 @@ function QuestKing_QuestObjectiveItem_OnUpdate(self, elapsed)
 end
 
 function QuestKing_QuestObjectiveItem_UpdateCooldown(itemButton)
-    if not itemButton or not itemButton.questLogIndex or not itemButton.Cooldown then
+    if not itemButton or not itemButton.Cooldown then
         return
     end
 
-    local start, duration, enable = GetQuestLogSpecialItemCooldownCompat(itemButton.questLogIndex)
+    local start, duration, enable = GetQuestLogSpecialItemCooldownCompat(
+        ResolveItemQuestLogIndex(itemButton),
+        itemButton.itemID
+    )
     if not start then
         return
     end
@@ -701,8 +739,8 @@ function QuestKing_QuestObjectiveItem_PostClick(self, mouseButton)
         return
     end
 
-    local questLogIndex = self.questLogIndex
-    if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
+    local questLogIndex = ResolveItemQuestLogIndex(self)
+    if not self.itemLink and not questLogIndex then
         return
     end
 
@@ -732,7 +770,7 @@ function QuestKing_QuestObjectiveItem_OnEnter(self)
     end
 
     local shown = false
-    local questLogIndex = self.questLogIndex
+    local questLogIndex = ResolveItemQuestLogIndex(self)
 
     if QuestKing.IsMainline then
         if questLogIndex

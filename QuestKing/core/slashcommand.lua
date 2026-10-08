@@ -294,6 +294,30 @@ Command.refresh = function()
     Print("Tracker refreshed.")
 end
 
+local function PrintPerformanceCounts(label, counts)
+    if type(counts) ~= "table" then
+        return
+    end
+
+    local names = {}
+    for name, count in pairs(counts) do
+        if type(name) == "string" and (tonumber(count) or 0) > 0 then
+            tinsert(names, name)
+        end
+    end
+    table.sort(names)
+
+    if #names == 0 then
+        return
+    end
+
+    Print("%s:", label)
+    for index = 1, #names do
+        local name = names[index]
+        Print("  %s=%d", name, tonumber(counts[name]) or 0)
+    end
+end
+
 Command.perf = function(action)
     action = lower(tostring(action or "status"))
     if action == "r" then
@@ -357,6 +381,13 @@ Command.perf = function(action)
         or 0
 
     Print("Profiler=%s", profile.enabled and "on" or "off")
+    if type(profile.startedAtSeconds) == "number" then
+        local elapsed = tonumber(profile.elapsedSeconds) or 0
+        local refreshRate = elapsed > 0 and refreshCount / elapsed or 0
+        Print("duration=%.2f sec refresh/sec=%.3f", elapsed, refreshRate)
+    else
+        Print("duration=unavailable")
+    end
     Print(
         "requests=%d coalesced=%d refreshes=%d full=%d cached=%d autocomplete=%d",
         tonumber(profile.refreshRequestCount) or 0,
@@ -374,6 +405,22 @@ Command.perf = function(action)
         tonumber(profile.achievementCriteriaScanCount) or 0,
         tonumber(profile.bagScanCount) or 0,
         tonumber(profile.autoCompleteScanCount) or 0
+    )
+    Print(
+        "objective reads indexed=%d modern=%d",
+        tonumber(profile.indexedObjectiveReadCount) or 0,
+        tonumber(profile.modernObjectiveReadCount) or 0
+    )
+    Print(
+        "headers expand=%d restore=%d",
+        tonumber(profile.questHeaderExpandCount) or 0,
+        tonumber(profile.questHeaderRestoreCount) or 0
+    )
+    Print(
+        "supertracking events changed=%d path=%d path requests=%d",
+        tonumber(profile.superTrackingChangedEventCount) or 0,
+        tonumber(profile.superTrackingPathEventCount) or 0,
+        tonumber(profile.superTrackingPathRefreshRequestCount) or 0
     )
     Print(
         "layout=%d anchors=%d metrics=%d rows +%d/-%d",
@@ -396,6 +443,9 @@ Command.perf = function(action)
         combatQuestEventCount,
         combatRefreshRatio
     )
+
+    PrintPerformanceCounts("Quest event breakdown", profile.questEvents)
+    PrintPerformanceCounts("Refresh request reasons", profile.refreshReasons)
 end
 
 Command.profile = Command.perf

@@ -13,6 +13,7 @@ local format = string.format
 local pairs = pairs
 local sort = table.sort
 local tinsert = table.insert
+local select = select
 local tostring = tostring
 local type = type
 local wipe = wipe
@@ -128,6 +129,10 @@ local function HasModernContentTracking()
         and type(C_ContentTracking.GetTrackedIDs) == "function"
 end
 
+local function PackReturns(...)
+    return { n = select("#", ...), ... }
+end
+
 local function GetTrackedAchievementIDs()
     if type(QuestKing.RecordPerformanceMetric) == "function" then
         QuestKing:RecordPerformanceMetric("achievementListScanCount", 1)
@@ -137,50 +142,101 @@ local function GetTrackedAchievementIDs()
     local seen = {}
 
     local function AddID(id)
-        if type(id) == "number" and id > 0 and not seen[id] then
+        if type(id) ~= "number" or id <= 0 or id % 1 ~= 0 then
+            return false
+        end
+
+        if not seen[id] then
             seen[id] = true
             ids[#ids + 1] = id
         end
+        return true
     end
 
     if HasModernContentTracking() then
         local ok, trackedIDs = SafeCall(C_ContentTracking.GetTrackedIDs, CONTENT_TRACKING_TYPE_ACHIEVEMENT)
         if ok and type(trackedIDs) == "table" then
+            local valid = true
+            local count = #trackedIDs
+            for key in pairs(trackedIDs) do
+                if type(key) ~= "number" or key < 1 or key > count or key % 1 ~= 0 then
+                    valid = false
+                    break
+                end
+            end
             for index = 1, #trackedIDs do
-                AddID(trackedIDs[index])
+                if not AddID(trackedIDs[index]) then
+                    valid = false
+                    break
+                end
             end
+            if valid then
+                return ids, true
+            end
+            wipe(ids)
+            wipe(seen)
         end
     end
 
-    if type(GetNumTrackedAchievements) == "function" and type(GetTrackedAchievement) == "function" then
-        local okCount, count = SafeCall(GetNumTrackedAchievements)
-        count = okCount and (SafeNumber(count, 0) or 0) or 0
-
-        for index = 1, count do
-            local okID, achievementID = SafeCall(GetTrackedAchievement, index)
-            if okID then
-                AddID(achievementID)
+    -- Classic WatchFrame consumes every return from this bulk getter. The
+    -- fixed-width SafeCall helper would truncate a longer tracked list.
+    if type(GetTrackedAchievements) == "function" then
+        local results = PackReturns(pcall(GetTrackedAchievements))
+        if results[1] then
+            local valid = true
+            for index = 2, results.n do
+                if not AddID(results[index]) then
+                    valid = false
+                    break
+                end
             end
+            if valid then
+                return ids, true
+            end
+            wipe(ids)
+            wipe(seen)
         end
     end
 
-    if type(GetNumTrackedAchievements) == "function" and type(GetTrackedAchievementInfo) == "function" then
+    -- Retain the existing indexed compatibility fallbacks, but do not use
+    -- them as proof that a native tracked list is known to be empty.
+    if type(GetNumTrackedAchievements) == "function" then
         local okCount, count = SafeCall(GetNumTrackedAchievements)
-        count = okCount and (SafeNumber(count, 0) or 0) or 0
+        if okCount and type(count) == "number" and count >= 0 and count % 1 == 0 then
+            if type(GetTrackedAchievement) == "function" then
+                local valid = true
+                for index = 1, count do
+                    local okID, achievementID = SafeCall(GetTrackedAchievement, index)
+                    if not okID or not AddID(achievementID) then
+                        valid = false
+                        break
+                    end
+                end
+                if valid then
+                    return ids, false
+                end
+                wipe(ids)
+                wipe(seen)
+            end
 
-        for index = 1, count do
-            local okInfo, a1, a2 = SafeCall(GetTrackedAchievementInfo, index)
-            if okInfo then
-                if type(a1) == "number" then
-                    AddID(a1)
-                elseif type(a2) == "number" then
-                    AddID(a2)
+            if type(GetTrackedAchievementInfo) == "function" then
+                local valid = true
+                for index = 1, count do
+                    local okInfo, a1, a2 = SafeCall(GetTrackedAchievementInfo, index)
+                    local achievementID = type(a1) == "number" and a1 or a2
+                    if not okInfo or not AddID(achievementID) then
+                        valid = false
+                        break
+                    end
+                end
+                if valid then
+                    return ids, false
                 end
             end
         end
     end
 
-    return ids
+    return nil, false
 end
 
 local function BuildTrackedAchievementSignature(ids)
@@ -199,8 +255,13 @@ local function BuildTrackedAchievementSignature(ids)
 end
 
 function QuestKing:SyncTrackedAchievementCacheFromAPIs()
+    local ids, listKnown = GetTrackedAchievementIDs()
+    self._trackedAchievementCacheReady = listKnown
+    if not ids then
+        return EnsureTrackedAchievementCache(), self._lastTrackedAchievementSignature, nil
+    end
+
     local cache = {}
-    local ids = GetTrackedAchievementIDs()
 
     for index = 1, #ids do
         cache[ids[index]] = true
@@ -224,14 +285,42 @@ local function RefreshAchievementUIState()
     end
 end
 
+local function ShouldRefreshAchievementDisplay(self)
+    local perChar = _G.QuestKingDBPerChar or {}
+    local displayMode = perChar.displayMode or "combined"
+    if displayMode == "quests" or displayMode == "raids"
+        or (perChar.trackerCollapsed or 0) ~= 0 then
+        return false
+    end
+
+    local cache = self.trackedAchievements
+    if self._achievementRefreshPending or self._achievementRefreshNeedsListSettle
+        or self._trackedAchievementCacheReady ~= true or type(cache) ~= "table" then
+        return true
+    end
+
+    for achievementID, tracked in pairs(cache) do
+        if tracked and type(achievementID) == "number" then
+            return true
+        end
+    end
+
+    -- An empty list must still clear rows left from the previous tracked list.
+    local rows = self._achievementDisplayRows
+    return type(rows) == "table" and #rows > 0
+end
+
 function QuestKing:QueueAchievementTrackerRefresh(waitForListChange)
     if not waitForListChange then
         self._achievementDisplayDataReady = false
-        QueueTrackerRefresh(false)
+        if ShouldRefreshAchievementDisplay(self) then
+            QueueTrackerRefresh(false)
+        end
         return
     end
 
     self._achievementDisplayDataReady = false
+    self._trackedAchievementCacheReady = false
     self._achievementRefreshNeedsListSettle = true
     if self._achievementRefreshPending then
         return

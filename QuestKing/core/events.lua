@@ -629,8 +629,12 @@ end
 
 Events.BAG_UPDATE_DELAYED = function()
     local ok, changed = SafeCallMethod(QuestKing, "ScanQuestStartItemPopups")
+    local itemOK, itemChanged = SafeCallMethod(QuestKing, "RefreshQuestItemDisplayData")
     if ok and changed then
         UpdateTracker(false, "popup")
+    elseif itemOK and itemChanged then
+        -- Item data is already current; this request only needs to render it.
+        UpdateTracker(false, "itemdisplay")
     end
 end
 
@@ -890,6 +894,7 @@ Events.ZONE_CHANGED_NEW_AREA = function()
 end
 
 Events.SUPER_TRACKING_CHANGED = function()
+    SafeCallMethod(QuestKing, "RecordPerformanceMetric", "superTrackingChangedEventCount", 1)
     local questID = GetSuperTrackedQuestIDCompat()
     if not SafeCallMethod(QuestKing, "OnSuperTrackedQuestChanged", questID) then
         UpdateTracker(false, "supertracking")
@@ -897,7 +902,11 @@ Events.SUPER_TRACKING_CHANGED = function()
 end
 
 Events.SUPER_TRACKING_PATH_UPDATED = function()
-    UpdateTracker(false, "supertracking")
+    SafeCallMethod(QuestKing, "RecordPerformanceMetric", "superTrackingPathEventCount", 1)
+    if not SafeCallMethod(QuestKing, "OnSuperTrackingPathUpdated") then
+        SafeCallMethod(QuestKing, "RecordPerformanceMetric", "superTrackingPathRefreshRequestCount", 1)
+        UpdateTracker(false, "supertracking")
+    end
 end
 
 function QuestKing:AddQuestWatchByID(questID)
