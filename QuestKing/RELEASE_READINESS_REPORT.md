@@ -1,5 +1,206 @@
 # QuestKing 3.1.1 Release Readiness Report
 
+## Current Phase 1 — Protected mouse and combat row layout
+
+**Date:** 2026-10-09  
+**Phase:** 1 — Protected mouse handling and combat updates  
+**Implementation base:** `QuestKing_3.1.1_Quest_Start_Alert_Hotfix_Full.zip`  
+**Input SHA-256:** `7f7b4e119007b4a61ca62eef4729f7ee9f1ed536111db575a41fe15c522cdbf2`  
+**Acceptance:** `PARTIAL — runtime validation required`  
+**Release verdict:** **Release candidate**
+
+The requested quest-alert update is the implementation base. The older attached
+Classic Quest Item Hotfix is a reference, not the output base. The newer supplied
+client snapshots replace the older build labels in the audit. Differences in
+reference build numbers are not treated as defects.
+
+## Panel Verdict
+
+- **Runtime reviewer:** The existing tracker-wide combat stop was already
+  removed. However, retaining only the secure-item row's anchor is insufficient:
+  a new row can be placed directly over it. Keep the displayed anchor chain
+  stable when a combat-time population or ordering change needs deferral.
+- **API reviewer:** A blanket combat stop would regress objective text updates.
+  The supplied Retail and Forever definitions also allow secret results from
+  `IsProtected` and `IsAnchoringRestricted`. Check those results before
+  comparing them, following the pattern already used by the integration adapters.
+- **Performance reviewer:** Do not freeze every ordinary combat layout or add a
+  polling loop. Check for a changed row sequence first, reuse the displayed-order
+  array, and retain the existing refresh coordinator and regen reconciliation.
+
+The panel accepts the scoped implementation and offline results. Live protected
+execution, taint, and actual rendering remain unverified.
+
+## Confirmed Findings
+
+### QK-COMBAT-LAYOUT-01 — Mixed deferred and movable anchors overlap
+
+**Severity:** Medium.  
+**Affected:** The shared layout path on all supported clients, when a secure-item,
+protected, or anchor-restricted row is present and row membership or order changes
+during combat.
+
+**Input evidence:** `core/core.lua`, `LayoutRequestedButtons`, lines 525–599;
+`ui/watchbutton.lua`, `WatchButton:Wipe`, beginning at line 371.
+
+The input code defers an item row's external anchor but continues anchoring other
+rows using the new request order. Starting with ordinary row A followed by item
+row B, insertion of ordinary row C between them places C below A while B keeps
+its existing anchor below A. Both rows therefore occupy the same position.
+
+Executing the actual input layout function with mocked frames reproduced equal
+top coordinates of **-33** for C and B. This proves the layout inconsistency in
+the tested state; it does not reproduce a game-client protected-action error.
+
+**Correction:** Retain the displayed order while that connected layout needs
+combat deferral. Continue rendering requested, unprotected existing rows. Hide
+new ordinary rows until reconciliation, and retain old anchor-owner rows in
+the pool so their frames cannot be reassigned underneath secure-item anchors.
+
+### Security-state contract correction
+
+**Input evidence:** `core/core.lua`, `IsProtectedFrameSafe` and
+`IsAnchoringRestrictedSafe`, lines 221–238; `ui/watchbutton.lua`,
+`IsProtectedFrame`, lines 136–143.
+
+The input helpers compared returned security values outside `pcall` without
+first checking whether they were secret. Retail and Forever's supplied
+`SimpleScriptRegionAPIDocumentation.lua` marks both methods with
+`SecretReturnsForAspect = { Enum.SecretAspect.ObjectSecurity }`.
+The methods exist with boolean return contracts in all six supplied snapshots.
+
+In Retail 12.1.5's supplied definition, `IsAnchoringRestricted` begins at line
+376 and `IsProtected` at line 516. Era, TBC, and Mists retain ordinary boolean
+definitions for these calls.
+
+The helpers now treat secret or failed reads conservatively and defer the
+affected operation. Synthetic secret markers verify this routing; they do not
+simulate WoW's secret-value enforcement. No live secret-comparison exception is
+claimed as reproduced.
+
+## Lifecycle Review
+
+| Operation | Combat classification | Current handling |
+| --- | --- | --- |
+| Ordinary pooled row creation and acquisition | Safe only while the row is unprotected | Uses the existing ordinary Button path; deferred new rows remain hidden |
+| Secure item creation, parenting, click setup, attributes, size and visibility | Deferred during combat | Existing guards in `ui/itembutton.lua` retained |
+| Row and title mouse changes | Deferred for protected or unreadable security state | Existing mouse helper now recognizes secret results |
+| Quest text, objective state, completion text and title counts | Continues during combat | Existing data refresh remains active |
+| Existing ordinary row content geometry | Continues while the row is unprotected | Published anchor sequence retains its spacing as row heights change |
+| Population or ordering changes affecting secure anchors | Deferred together | New displayed-order retention prevents partial-chain overlap |
+| Retained row release and reuse | Deferred until reconciliation | `Wipe` preserves anchor owners; removed ordinary rows can be hidden |
+| Tracker scrolling, movement and viewport sizing | Deferred during combat | Existing tracker presentation guards retained |
+| PetTracker attachment to the last quest row | Deferred with the changed row layout | Adapter respects the shared deferred-layout flag |
+| Post-combat reconciliation | Uses existing regen event and queued refresh | Publishes requested order, shows new rows and releases retired rows |
+
+A removed secure-item row can remain displayed until combat ends because its
+secure button cannot be hidden or reassigned then. Its frame retains the original
+identity throughout that interval.
+
+## Corrections and Changed Files
+
+| File | Change |
+| --- | --- |
+| `core/core.lua` | Tracks displayed order; defers connected row membership/order changes; guards secret security-state results |
+| `ui/watchbutton.lua` | Retains anchor-owner rows during combat; guards secret protected-state results |
+| `ui/pettracker.lua` | Waits for the same deferred quest-row layout before repositioning its section |
+| `CONSOLIDATED_CHANGELOG.md` | Adds this correction to the single changelog |
+| `RELEASE_READINESS_REPORT.md` | Records this phase, evidence, test matrix and limitations |
+| `SUPPLIED_PATCH_VALIDATION.md` | Records the current checks |
+
+All six TOCs, load order, XML, fonts, textures, dependencies and SavedVariables
+declarations remain byte-identical to the quest-alert base. No bundled library
+directory exists in this archive; no external or Blizzard library is changed.
+The alert fix's `buttons/popup.lua` and the existing secure-item implementation
+remain byte-identical.
+
+The changed-files archive contains complete replacement files under
+`QuestKing/`. The full archive contains the complete addon. No manual code
+merging or new runtime helper is required.
+
+## Offline Validation
+
+**16 regression cases passed** using the actual modified layout coordinator,
+pool/mouse methods, and PetTracker deferral predicate with mocked frame services:
+
+1. Initial spacing and insertion before a secure-item row.
+2. Repeated combat refreshes retaining the displayed order.
+3. Objective row-height growth retaining spacing and updated text.
+4. Removal of an ordinary anchor-owner row without early recycling.
+5. Reappearance of a retained row during the same combat.
+6. Removal of an item row without reassignment or secure-item removal.
+7. Tracker collapse and post-combat row release.
+8. Publication of reordered and newly requested rows after combat.
+9. Full combat layout updates when no restricted anchor chain is involved.
+10. Conservative handling of secret protected-state results.
+11. Conservative handling of secret anchor-state results while text updates.
+12. Failed or missing security methods.
+13. Deferred mouse changes and post-combat application.
+14. Pool reuse clearing old quest IDs and click handlers.
+15. PetTracker attachment waiting for the deferred quest-row layout.
+16. One queued callback for ten refresh requests, current combat text/title
+    counts, and one post-combat reconciliation without polling.
+
+All **25 Lua sources** parse with the available **Lua 5.3** parser. Both XML files
+parse. The changed code uses Lua 5.1 syntax; an actual Lua 5.1 runtime/parser was
+not available for this turn, so a Lua 5.1 execution result is not claimed.
+All six TOCs resolve **27 exact-case load entries** in the same order.
+
+No live client was available. Mocks do not establish the absence of taint,
+protected-action failures, secret-value exceptions or visual clipping in WoW.
+No measured CPU or memory improvement is claimed.
+
+## Supplied-Source Matrix
+
+These are source and package checks, not six separate in-game test results.
+
+| Client | Supplied snapshot | Frame security contracts | Lua/XML and existing loader paths | Live quest/combat display |
+| --- | --- | --- | --- | --- |
+| Classic Era | 1.15.9.69722 | Checked; ordinary booleans | Checked | Not run |
+| Classic TBC | 2.5.6.69795 | Checked; ordinary booleans | Checked | Not run |
+| Retail | 12.1.0.69933 | Checked; ObjectSecurity secret aspect | Checked | Not run |
+| Retail/PTR | 12.1.5.70077 | Checked; ObjectSecurity secret aspect | Checked | Not run |
+| Mists Classic | 5.5.4.70032 | Checked; ordinary booleans | Checked | Not run |
+| WoW Forever | 1.60.1 (70235) | Checked; ObjectSecurity secret aspect | Checked | Not run |
+
+No new Cataclysm or Wrath snapshot was supplied in this turn. Existing compatibility
+paths remain unchanged; no fresh snapshot-specific or live result is asserted for
+those clients. Right-click menus, live options and scenario/task behavior are
+preserved from the requested base and are not declared newly validated here.
+
+## Test Procedure
+
+1. Exit WoW and replace the installed `Interface/AddOns/QuestKing` folder with
+   the folder in the full archive, then start the client.
+2. With a quest-starting item in bags, accept its quest. Confirm the offer alert
+   disappears and stays gone after bag updates and a reload.
+3. Track a quest with a usable quest-item button plus ordinary quests. Enter
+   combat and advance an objective. Check the text and title counts.
+4. While in combat, change quest focus or tracking when the client allows it.
+   Confirm existing rows and item icons stay aligned, without overlap. Newly
+   requested rows in a deferred chain should appear after combat.
+5. Leave combat. Confirm the requested order, retired-row removal and new rows
+   reconcile without another reload. Use the quest-item button again.
+6. Repeat collapse/restore and row additions/removals during combat. When
+   PetTracker is installed, confirm its section remains below the quest rows.
+7. Capture the client build and any new BugSack/BugJar or protected-action
+   errors. Repeat on the clients used for the release.
+
+## Acceptance Result and Remaining Risks
+
+**PARTIAL — runtime validation required. Release candidate.**
+
+The source correction and offline checks are complete. The Phase 1 live
+acceptance checks in the supplied recommended-order prompt remain outstanding.
+That prompt says: “Do not proceed to Phase 2 until these conditions are met.”
+This package therefore completes the scoped Phase 1 correction and leaves
+subsequent phase work at the requested acceptance gate.
+
+Remaining checks are actual combat rendering, secure-item alignment/use, mouse
+behavior, PetTracker placement, and deterministic reconciliation in WoW.
+
+## Earlier validation records
+
 ## Current hotfix — Forever ObjectiveTracker suppression
 
 **Base:** `QuestKing_3.1.1_Phase_8_Native_Abandon_Dialog_Restored.zip`  
@@ -759,247 +960,135 @@ quest-item readiness, actual bag effects, secure ancestry, and taint cannot be
 proven by an offline Lua runtime. Test the affected Classic quest before
 considering the reported issue resolved in game.
 
+## Quest-starting item alert hotfix — 2026-10-09
 
-## Classic quest-log refresh hotfix candidate — 2026-10-06
+### Scope and base
 
-The current package matches Blizzard's internal header-update calls and
-extends the existing profiler status with elapsed duration, event breakdowns,
-and request reasons. Its implementation base is the supplied 3.1.1 Classic
-Quest Item Hotfix Full archive; no TOC/version/library changes were made.
+Base: `QuestKing_3.1.1_Classic_Quest_Item_Hotfix_Full.zip`.
+This is a focused correction to the item-start offer alert. It does not advance
+the broader feature-coverage plan or certify unrelated addon features.
 
-All 25 Lua files compiled under actual Lua 5.1. Eighteen profiler checks and
-eight modeled header/event scenarios passed; six supplied native header-call
-patterns matched. The model assumes native suppression by the second header
-argument, which remains unproven without an active WoW client.
+### Panel verdict
 
-**Release status: Release candidate — PARTIAL; native runtime validation
-required.** The mandatory next gate is reproducing the reported MoP completion
-and turn-in case with a remaining quest beneath a collapsed Blizzard header,
-then confirming counters settle during a measured 60-second idle interval.
-Real objective, combat, population, and quest-item behavior must remain
-correct. See the appended section of SUPPLIED_PATCH_VALIDATION.md for exact
-steps and limits. Prior cross-version observations do not validate this
-candidate's native API behavior.
+| Review position | Finding and resolution |
+| --- | --- |
+| Runtime and protected actions | Fix popup data and acceptance identity; add no secure attributes, frame methods, hooks, or combat restrictions. Live client behavior still needs confirmation. |
+| Client APIs | Name matching cannot prove which quest an item starts. All six supplied client snapshots document native `ItemQuestInfo.questID`, `isActive`, and `C_QuestLog.IsOnQuest`; use exact quest identity first. |
+| Performance and reliability | Avoid new polling or broad quest-event bag scans. Recheck only cached candidate slots when popup state is dirty, keep existing bag scans, and deduplicate identical item IDs within a scan. |
 
+**Acceptance:** `PARTIAL — runtime validation required`.  
+**Release status:** `Release candidate`.
 
-## Current revision — Classic indexed objective reader — 2026-10-06
+### Confirmed findings
 
-**Release candidate — PARTIAL; not release ready.** This entry supersedes the
-preceding candidate's pending MoP gate: the reported MoP retest failed with
-4,264 refreshes in 486.41 seconds and 4,247 QUEST_LOG_UPDATE events.
+1. **Accepted quest item remains an offer — Medium.** In the supplied
+   `buttons/popup.lua`, `ScanQuestStartItemPopups` (lines 867–909) detects
+   candidates from a fixed item list but reads no native item quest metadata.
+   `ShouldHideQuestStartItemPopup` (lines 672–688) depends on a special item,
+   prior tracker-click association, eight hardcoded quest links, or text
+   matching. `OnQuestStartItemQuestAccepted` (lines 1111–1139) has no general
+   link for an item accepted from bags. If that item remains in inventory and
+   its name differs from the quest title/objectives, subsequent scans recreate
+   or retain its offer row. The offline harness reproduced this path on the
+   supplied base.
 
-Offline verification passed: 25 Lua files compile in Lua 5.1, 21 profiler
-checks and 28 objective/event checks pass, and eight header/event scenarios
-pass under their stated engine assumptions. The objective model also retains
-one explicit header-notification limitation. Native runtime gates remain
-open.
+2. **Pending item click can be associated with the wrong quest — Medium.**
+   The supplied acceptance handler associates any pending tracker item click
+   with the next accepted quest without comparing quest IDs. A player can
+   close the item offer, then accept an unrelated quest; the starter becomes
+   suppressed by an unrelated association. The correction requires the
+   item's quest ID to match the accepted quest ID.
 
-The revision keeps real event handling and changes normal Classic objective
-reads to Blizzard WatchFrame's verified-index backend. Successful zero counts
-are authoritative, and errors/unavailable indices retain fallback. Indexed
-money reads follow the same native source. New profiler lines identify reader
-backend use and temporary header calls. They do not assert which endpoint
-emitted a native event. See SUPPLIED_PATCH_VALIDATION.md for reproduction and
-acceptance steps.
+These defects affect the shared popup code on every branch using the relevant
+item. They do not establish that every quest-starting item is affected.
 
-| Branch | Supplied build | Current offline gate | Current native gate |
-| --- | --- | --- | --- |
-| Classic Era | 1.15.9.69722 | Indexed native call pattern verified; Lua syntax checked | Pending for this revision. Preceding candidate's 1,251.97-second capture had 26 refreshes and 8 log updates. |
-| BCC | 2.5.6.69795 | Indexed native call pattern verified; Lua syntax checked | Pending for this revision. Earlier counters describe older builds. |
-| MoP Classic | 5.5.4.70032 | Indexed native call pattern verified; mocked routing checked | Preceding candidate FAIL; this revision pending. |
-| Retail | 12.1.0.69933 | Mainline getter path retained; Lua syntax checked | Pending. |
-| Retail PTR | 12.1.5.70077 | Mainline getter path retained; Lua syntax checked | Pending. |
-| WoW Forever | 1.60.1 build 70235 | Existing Mainline routing retained; Lua syntax checked | Pending. |
-| Cataclysm Classic | No new snapshot supplied | Shared Lua syntax checked; no new source-contract claim | Pending. |
+### Corrections and full changed files
 
-No event filtering, secure frame changes, new polling/timers, SavedVariables,
-TOC changes, library changes, or new production files are included. The
-existing header-state restoration and quest-item capture are retained.
-Legacy text supplies numeric flash metadata when recognizable counts exist;
-metadata absent from that text requires live locale/quest coverage. Native
-WoW timing, taint, hardware item use, and combat visual correctness cannot be
-proven by the offline runtime.
+- `buttons/popup.lua`: cache each detected starter's bag slot, native quest ID,
+  and active state; validate cached slot identity before reading metadata;
+  hide accepted or completed linked quests; use `IsOnQuest` independently of
+  visible quest-log indices; associate acceptance by exact quest ID; preserve
+  identity through a tracker click and further loot; recheck cached slots on
+  popup-state invalidation.
+- `CONSOLIDATED_CHANGELOG.md`: append this entry to the existing single
+  changelog.
+- `RELEASE_READINESS_REPORT.md`: append this focused validation record.
 
-Input implementation archive SHA-256:
-`ba6023f015b2d6bfb4be6a40662c96e1a6bebb5f34e5e6a0916eef5b95e10166`.
-Final output archive hashes are supplied beside the ZIPs in the SHA256 text
-file; an archive cannot contain its own final checksum.
+No TOC, XML, library, other Lua file, SavedVariables declaration, or addon
+version marker changes. Full contents of all changed files are included in the
+changed-files archive. The complete archive retains the `QuestKing/` root.
 
+### Supplied-client contract matrix
 
-## Current revision — Achievement refresh eligibility — 2026-10-06
+| Client snapshot | Native container quest metadata | `C_QuestLog.IsOnQuest` | Acceptance payload | Actual client run |
+| --- | --- | --- | --- | --- |
+| Classic Era 1.15.9.69722 | Verified | Verified | questIndex, questId | Required |
+| BCC 2.5.6.69795 | Verified | Verified | questIndex, questId | Required |
+| Mists Classic 5.5.4.70032 | Verified | Verified | questIndex, questId | Required |
+| Mainline 12.1.0.69933 | Verified | Verified | questId | Required |
+| Mainline/PTR 12.1.5.70077 | Verified | Verified | questId | Required |
+| Forever 1.60.1 (70235) | Verified | Verified | questId | Required |
 
-**Release candidate — PARTIAL; not release ready.** This section is the current
-verification record and supersedes the preceding revision's pending retest
-description. The user reported multiple completed quests in 1,373.58 seconds,
-with 805 refreshes (0.586/second) and a 0.59 ms mean refresh body. This is a
-healthier activity capture, not a controlled idle acceptance test. Its missing
-reader/header lines do not by themselves identify the installed source.
+Evidence: each supplied snapshot's
+`Blizzard_APIDocumentationGenerated/ContainerDocumentation.lua` declares
+`GetContainerItemQuestInfo(containerIndex, slotIndex)` returning
+`ItemQuestInfo`, whose fields include a nullable numeric `questID` and a
+non-null boolean `isActive`. Its `QuestLogDocumentation.lua` declares
+`IsOnQuest(questID)` and the acceptance payload above. Supplied Classic and
+Mainline container UI code uses `questID and not isActive` for the
+quest-start exclamation mark.
 
-Achievement calls are 1,225 of 1,694 refresh requests (72.3%) despite zero
-achievement scans. The source confirms unnecessary broad progress presentation
-when there are no visible achievement rows. The new guard retains data
-invalidation and queues whenever tracked visible content, unknown/pending
-state, or stale rows require it. Every tracking-list, hook, startup, and world
-synchronization remains unconditional.
+Cataclysm and other older branches have no dedicated snapshot in this turn.
+Existing capability checks and fallbacks are retained; no fresh load or
+runtime certification is claimed for those branches.
 
-The API review also confirmed the missing Classic GetTrackedAchievements bulk
-reader. Complete valid native results now establish cache readiness; failures
-retain the prior cache and fail open. Modern GetTrackedIDs remains first choice
-when available. Existing indexed fallbacks do not establish empty readiness.
+### Offline verification
 
-The three-expert panel challenged empty-cache assumptions, startup races,
-hidden-state reopening, partial native results, and protected-action scope.
-The final runtime review found no blocker within this narrow change. Offline
-verification passed 42 actual-module achievement cases, all
-six supplied native tracked-list call patterns, Lua 5.1 compilation of all 25
-Lua files, XML parsing of both files, exact resolution of all 162 TOC entries,
-and complete ZIP/source equality. Prior quest/profiler implementation bytes and
-their documented validation limits are retained.
+- Reproduced the reported accepted-item alert on the unmodified supplied base.
+- Passed 20 regression cases executing the actual patched popup module and
+  event dispatcher with simulated client APIs: both acceptance payload shapes,
+  acceptance from bags, event timing before log/bag settlement, reload with
+  collapsed headers, native active state without a quest ID, abandonment,
+  turn-in, unrelated starters, cancelled item offers, tracker clicks, duplicate
+  loot/copies, stale slot identity, unrelated matching titles, invalid payloads,
+  unavailable/erroring APIs, secret metadata, and clean popup rendering.
+- Verified that normal clean popup rendering adds no inventory/metadata reads;
+  targeted popup-state reconciliation does not enumerate all bag slots.
+- Verified the native API structures and acceptance payloads in all six supplied
+  snapshots.
+- Parsed all 25 Lua files successfully with the available Lua 5.3 compiler.
+  Changed code uses only Lua 5.1-compatible constructs. An actual Lua 5.1
+  compiler/runtime was unavailable; the offline execution results above are
+  from Lua 5.3, not an active WoW client.
+- Verified only the three listed files differ from the supplied base, that all
+  six TOCs match byte for byte, and that all other files, including any libraries,
+  remain unchanged.
 
-| Branch | Supplied build | Current source/package gate | Native gate for this revision |
-| --- | --- | --- | --- |
-| Classic Era | 1.15.9.69722 | Bulk vararg pattern verified; static package PASS | Pending. |
-| BCC | 2.5.6.69795 | Bulk vararg pattern verified; static package PASS | Pending. |
-| MoP Classic | 5.5.4.70032 | Bulk vararg pattern verified; static package PASS | Latest activity improved; eligibility guard pending. |
-| Retail | 12.1.0.69933 | Modern array pattern verified; static package PASS | Pending. |
-| Retail PTR | 12.1.5.70077 | Modern array pattern verified; static package PASS | Pending. |
-| WoW Forever | 1.60.1 build 70235 | Modern array pattern verified; static package PASS | Pending. |
-| Cataclysm Classic | No standalone new snapshot | Lua/package syntax checked; no new branch-runtime claim | Pending. |
+### Exact client test procedure
 
-This revision changes one Lua file beyond the indexed-reader candidate and
-updates the three existing Markdown records. Relative to the supplied input,
-the Changed Files ZIP contains four complete Lua and three complete Markdown
-replacements. The Full ZIP retains all 45 source files. All TOCs, libraries,
-XML, assets, and other files remain byte-identical to the supplied input.
+1. Install the full package over the supplied QuestKing build and start/reload
+   the client once to load the patch. Enable quest-starting item popups.
+2. Hold an item that starts an unaccepted quest. Confirm one offer alert.
+3. Accept its quest directly from bags while the item remains in inventory.
+   Confirm the offer disappears and stays gone after another bag update.
+4. Relog with that quest active and the item still in bags. Confirm no offer
+   alert. On Classic, repeat with the quest's log header collapsed.
+5. Where possible, abandon that quest while retaining the item. Confirm the
+   available offer returns without a reload. Reaccept and confirm it clears.
+6. Complete/turn in the quest while retaining the starter where applicable.
+   Confirm the completed linked quest does not produce a new offer.
+7. Keep a second unrelated starter in bags. Confirm it remains visible when
+   accepting the first quest. Open an item offer through QuestKing, cancel it,
+   then accept an unrelated quest; confirm that starter is still available.
+8. Move the starter between bags or loot another copy. Confirm there is one
+   offer row when appropriate and no repeated alert for the active quest.
 
-Acceptance requires the separate no-tracked idle/activity intervals, visible
-tracked progress, untracking, hidden-mode reopening, startup restoration, and
-continued real quest/item/combat behavior listed in SUPPLIED_PATCH_VALIDATION.md.
-Native timing, engine notifications, taint, and protected input behavior cannot
-be established by mocked engine APIs. No new timer, polling, hook,
-SavedVariable, production file, protected mutation, or quest-event filtering
-is introduced.
+### Remaining limitations
 
-Input implementation archive SHA-256 remains
-`ba6023f015b2d6bfb4be6a40662c96e1a6bebb5f34e5e6a0916eef5b95e10166`.
-Current output hashes are supplied in the adjacent SHA256 text file.
+Real inventory state changes, secure ancestry, actual item use, combat taint,
+and login restoration require in-game checks. The existing curated starter
+item list is unchanged. If native metadata is unavailable for an item, existing
+known-quest/special-item/text fallbacks remain; no exact relationship can be
+claimed from item presence alone. Loader compatibility is inherited from the
+supplied TOCs and was intentionally not changed.
 
-
-## Current revision — Cached quest header-access preflight — 2026-10-06
-
-**Release candidate — PARTIAL; not release ready.** The latest explicitly
-identified MoP last-patch capture records 324 refreshes in 548.72 seconds,
-0.590 refreshes/second, a 0.62 ms mean refresh body, 345 indexed/zero modern
-regular objective reads, and no achievement requests. The overall refresh
-frequency remains similar to the preceding activity capture. Native header
-attempts are 294 expand / 294 restore; 314 of 339 quest events are log updates.
-These correlated counters do not establish native event causation or idle
-settling. The sample includes quest activity and no combat quest events.
-
-The three-expert panel approved a conservative optimization rather than an
-indexing assumption: cached display/item scans check whether their exact
-eligible rows already have matching live indices before expanding headers.
-The legacy title getter, when present, must agree on quest identity at that
-index. Preflight stores no index or row state. Callbacks resolve again, and
-inaccessible rows preserve expansion/restoration. Full population discovery
-continues to expand headers, including new and unwatched quests.
-
-The runtime review approved the exact implementation after challenging stale
-indices, hidden quests, and item/combat behavior. 35
-actual-module Lua 5.1 regression scenarios passed with engine/UI mocks;
-Classic native display-read patterns matched all three supplied Classic
-snapshots. Package validation passed for all 25 Lua files, both XML files,
-all 162 TOC load entries, ZIP integrity/source equality, and byte preservation
-outside the four Lua and three Markdown replacement files. Prior achievement
-code and its 42-check verification record are retained exactly.
-One explicit modeled limitation remains when required inaccessible-row
-expansion posts delayed log events despite the header flag; zero checks failed.
-
-| Branch | Source/package result | Native result for this revision |
-| --- | --- | --- |
-| Era 1.15.9.69722 | Direct-read pattern verified; syntax/paths PASS | Pending. |
-| BCC 2.5.6.69795 | Direct-read pattern verified; syntax/paths PASS | Pending. |
-| MoP 5.5.4.70032 | Direct-read pattern verified; syntax/paths PASS | Last-patch data recorded above; new preflight pending. |
-| Retail 12.1.0.69933 | Syntax/paths PASS; no index-independence claim | Pending. |
-| PTR 12.1.5.70077 | Syntax/paths PASS; no index-independence claim | Pending. |
-| Forever 1.60.1 build 70235 | Syntax/paths PASS; no index-independence claim | Pending. |
-| Cataclysm Classic | No standalone new snapshot; Lua/package syntax checked | Pending. |
-
-Native acceptance requires separate 60-second idle captures with open and
-collapsed Blizzard headers, identifying whether a collapsed header contains
-displayed quests, plus genuine objective, item, combat, population, and tracked
-achievement checks. Required header access may remain and the patch does not
-claim complete loop elimination. A WoW client is unavailable here; mocks cannot
-prove native notification timing, secure input, taint, or visual restoration.
-
-All six TOCs, libraries, XML, assets, and other supplied files remain
-byte-identical. No new hook, timer, polling, SavedVariable, production file,
-protected mutation, or event filter was added. Current input and output
-checksums are supplied in the adjacent SHA256 text file.
-
-
-## Current revision — Supertracking path eligibility — 2026-10-08
-
-**Release candidate — PARTIAL; native Retail/PTR validation required.**
-This entry supersedes preceding frequency-gate statuses using the supplied
-six-client captures of the last header-access package. It does not accept
-unobserved UI, taint, combat, option, or scenario behavior from counters alone.
-
-| Client / build | Prior revision native idle | Prior revision activity | Current correction gate |
-| --- | --- | --- | --- |
-| Era 1.15.9.69722 | PASS — 193.48 s, zero requests/refreshes | 59 refreshes / 3,169.55 s; 0.019/s | Shared Lua syntax and modeled legacy focus pass; native focus behavior pending |
-| BCC 2.5.6.69795 | PASS — 329.77 s, zero requests/refreshes | 47 / 1,564.48 s; 0.030/s | Shared Lua syntax and modeled legacy focus pass; native focus behavior pending |
-| MoP 5.5.4.70032 | PASS — 481.11 s, zero requests/refreshes | 144 / 995.29 s; 0.145/s; 16 balanced header pairs | Earlier quiet-idle gate satisfied; shared focus correction native validation pending |
-| Forever 1.60.1.70235 | PASS — 674.99 s, zero requests/refreshes | 226 / 4,683.98 s; 0.048/s | Supplied API contract pass; shared focus correction native validation pending |
-| Retail 12.1.0.69933 | Inconclusive — duration 0.00 s | FAIL frequency — 5,518 / 1,448.79 s; 3.809/s | Path correction passes source/model gates; timed idle and activity retest required |
-| PTR 12.1.5.70077 | PASS — 431.70 s, zero requests/refreshes | FAIL frequency — 2,660 / 1,626.72 s; 1.635/s | Path correction passes source/model gates; activity/focus retest required |
-| Cataclysm Classic | No new capture or snapshot | Not established | Shared Lua syntax only; no advertised loader changes |
-
-MoP's idle includes one indexed read outside any recorded refresh; this is not
-evidence of an idle refresh loop. Activity differs across captures and the
-lower observed rate is not a controlled speedup result. All six captures have
-balanced header calls and no achievement requests. The preceding quest,
-objective-reader, item, header-access, and achievement implementations are
-retained byte-for-byte in this revision.
-
-Retail/PTR supertracking shares are 96.22% and 96.12% of requests before
-coalescing. The reason combined native changed/path events and focus-module
-requests, so the capture cannot assign all executed refreshes to a path event.
-Source proves that the old path handler always queued presentation. The tracker
-has no navigation-geometry consumer, but path-driven pending focus recovery
-must remain available.
-
-The candidate gates unchanged path notifications using a separate committed
-quest/type identity and existing Pre/Post eligibility. Getter/setter cache
-updates cannot consume the presentation comparison. A successful generation
-commits the staged state before PostCheck; failed renders retain their recovery
-opportunity. Focus mutations, genuine quest events, and combat reconciliation
-remain in existing paths. Three independent counters distinguish native changed
-and path events from path requests without altering quest-event ratios.
-
-Offline verification: **41 full-module scenarios and 25 profiler checks pass
-in actual Lua 5.1**. Seven complete modules execute with mocked engine/UI
-services. A 1,000-event modeled sequence across separate flushes produces zero
-additional candidate requests/refreshes versus 1,000/1,000 previously. Focus
-repaint, pending/contested recovery, real combat objective data, uncertain-read
-fallback, renderer-abort recovery, and profiler output pass their modeled
-assertions. These results do not prove native event cause, rate, frame safety,
-or rendered behavior.
-
-All 25 Lua files compile, both XML files parse, and six TOCs retain 162 exact-case
-load entries and identical original bytes. Full ZIP retains 45 files; Changed
-Files ZIP contains nine complete replacements relative to the authoritative
-input. Existing documentation is appended only; no libraries, assets, loaders,
-SavedVariables, polling, timers, hooks, or new production files are changed.
-The three-expert panel accepted the source-supported correction after fixing
-the render-commit recovery seam. All package bytes match the reviewed source.
-
-Next native gate: install this replacement and provide separate Retail/PTR
-idle and activity captures, including the new `supertracking events changed=…
-path=… path requests=…` line. Keep the normal quest activity and verify explicit
-focus changes, pending distance recovery, waypoint/offer contention, bonus/world
-focus icons, combat progress, item alignment, and post-combat reconciliation.
-Full steps and scoped acceptance criteria are in the appended section of
-SUPPLIED_PATCH_VALIDATION.md. Earlier unobserved feature/branch gates remain
-open. Uncertain or inaccessible focus may still request recovery on each path
-notification. This package is not marked release ready.

@@ -55,8 +55,6 @@ local TRACKER_POPULATION_AUTOMATIC = "automatic"
 local TRACKER_POPULATION_WATCHED = "watched"
 local TRACKER_POPULATION_ALL = "all"
 
-local ResolveMatchingQuestLogIndex
-
 local IsSecretValue = QuestKing.IsSecretValue or function()
     return false
 end
@@ -769,76 +767,14 @@ local function ObjectiveTextAlreadyHasProgress(text)
     return false
 end
 
-local function GetIndexedQuestObjectives(questLogIndex, allowPartial)
-    if type(questLogIndex) ~= "number" or questLogIndex <= 0
-        or type(_G.GetNumQuestLeaderBoards) ~= "function"
-        or type(_G.GetQuestLogLeaderBoard) ~= "function" then
-        return nil
-    end
-
-    if type(QuestKing.RecordPerformanceMetric) == "function" then
-        QuestKing:RecordPerformanceMetric("indexedObjectiveReadCount", 1)
-    end
-
-    local okNum, numObjectives = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndex)
-    numObjectives = SafeNumber(numObjectives, nil)
-    if not okNum then
-        return nil
-    end
-    if allowPartial then
-        numObjectives = numObjectives or 0
-    elseif not numObjectives or numObjectives < 0
-        or numObjectives ~= floor(numObjectives) then
-        return nil
-    end
-
-    local out = {}
-    for i = 1, numObjectives do
-        local okObj, text, objectiveType, finished =
-            SafeCall(_G.GetQuestLogLeaderBoard, i, questLogIndex)
-        if not allowPartial and (not okObj
-            or (text ~= nil and type(text) ~= "string")
-            or (text == nil and objectiveType == nil and finished == nil)) then
-            return nil
-        end
-        if okObj and (not allowPartial or text) then
-            text = SafeString(text, "") or ""
-            local numFulfilled, numRequired
-            if not allowPartial then
-                numFulfilled, numRequired = match(text, "(%d+)%s*/%s*(%d+)%D*$")
-            end
-            out[#out + 1] = {
-                text = text,
-                type = objectiveType,
-                finished = finished and true or false,
-                numFulfilled = SafeNumber(numFulfilled, nil),
-                numRequired = SafeNumber(numRequired, nil),
-            }
-        end
-    end
-
-    return out
-end
-
-local function GetQuestObjectives(questID, questLogIndex, classicIndexedRead)
+local function GetQuestObjectives(questID)
     local out = {}
 
     if type(questID) ~= "number" or questID <= 0 then
         return out
     end
 
-    if classicIndexedRead then
-        -- Classic's WatchFrame reads the log directly, including zero objectives.
-        local indexedObjectives = GetIndexedQuestObjectives(questLogIndex)
-        if indexedObjectives then
-            return indexedObjectives
-        end
-    end
-
     if C_QuestLog and C_QuestLog.GetQuestObjectives then
-        if type(QuestKing.RecordPerformanceMetric) == "function" then
-            QuestKing:RecordPerformanceMetric("modernObjectiveReadCount", 1)
-        end
         local ok, objectives = SafeCall(C_QuestLog.GetQuestObjectives, questID)
         if ok and type(objectives) == "table" then
             for i = 1, #objectives do
@@ -860,16 +796,22 @@ local function GetQuestObjectives(questID, questLogIndex, classicIndexedRead)
         end
     end
 
-    if not classicIndexedRead then
-        questLogIndex = questLogIndex or GetQuestLogIndexByIDCompat(questID)
-        local indexedObjectives = GetIndexedQuestObjectives(questLogIndex, true)
-        if indexedObjectives then
-            return indexedObjectives
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    if questLogIndex and _G.GetNumQuestLeaderBoards and _G.GetQuestLogLeaderBoard then
+        local okNum, numObjectives = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndex)
+        if okNum then
+            for i = 1, SafeNumber(numObjectives, 0) or 0 do
+                local okObj, text, objectiveType, finished = SafeCall(_G.GetQuestLogLeaderBoard, i, questLogIndex, true)
+                if okObj and text then
+                    out[#out + 1] = {
+                        text = SafeString(text, "") or "",
+                        type = objectiveType,
+                        finished = finished and true or false,
+                    }
+                end
+            end
         end
-    end
-
-    if _G.GetQuestObjectiveInfo and _G.GetNumQuestLeaderBoards
-        and not _G.GetQuestLogLeaderBoard then
+    elseif _G.GetQuestObjectiveInfo and _G.GetNumQuestLeaderBoards then
         local okNum, numObjectives = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndex or 0)
         if okNum then
             for i = 1, SafeNumber(numObjectives, 0) or 0 do
@@ -888,19 +830,9 @@ local function GetQuestObjectives(questID, questLogIndex, classicIndexedRead)
     return out
 end
 
-local function GetRequiredMoney(questID, questLogIndex, classicIndexedRead)
+local function GetRequiredMoney(questID)
     if type(questID) ~= "number" or questID <= 0 then
         return 0
-    end
-
-    if classicIndexedRead
-        and type(questLogIndex) == "number" and questLogIndex > 0
-        and type(_G.GetQuestLogRequiredMoney) == "function" then
-        local ok, amount = SafeCall(_G.GetQuestLogRequiredMoney, questLogIndex)
-        amount = SafeNumber(amount, nil)
-        if ok and amount and amount >= 0 then
-            return amount
-        end
     end
 
     if C_QuestLog and C_QuestLog.GetRequiredMoney then
@@ -1490,9 +1422,40 @@ local function GetKindOrder(kind)
     return 60
 end
 
+local campaignTitleIcon = {}
+
+local function GetCampaignTitleIcon()
+    local size = floor(SafeNumber(opt.fontSize, 12) or 12)
+    if size < 1 then
+        size = 12
+    end
+
+    if campaignTitleIcon.size == size then
+        return campaignTitleIcon.markup
+    end
+
+    if not campaignTitleIcon.checked then
+        campaignTitleIcon.checked = true
+        if C_Texture and type(C_Texture.GetAtlasInfo) == "function" then
+            local ok, info = SafeCall(C_Texture.GetAtlasInfo, "CampaignAvailableQuestIcon")
+            campaignTitleIcon.hasAtlas = ok and type(info) == "table"
+        end
+    end
+
+    -- Inline markup follows the title font without adding frames to pooled rows.
+    campaignTitleIcon.size = size
+    if campaignTitleIcon.hasAtlas then
+        campaignTitleIcon.markup = ("|A:CampaignAvailableQuestIcon:%d:%d:0:0|a"):format(size, size)
+    else
+        campaignTitleIcon.markup = ("|TInterface\\Icons\\INV_Misc_Book_09:%d:%d:0:0|t"):format(size, size)
+    end
+
+    return campaignTitleIcon.markup
+end
+
 local function GetKindPrefix(kind)
     if kind == QUEST_KIND.CAMPAIGN then
-        return "[Campaign]"
+        return GetCampaignTitleIcon()
     elseif kind == QUEST_KIND.WORLD_QUEST then
         return "[World]"
     elseif kind == QUEST_KIND.SPECIAL_ASSIGNMENT then
@@ -1551,18 +1514,9 @@ function QuestKing:GetQuestTagBracket(questID)
     return nil
 end
 
-function QuestKing:GetQuestObjectivesText(questID, questLogIndex, preferModernObjectives)
+function QuestKing:GetQuestObjectivesText(questID)
     local out = {}
-    local classicIndexedRead = IsClassicFamilyCompat()
-        and not preferModernObjectives
-        and not IsTaskQuest(questID)
-        and not IsWorldQuest(questID)
-    if classicIndexedRead then
-        questLogIndex = ResolveMatchingQuestLogIndex(questID, questLogIndex)
-    else
-        questLogIndex = nil
-    end
-    local objectives = GetQuestObjectives(questID, questLogIndex, classicIndexedRead)
+    local objectives = GetQuestObjectives(questID)
     local hasProgressBarObjective = false
 
     for index = 1, #objectives do
@@ -1575,10 +1529,6 @@ function QuestKing:GetQuestObjectivesText(questID, questLogIndex, preferModernOb
 
             if objectiveType == "progressbar" then
                 hasProgressBarObjective = true
-                if classicIndexedRead and not IsSafeNumber(numFulfilled) then
-                    numFulfilled = GetQuestProgressPercent(questID)
-                    numRequired = IsSafeNumber(numFulfilled) and 100 or nil
-                end
             elseif IsSafeNumber(numRequired)
                 and numRequired > 0
                 and text ~= ""
@@ -1597,7 +1547,7 @@ function QuestKing:GetQuestObjectivesText(questID, questLogIndex, preferModernOb
         end
     end
 
-    local requiredMoney = GetRequiredMoney(questID, questLogIndex, classicIndexedRead)
+    local requiredMoney = GetRequiredMoney(questID)
     if requiredMoney > 0 then
         local playerMoney = SafeNumber(_G.GetMoney and _G.GetMoney() or 0, 0) or 0
         local complete = playerMoney >= requiredMoney
@@ -2353,6 +2303,8 @@ local questContextMenu
 local lastQuestContextMenuQuestID
 local lastQuestContextMenuOpenTime = 0
 local QUEST_CONTEXT_MENU_GUARD_SECONDS = 0.25
+local ResolveMatchingQuestLogIndex
+
 local QUEST_TRACKING_BACKEND_SUPERTRACK = "supertrack"
 local QUEST_TRACKING_BACKEND_WATCH = "watch"
 
@@ -2828,6 +2780,7 @@ function mouseHandlerAvailableCampaign:TitleButtonOnEnter()
     end
 
     tooltip:SetText(row.title or CAMPAIGN_HEADER, 1, 0.82, 0)
+    AddQuestTypeLine(tooltip, QUEST_KIND.CAMPAIGN)
     AddTooltipLine(tooltip, row.text, AVAILABLE_CAMPAIGN_COLOR.r, AVAILABLE_CAMPAIGN_COLOR.g, AVAILABLE_CAMPAIGN_COLOR.b)
 
     if row.questID then
@@ -2869,11 +2822,7 @@ function QuestKing:GetQuestDisplayData(questLogIndex)
     end
 
     local kind = self:GetQuestKind(questID, info)
-    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(
-        questID,
-        questLogIndex,
-        kind ~= QUEST_KIND.NORMAL and kind ~= QUEST_KIND.CAMPAIGN
-    )
+    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID)
     local percent = nil
 
     if hasProgressBarObjective then
@@ -2927,7 +2876,7 @@ function QuestKing:GetTaskQuestDisplayData(questID, kindOverride)
     end
 
     local kind = kindOverride or self:GetQuestKind(questID)
-    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID, nil, true)
+    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID)
     local percent = nil
 
     if hasProgressBarObjective then
@@ -3436,11 +3385,7 @@ local function ExpandCollapsedQuestLogHeaders()
         local isHeader, isCollapsed = GetQuestHeaderState(questLogIndex)
         if isHeader and isCollapsed then
             collapsedHeaderIndices[#collapsedHeaderIndices + 1] = questLogIndex
-            -- Match Blizzard's internal QuestMapFrame_ResetFilters calls.
-            if type(QuestKing.RecordPerformanceMetric) == "function" then
-                QuestKing:RecordPerformanceMetric("questHeaderExpandCount", 1)
-            end
-            SafeCall(_G.ExpandQuestHeader, questLogIndex, true)
+            SafeCall(_G.ExpandQuestHeader, questLogIndex)
             numEntries = GetNumQuestLogEntriesCompat()
         end
 
@@ -3457,10 +3402,7 @@ local function RestoreCollapsedQuestLogHeaders(collapsedHeaderIndices)
     end
 
     for i = #collapsedHeaderIndices, 1, -1 do
-        if type(QuestKing.RecordPerformanceMetric) == "function" then
-            QuestKing:RecordPerformanceMetric("questHeaderRestoreCount", 1)
-        end
-        SafeCall(_G.CollapseQuestHeader, collapsedHeaderIndices[i], true)
+        SafeCall(_G.CollapseQuestHeader, collapsedHeaderIndices[i])
     end
 end
 
@@ -3485,32 +3427,6 @@ local function RunQuestLogPopulationScan(expandHeaders, callback)
     end
 end
 
-local function CachedQuestRowsNeedHeaderExpansion(rows, itemDataOnly)
-    for i = 1, #rows do
-        local row = rows[i]
-        if row and row.rowType ~= ROW_TYPE_AVAILABLE_CAMPAIGN
-            and row.rowType ~= ROW_TYPE_TASK_QUEST
-            and (not itemDataOnly or type(row.displayData) == "table") then
-            local questLogIndex = ResolveMatchingQuestLogIndex(row.questID, row.questLogIndex)
-            if not questLogIndex then
-                return true
-            end
-
-            -- Classic objective/item readers use the legacy index projection.
-            -- A namespaced identity alone must not bypass header expansion.
-            if type(_G.GetQuestLogTitle) == "function" then
-                local ok, _, _, _, isHeader, _, _, _, questID =
-                    SafeCall(_G.GetQuestLogTitle, questLogIndex)
-                if not ok or isHeader or SafeNumber(questID, nil) ~= row.questID then
-                    return true
-                end
-            end
-        end
-    end
-
-    return false
-end
-
 function QuestKing:RefreshQuestItemDisplayData()
     local rows = self.questSortTable
     if self._questSortTableReady ~= true or type(rows) ~= "table" or #rows == 0 then
@@ -3520,8 +3436,6 @@ function QuestKing:RefreshQuestItemDisplayData()
     local changed = false
     local shouldExpandHeaders = self.trackerQuestPopulationResolvedPolicy == TRACKER_POPULATION_ALL
         or IsClassicFamilyCompat()
-    shouldExpandHeaders = shouldExpandHeaders
-        and CachedQuestRowsNeedHeaderExpansion(rows, true)
     RunQuestLogPopulationScan(shouldExpandHeaders, function()
         for i = 1, #rows do
             local row = rows[i]
@@ -3703,8 +3617,6 @@ local function RefreshCachedQuestRows(
     local refreshed = false
     local shouldExpandHeaders = self.trackerQuestPopulationResolvedPolicy == TRACKER_POPULATION_ALL
         or IsClassicFamilyCompat()
-    shouldExpandHeaders = shouldExpandHeaders
-        and CachedQuestRowsNeedHeaderExpansion(rows, false)
 
     RunQuestLogPopulationScan(shouldExpandHeaders, function()
         refreshed = true

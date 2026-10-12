@@ -303,6 +303,28 @@ local function GetContainerItemIDCompat(bagID, slotID)
     return nil
 end
 
+local function RefreshQuestStartItemBagInfo(itemID, bagInfo)
+    if type(bagInfo) ~= "table"
+        or GetContainerItemIDCompat(bagInfo.bagID, bagInfo.slotID) ~= itemID then
+        return
+    end
+
+    if C_Container and type(C_Container.GetContainerItemQuestInfo) == "function" then
+        local ok, questInfo = SafeCall(C_Container.GetContainerItemQuestInfo, bagInfo.bagID, bagInfo.slotID)
+        if ok and not IsSecretValue(questInfo) and type(questInfo) == "table" then
+            local questID = SafeNumber(questInfo.questID, nil)
+            if questID and questID > 0 then
+                bagInfo.questID = questID
+            end
+
+            local isActive = questInfo.isActive
+            if not IsSecretValue(isActive) and type(isActive) == "boolean" then
+                bagInfo.isActive = isActive
+            end
+        end
+    end
+end
+
 local function UseContainerItemCompat(bagID, slotID)
     if C_Container and C_Container.UseContainerItem then
         local ok = SafeCall(C_Container.UseContainerItem, bagID, slotID)
@@ -369,6 +391,15 @@ local function UseContainerItemByID(searchID)
         return false
     end
 
+    local bagInfo = questStartItemsInBags[searchID]
+    if type(bagInfo) ~= "table" then
+        bagInfo = {}
+        questStartItemsInBags[searchID] = bagInfo
+    end
+    bagInfo.bagID = bagID
+    bagInfo.slotID = slotID
+    RefreshQuestStartItemBagInfo(searchID, bagInfo)
+
     return UseContainerItemCompat(bagID, slotID)
 end
 
@@ -414,6 +445,17 @@ local function IsQuestFlaggedCompletedCompat(questID)
     end
 
     return false
+end
+
+local function IsQuestInLogCompat(questID)
+    if C_QuestLog and type(C_QuestLog.IsOnQuest) == "function" then
+        local ok, isOnQuest = SafeCall(C_QuestLog.IsOnQuest, questID)
+        if ok and not IsSecretValue(isOnQuest) and type(isOnQuest) == "boolean" then
+            return isOnQuest
+        end
+    end
+
+    return GetQuestLogIndexByIDCompat(questID) ~= nil
 end
 
 local function ResetQuestPopupCaches()
@@ -669,18 +711,34 @@ local function RemoveAcceptedQuestStartItemForQuest(questID)
     return changed
 end
 
-local function ShouldHideQuestStartItemPopup(itemID, itemName)
-    local activeSpecialItems = BuildActiveQuestSpecialItemSet()
-    if activeSpecialItems[itemID] then
-        return true
+local function GetQuestStartItemQuestID(itemID)
+    local bagInfo = questStartItemsInBags[itemID]
+    if type(bagInfo) == "table" and bagInfo.questID then
+        return bagInfo.questID
     end
 
+    return QUEST_ID_BY_START_ITEM_ID[itemID]
+end
+
+local function ShouldHideQuestStartItemPopup(itemID, itemName)
     if acceptedQuestStartItemIDs[itemID] ~= nil then
         return true
     end
 
-    local questID = QUEST_ID_BY_START_ITEM_ID[itemID]
-    if questID and (GetQuestLogIndexByIDCompat(questID) ~= nil or IsQuestFlaggedCompletedCompat(questID)) then
+    local bagInfo = questStartItemsInBags[itemID]
+    if type(bagInfo) == "table" and bagInfo.isActive == true then
+        return true
+    end
+
+    local questID = GetQuestStartItemQuestID(itemID)
+    if questID then
+        -- A native item-to-quest link is more precise than matching names or
+        -- special items belonging to other active quests.
+        return IsQuestInLogCompat(questID) or IsQuestFlaggedCompletedCompat(questID)
+    end
+
+    local activeSpecialItems = BuildActiveQuestSpecialItemSet()
+    if activeSpecialItems[itemID] then
         return true
     end
 
@@ -887,8 +945,10 @@ function QuestKing:ScanQuestStartItemPopups(playAlert)
         local numSlots = GetContainerNumSlotsCompat(bagID)
         for slotID = 1, numSlots do
             local itemID = GetContainerItemIDCompat(bagID, slotID)
-            if itemID and questStartItemSet[itemID] then
-                questStartItemsInBags[itemID] = true
+            if itemID and questStartItemSet[itemID] and not questStartItemsInBags[itemID] then
+                local bagInfo = { bagID = bagID, slotID = slotID }
+                questStartItemsInBags[itemID] = bagInfo
+                RefreshQuestStartItemBagInfo(itemID, bagInfo)
                 if TrackQuestStartItem(itemID, nil, playAlert) then
                     changed = true
                 end
@@ -1110,15 +1170,26 @@ end
 
 function QuestKing:OnQuestStartItemQuestAccepted(questID)
     local acceptedQuestID = SafeNumber(questID, nil)
+    if not acceptedQuestID or acceptedQuestID <= 0 then
+        return false
+    end
+
     local changed = false
+
+    for itemID, bagInfo in pairs(questStartItemsInBags) do
+        RefreshQuestStartItemBagInfo(itemID, bagInfo)
+        if GetQuestStartItemQuestID(itemID) == acceptedQuestID then
+            acceptedQuestStartItemIDs[itemID] = acceptedQuestID
+        end
+    end
 
     if pendingQuestStartItemID then
         local itemID = pendingQuestStartItemID
         pendingQuestStartItemID = nil
-        acceptedQuestStartItemIDs[itemID] = acceptedQuestID or true
-        if itemPopups[itemID] ~= nil then
-            itemPopups[itemID] = nil
-            changed = true
+        -- Opening an item offer does not prove that the next accepted quest
+        -- came from it; the player may have closed that offer first.
+        if GetQuestStartItemQuestID(itemID) == acceptedQuestID then
+            acceptedQuestStartItemIDs[itemID] = acceptedQuestID
         end
     end
 
@@ -1126,7 +1197,7 @@ function QuestKing:OnQuestStartItemQuestAccepted(questID)
     questPopupStateDirty = true
 
     for itemID, popupInfo in pairs(itemPopups) do
-        if QUEST_ID_BY_START_ITEM_ID[itemID] == acceptedQuestID
+        if GetQuestStartItemQuestID(itemID) == acceptedQuestID
             or ShouldHideQuestStartItemPopup(itemID, popupInfo and popupInfo.name or nil) then
             itemPopups[itemID] = nil
             changed = true
@@ -1187,7 +1258,7 @@ function QuestKing:ParseLoot(msg)
         return false
     end
 
-    if BuildQuestStartItemSet()[itemID] then
+    if BuildQuestStartItemSet()[itemID] and not questStartItemsInBags[itemID] then
         questStartItemsInBags[itemID] = true
     end
     if TrackQuestStartItem(itemID, itemName, true) then
@@ -1216,8 +1287,9 @@ function QuestKing:UpdateTrackerPopups()
         questPopupStateDirty = false
         ResetQuestPopupCaches()
 
-        for itemID, present in pairs(questStartItemsInBags) do
-            if present then
+        for itemID, bagInfo in pairs(questStartItemsInBags) do
+            if bagInfo then
+                RefreshQuestStartItemBagInfo(itemID, bagInfo)
                 TrackQuestStartItem(itemID, nil, false)
             end
         end

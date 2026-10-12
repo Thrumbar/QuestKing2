@@ -139,7 +139,11 @@ local function IsProtectedFrame(frame)
     end
 
     local ok, protected = pcall(frame.IsProtected, frame)
-    return not ok or protected == true
+    if not ok or (QuestKing.IsSecretValue and QuestKing.IsSecretValue(protected)) then
+        return true
+    end
+
+    return protected == true
 end
 
 local function SetMouseEnabledSafe(frame, enabled)
@@ -369,7 +373,11 @@ do
     end
 
     function WatchButton:Wipe()
-        if IsInCombatLockdownSafe() and (self.itemButton ~= nil or IsProtectedFrame(self)) then
+        if IsInCombatLockdownSafe() and (
+            self._combatLayoutRetained
+            or self.itemButton ~= nil
+            or IsProtectedFrame(self)
+        ) then
             if QuestKing.StartCombatTimer then
                 QuestKing:StartCombatTimer()
             end

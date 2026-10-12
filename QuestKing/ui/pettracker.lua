@@ -192,6 +192,10 @@ local function ShouldDeferLayout()
         return false
     end
 
+    if QuestKing.WatchButton and QuestKing.WatchButton._combatLayoutDeferred then
+        return true
+    end
+
     return IsProtectedFrameSafe(QuestKing.Tracker)
         or (section and IsProtectedFrameSafe(section))
         or (petTrackerFrame and IsProtectedFrameSafe(petTrackerFrame))

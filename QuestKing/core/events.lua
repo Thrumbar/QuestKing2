@@ -894,7 +894,6 @@ Events.ZONE_CHANGED_NEW_AREA = function()
 end
 
 Events.SUPER_TRACKING_CHANGED = function()
-    SafeCallMethod(QuestKing, "RecordPerformanceMetric", "superTrackingChangedEventCount", 1)
     local questID = GetSuperTrackedQuestIDCompat()
     if not SafeCallMethod(QuestKing, "OnSuperTrackedQuestChanged", questID) then
         UpdateTracker(false, "supertracking")
@@ -902,11 +901,7 @@ Events.SUPER_TRACKING_CHANGED = function()
 end
 
 Events.SUPER_TRACKING_PATH_UPDATED = function()
-    SafeCallMethod(QuestKing, "RecordPerformanceMetric", "superTrackingPathEventCount", 1)
-    if not SafeCallMethod(QuestKing, "OnSuperTrackingPathUpdated") then
-        SafeCallMethod(QuestKing, "RecordPerformanceMetric", "superTrackingPathRefreshRequestCount", 1)
-        UpdateTracker(false, "supertracking")
-    end
+    UpdateTracker(false, "supertracking")
 end
 
 function QuestKing:AddQuestWatchByID(questID)

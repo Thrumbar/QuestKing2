@@ -40,6 +40,8 @@ local trackerUpdatePendingAchievementData = false
 local trackerUpdatePendingQuestEvent = false
 local trackerUpdatePendingCombatQuestEvent = false
 local trackerRenderRecoveryAttempted = false
+local displayedButtonOrder = {}
+local displayedButtonCount = 0
 
 local TRACKER_UPDATE_COALESCE_DELAY = 0.05
 
@@ -125,37 +127,6 @@ local function GetProfileTimeMilliseconds()
     return nil
 end
 
-local function GetPerformanceClockSeconds()
-    if type(_G.GetTimePreciseSec) == "function" then
-        local ok, value = pcall(_G.GetTimePreciseSec)
-        if ok and type(value) == "number" then
-            return value
-        end
-    end
-
-    if type(_G.GetTime) == "function" then
-        local ok, value = pcall(_G.GetTime)
-        if ok and type(value) == "number" then
-            return value
-        end
-    end
-
-    return nil
-end
-
-local function UpdatePerformanceElapsedTime()
-    if not Performance.enabled then
-        return
-    end
-
-    local now = GetPerformanceClockSeconds()
-    local started = Performance.startedAtSeconds
-    if type(now) == "number" and type(started) == "number" then
-        local elapsed = now - started
-        Performance.elapsedSeconds = elapsed > 0 and elapsed or 0
-    end
-end
-
 local function ResetPerformanceProfile()
     local enabled = Performance.enabled == true
 
@@ -169,8 +140,6 @@ local function ResetPerformanceProfile()
 
     Performance.enabled = enabled
     Performance.startedAtMilliseconds = GetProfileTimeMilliseconds()
-    Performance.startedAtSeconds = GetPerformanceClockSeconds()
-    Performance.elapsedSeconds = 0
     Performance.refreshRequestCount = 0
     Performance.coalescedRequestCount = 0
     Performance.trackerRefreshCount = 0
@@ -178,13 +147,6 @@ local function ResetPerformanceProfile()
     Performance.cachedPopulationRefreshCount = 0
     Performance.questLogScanCount = 0
     Performance.objectiveScanCount = 0
-    Performance.indexedObjectiveReadCount = 0
-    Performance.modernObjectiveReadCount = 0
-    Performance.questHeaderExpandCount = 0
-    Performance.questHeaderRestoreCount = 0
-    Performance.superTrackingChangedEventCount = 0
-    Performance.superTrackingPathEventCount = 0
-    Performance.superTrackingPathRefreshRequestCount = 0
     Performance.achievementListScanCount = 0
     Performance.achievementCriteriaScanCount = 0
     Performance.autoCompleteRequestCount = 0
@@ -203,7 +165,6 @@ local function ResetPerformanceProfile()
     Performance.maxRefreshMilliseconds = 0
     Performance.lastRefreshMilliseconds = 0
     Performance.questEvents = {}
-    Performance.refreshReasons = {}
 end
 
 if Performance.refreshRequestCount == nil then
@@ -241,12 +202,10 @@ function QuestKing:RecordPerformanceQuestEvent(eventName)
 end
 
 function QuestKing:SetPerformanceProfilingEnabled(enabled)
-    if enabled then
-        Performance.enabled = true
+    Performance.enabled = enabled and true or false
+    if Performance.enabled then
         ResetPerformanceProfile()
-    else
-        UpdatePerformanceElapsedTime()
-        Performance.enabled = false
+        Performance.enabled = true
     end
 
     return Performance.enabled
@@ -258,7 +217,6 @@ function QuestKing:ResetPerformanceProfile()
 end
 
 function QuestKing:GetPerformanceProfile()
-    UpdatePerformanceElapsedTime()
     return Performance
 end
 
@@ -268,7 +226,7 @@ local function IsProtectedFrameSafe(frame)
     end
 
     local ok, protected = pcall(frame.IsProtected, frame)
-    return not ok or protected == true
+    return not ok or IsSecretValue(protected) or protected == true
 end
 
 local function IsAnchoringRestrictedSafe(frame)
@@ -277,7 +235,7 @@ local function IsAnchoringRestrictedSafe(frame)
     end
 
     local ok, restricted = pcall(frame.IsAnchoringRestricted, frame)
-    return not ok or restricted == true
+    return not ok or IsSecretValue(restricted) or restricted == true
 end
 
 local function SafeCallMethod(target, method, ...)
@@ -575,6 +533,81 @@ local function LayoutRequestedButtons(postCombat)
     local inCombat = IsInCombatLockdownSafe()
     QuestKing:RecordPerformanceMetric("layoutPassCount", 1)
 
+    local deferLayout = false
+    if inCombat then
+        local orderChanged = requestCount ~= displayedButtonCount
+        if not orderChanged then
+            for index = 1, requestCount do
+                if requestOrder[index] ~= displayedButtonOrder[index] then
+                    orderChanged = true
+                    break
+                end
+            end
+        end
+
+        if orderChanged then
+            local usedPool = WatchButton.usedPool or requestOrder
+            for index = 1, #usedPool do
+                local button = usedPool[index]
+                if button and (
+                    button.itemButton ~= nil
+                    or IsProtectedFrameSafe(button)
+                    or IsAnchoringRestrictedSafe(button)
+                ) then
+                    deferLayout = true
+                    break
+                end
+            end
+        end
+    end
+
+    if deferLayout then
+        WatchButton._combatLayoutDeferred = true
+        QuestKing:StartCombatTimer()
+
+        -- Keep the published anchor chain together. Inserting a new row into
+        -- only its movable portion can overlap a row whose anchor is deferred.
+        for index = 1, displayedButtonCount do
+            local button = displayedButtonOrder[index]
+            button._combatLayoutRetained = true
+            if not IsProtectedFrameSafe(button) then
+                if button.wasRequested then
+                    button:Render()
+                elseif not button.itemButton then
+                    button:Hide()
+                end
+            end
+            lastShown = button
+        end
+
+        for index = 1, requestCount do
+            local button = requestOrder[index]
+            if button and not button._combatLayoutRetained
+                and not button.itemButton
+                and not IsProtectedFrameSafe(button) then
+                button:Hide()
+            end
+        end
+
+        if WatchButton.FreeUnused then
+            WatchButton:FreeUnused()
+        end
+        if WatchButton.CommitOrder then
+            WatchButton:CommitOrder()
+        end
+        if Tracker and Tracker.Resize then
+            Tracker:Resize(lastShown)
+        end
+        return
+    end
+
+    WatchButton._combatLayoutDeferred = nil
+    for index = 1, displayedButtonCount do
+        displayedButtonOrder[index]._combatLayoutRetained = nil
+        displayedButtonOrder[index] = nil
+    end
+    displayedButtonCount = 0
+
     for index = 1, requestCount do
         local button = requestOrder[index]
         if button and button.ClearAllPoints and button.SetPoint and button.Render then
@@ -642,6 +675,8 @@ local function LayoutRequestedButtons(postCombat)
             end
 
             lastShown = button
+            displayedButtonCount = displayedButtonCount + 1
+            displayedButtonOrder[displayedButtonCount] = button
         end
     end
 
@@ -820,7 +855,6 @@ local function RunTrackerUpdate(
 
     LayoutRequestedButtons(postCombat)
 
-    SafeCallMethod(QuestKing, "CommitPresentedSuperTrackingState")
     SafeCallMethod(QuestKing, "PostCheckQuestFocus")
 
     local hooks = QuestKing.updateHooks or {}
@@ -883,16 +917,6 @@ end
 
 function QuestKing:QueueTrackerUpdate(forceBuild, postCombat, reason)
     self:RecordPerformanceMetric("refreshRequestCount", 1)
-
-    if Performance.enabled then
-        local reasonName = type(reason) == "string" and reason or "unspecified"
-        local reasons = Performance.refreshReasons
-        if type(reasons) ~= "table" then
-            reasons = {}
-            Performance.refreshReasons = reasons
-        end
-        reasons[reasonName] = (tonumber(reasons[reasonName]) or 0) + 1
-    end
 
     if trackerUpdatePending or trackerUpdateFlushQueued then
         self:RecordPerformanceMetric("coalescedRequestCount", 1)
