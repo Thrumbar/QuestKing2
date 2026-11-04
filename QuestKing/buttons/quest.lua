@@ -1518,6 +1518,9 @@ function QuestKing:GetQuestObjectivesText(questID)
     local out = {}
     local objectives = GetQuestObjectives(questID)
     local hasProgressBarObjective = false
+    -- The quest log's completed state is authoritative when objective flags
+    -- or cached counts lag behind (observed on Classic Era).
+    local questComplete = IsQuestCompleteCompat(questID)
 
     for index = 1, #objectives do
         local objective = objectives[index]
@@ -1526,21 +1529,33 @@ function QuestKing:GetQuestObjectivesText(questID)
             local objectiveType = objective.type or objective.objectiveType
             local numFulfilled = SafeNumber(objective.numFulfilled, nil)
             local numRequired = SafeNumber(objective.numRequired, nil)
+            local finished = questComplete or SafeBoolean(objective.finished or objective.completed, false)
 
             if objectiveType == "progressbar" then
                 hasProgressBarObjective = true
-            elseif IsSafeNumber(numRequired)
-                and numRequired > 0
-                and text ~= ""
-                and not ObjectiveTextAlreadyHasProgress(text) then
-                text = ("%s (%d/%d)"):format(text, numFulfilled or 0, numRequired)
+            elseif text ~= "" then
+                if finished then
+                    -- Blizzard may supply an already-formatted, stale (0/1).
+                    -- Strip only a trailing numeric counter, not arbitrary text.
+                    local prefix, shown, total = match(text, "^(.-)%s*%((%d+)%s*/%s*(%d+)%)%s*$")
+                    if prefix and tonumber(shown) < tonumber(total) then
+                        text = prefix:gsub("%s+$", "") .. " (" .. (_G.COMPLETE or "Complete") .. ")"
+                    elseif not ObjectiveTextAlreadyHasProgress(text)
+                        and IsSafeNumber(numRequired) and numRequired > 0
+                        and (not IsSafeNumber(numFulfilled) or numFulfilled < numRequired) then
+                        text = text .. " (" .. (_G.COMPLETE or "Complete") .. ")"
+                    end
+                elseif not ObjectiveTextAlreadyHasProgress(text)
+                    and IsSafeNumber(numRequired) and numRequired > 0 then
+                    text = ("%s (%d/%d)"):format(text, numFulfilled or 0, numRequired)
+                end
             end
 
             out[#out + 1] = {
                 index = index,
                 text = text,
                 type = objectiveType,
-                finished = SafeBoolean(objective.finished or objective.completed, false),
+                finished = finished,
                 numFulfilled = numFulfilled,
                 numRequired = numRequired,
             }

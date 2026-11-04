@@ -1,0 +1,4 @@
+QuestKing 3.1.7 Classic objective display follow-up
+Correct quest-level completed state precedence and stale embedded (0/1) suffix.
+Only buttons/quest.lua changed; TOC and libraries untouched.
+Requires live validation.
