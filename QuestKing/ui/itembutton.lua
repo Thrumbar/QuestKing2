@@ -127,7 +127,9 @@ local function IsQuestLogSpecialItemInRangeCompat(questLogIndex, itemID)
         end
     end
 
-    if itemID and C_Item and type(C_Item.IsItemInRange) == "function" then
+    -- The generic target range check can trigger ADDON_ACTION_BLOCKED in combat.
+    if itemID and C_Item and type(C_Item.IsItemInRange) == "function"
+        and not IsInCombatLockdownCompat() then
         local ok, inRange = pcall(C_Item.IsItemInRange, itemID, "target")
         if ok and not (QuestKing.IsSecretValue and QuestKing.IsSecretValue(inRange))
             and type(inRange) == "boolean" then
