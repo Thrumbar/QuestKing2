@@ -20,7 +20,6 @@ local VALID_DISPLAY_MODES = {
     combined = true,
     quests = true,
     achievements = true,
-    raids = true,
 }
 
 local pairs = pairs
@@ -288,8 +287,6 @@ local function GetModeLabel(displayMode)
         return "C"
     elseif displayMode == "achievements" then
         return "A"
-    elseif displayMode == "raids" then
-        return "R"
     end
 
     return "Q"
@@ -1473,8 +1470,6 @@ function Tracker.ModeButtonOnClick(self, mouse)
         end
     else
         if displayMode == "quests" then
-            QuestKingDBPerChar.displayMode = "raids"
-        elseif displayMode == "raids" then
             QuestKingDBPerChar.displayMode = "achievements"
         elseif displayMode == "achievements" then
             QuestKingDBPerChar.displayMode = "combined"

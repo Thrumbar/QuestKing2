@@ -22,8 +22,7 @@ local type = type
 local tonumber = tonumber
 local strfind = string.find
 
-local Compat = QuestKing.Compatibility or {}
-local CommonCompat = Compat.Common or {}
+local CommonCompat = QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
 local WOW_PROJECT_ID = _G.WOW_PROJECT_ID
 local WOW_PROJECT_MAINLINE = _G.WOW_PROJECT_MAINLINE
 local IS_MAINLINE = WOW_PROJECT_MAINLINE and WOW_PROJECT_ID == WOW_PROJECT_MAINLINE or false
@@ -169,8 +168,8 @@ local function GetCVarBoolCompat(name)
 end
 
 local function GetNumQuestWatchesCompat()
-    if type(Compat.GetNumQuestWatches) == "function" then
-        local count = Compat.GetNumQuestWatches()
+    if type(CommonCompat.GetNumQuestWatches) == "function" then
+        local count = CommonCompat.GetNumQuestWatches()
         return tonumber(count) or 0
     end
 
@@ -196,8 +195,8 @@ local function GetMaxQuestWatchesCompat()
 end
 
 local function GetQuestLogIndexByIDCompat(questID)
-    if type(Compat.GetQuestLogIndexByID) == "function" then
-        return Compat.GetQuestLogIndexByID(questID)
+    if type(CommonCompat.GetQuestLogIndexByQuestID) == "function" then
+        return CommonCompat.GetQuestLogIndexByQuestID(questID)
     end
 
     if type(questID) ~= "number" or questID <= 0 then
@@ -222,8 +221,8 @@ local function GetQuestLogIndexByIDCompat(questID)
 end
 
 local function GetQuestIDFromQuestLogIndexCompat(questLogIndex)
-    if type(Compat.GetQuestIDForLogIndex) == "function" then
-        return Compat.GetQuestIDForLogIndex(questLogIndex)
+    if type(CommonCompat.GetQuestIDByLogIndex) == "function" then
+        return CommonCompat.GetQuestIDByLogIndex(questLogIndex)
     end
 
     if type(questLogIndex) ~= "number" or questLogIndex <= 0 then
@@ -248,8 +247,8 @@ local function GetQuestIDFromQuestLogIndexCompat(questLogIndex)
 end
 
 local function GetQuestIDForWatchIndexCompat(watchIndex)
-    if type(Compat.GetQuestIDForWatchIndex) == "function" then
-        return Compat.GetQuestIDForWatchIndex(watchIndex)
+    if type(CommonCompat.GetQuestIDForWatchIndex) == "function" then
+        return CommonCompat.GetQuestIDForWatchIndex(watchIndex)
     end
 
     if type(watchIndex) ~= "number" or watchIndex <= 0 then
@@ -274,8 +273,8 @@ local function GetQuestIDForWatchIndexCompat(watchIndex)
 end
 
 local function IsQuestWatchedCompat(questID, questLogIndex)
-    if type(Compat.IsQuestWatched) == "function" and questID then
-        return Compat.IsQuestWatched(questID) and true or false
+    if type(CommonCompat.IsQuestWatched) == "function" and questID then
+        return CommonCompat.IsQuestWatched(questID, questLogIndex) and true or false
     end
 
     if type(questID) == "number" and C_QuestLog and C_QuestLog.GetQuestWatchType then
@@ -296,8 +295,8 @@ local function IsQuestWatchedCompat(questID, questLogIndex)
 end
 
 local function AddQuestWatchCompat(questLogIndex, questID)
-    if type(Compat.AddQuestWatch) == "function" and questID then
-        return Compat.AddQuestWatch(questID, questLogIndex) and true or false
+    if type(CommonCompat.AddQuestWatch) == "function" and questID then
+        return CommonCompat.AddQuestWatch(questID, questLogIndex) and true or false
     end
 
     if type(questID) ~= "number" or questID <= 0 then
@@ -320,8 +319,8 @@ local function AddQuestWatchCompat(questLogIndex, questID)
 end
 
 local function RemoveQuestWatchCompat(questLogIndex, questID)
-    if type(Compat.RemoveQuestWatch) == "function" and questID then
-        return Compat.RemoveQuestWatch(questID) and true or false
+    if type(CommonCompat.RemoveQuestWatch) == "function" and questID then
+        return CommonCompat.RemoveQuestWatch(questID, questLogIndex) and true or false
     end
 
     if type(questID) ~= "number" or questID <= 0 then
@@ -342,8 +341,8 @@ local function RemoveQuestWatchCompat(questLogIndex, questID)
 end
 
 local function GetSuperTrackedQuestIDCompat()
-    if type(Compat.GetSuperTrackedQuestID) == "function" then
-        local questID = Compat.GetSuperTrackedQuestID()
+    if type(CommonCompat.GetSuperTrackedQuestID) == "function" then
+        local questID = CommonCompat.GetSuperTrackedQuestID()
         return tonumber(questID) or 0
     end
 
@@ -523,6 +522,14 @@ local function TryAutoWatchQuest(questLogIndex, questID, didRetry)
     end
 
     if IsQuestWatchedCompat(questID, questLogIndex) then
+        -- Another acceptance handler may have added the native watch first.
+        -- Run the shared helper so Era/BCC also retain its permanent timer.
+        local projectFlags = type(CommonCompat.GetProjectFlags) == "function"
+            and CommonCompat.GetProjectFlags()
+        if projectFlags and (projectFlags.isClassicEra or projectFlags.isTBCClassic)
+            and type(CommonCompat.AddQuestWatch) == "function" and questID then
+            return CommonCompat.AddQuestWatch(questID, questLogIndex) and true or false
+        end
         return true
     end
 
@@ -590,6 +597,21 @@ local function DispatchEvent(self, event, ...)
 
     if QUEST_PERFORMANCE_EVENTS[event] then
         SafeCallMethod(QuestKing, "RecordPerformanceQuestEvent", event)
+    end
+
+    if QuestKing.trackingTraceEnabled then
+        if event == "QUEST_WATCH_UPDATE" or event == "QUEST_WATCH_LIST_CHANGED"
+            or event == "QUEST_ACCEPTED" or event == "QUEST_REMOVED"
+            or event == "QUEST_TURNED_IN" or event == "SUPER_TRACKED_QUEST_CHANGED" then
+            local questID = select(1, ...)
+            if event == "QUEST_ACCEPTED" then
+                local _, acceptedQuestID = NormalizeQuestAcceptedPayload(...)
+                questID = acceptedQuestID
+            end
+            SafeCallMethod(QuestKing, "RecordQuestTrackingTrace", event, questID)
+        elseif event == "QUEST_LOG_UPDATE" or event == "UNIT_QUEST_LOG_CHANGED" then
+            SafeCallMethod(QuestKing, "RecordQuestTrackingTrace", event)
+        end
     end
 
     local handler = Events[event]
@@ -708,7 +730,8 @@ Events.ACHIEVEMENT_EARNED = function()
 end
 
 Events.QUEST_WATCH_UPDATE = function(self, event, questID)
-    SafeCallMethod(QuestKing, "OnQuestObjectivesCompleted", questID)
+    -- This event reports objective progress, including incomplete objectives.
+    -- Refresh the display without replacing the player's active quest focus.
     UpdateTrackerAndQueueQuestStateRefresh()
 end
 

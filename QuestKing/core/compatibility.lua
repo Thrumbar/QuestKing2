@@ -458,6 +458,53 @@ function Compat.GetQuestInfo(questLogIndex)
     return nil
 end
 
+function Compat.GetIndexedQuestObjectives(questID, questLogIndex)
+    questID = SafeNumber(questID, nil)
+    if not questID or questID <= 0
+        or type(_G.GetNumQuestLeaderBoards) ~= "function"
+        or type(_G.GetQuestLogLeaderBoard) ~= "function" then
+        return nil
+    end
+
+    questLogIndex = SafeNumber(questLogIndex, nil)
+    if not questLogIndex or questLogIndex <= 0
+        or Compat.GetQuestIDByLogIndex(questLogIndex) ~= questID then
+        questLogIndex = Compat.GetQuestLogIndexByQuestID(questID)
+    end
+    if not questLogIndex or questLogIndex <= 0 then
+        return nil
+    end
+
+    if type(QuestKing.RecordPerformanceMetric) == "function" then
+        QuestKing:RecordPerformanceMetric("objectiveIndexedReadCount", 1)
+    end
+
+    local ok, count = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndex)
+    count = SafeNumber(count, nil)
+    if not ok or not count or count < 0 then
+        return nil
+    end
+
+    local objectives = {}
+    for objectiveIndex = 1, count do
+        local readOK, text, objectiveType, finished = SafeCall(
+            _G.GetQuestLogLeaderBoard, objectiveIndex, questLogIndex
+        )
+        if not readOK then
+            return nil
+        end
+        if type(text) == "string" and not IsSecretValue(text) then
+            objectives[#objectives + 1] = {
+                text = text,
+                type = objectiveType,
+                finished = SafeBoolean(finished, false),
+            }
+        end
+    end
+
+    return objectives
+end
+
 function Compat.GetAutoQuestPopupType(questID)
     questID = SafeNumber(questID, nil)
     if not questID or questID <= 0 then
@@ -670,12 +717,56 @@ function Compat.IsQuestWatched(questID, questLogIndex)
     return false
 end
 
+local function SyncLegacyQuestWatch(questID, isWatched)
+    local flags = GetProjectFlags()
+    if not flags.isClassicEra and not flags.isTBCClassic then
+        return
+    end
+
+    local watches = _G.QUEST_WATCH_LIST
+    local noExpire = SafeNumber(_G.QUEST_WATCH_NO_EXPIRE, nil)
+    if not questID or questID <= 0 or type(watches) ~= "table" or not noExpire then
+        return
+    end
+
+    if Compat.IsQuestWatched(questID) ~= isWatched then
+        return
+    end
+
+    -- Era and BCC keep watch permanence in this separate UI-owned list.
+    -- A bare AddQuestWatch leaves no permanent entry, so objective progress
+    -- can create a temporary auto-watch that later removes the native watch.
+    local found = false
+    for index = #watches, 1, -1 do
+        local watch = watches[index]
+        if type(watch) == "table" and watch.id == questID then
+            if isWatched and not found then
+                watch.timer = noExpire
+                found = true
+            else
+                table.remove(watches, index)
+            end
+        end
+    end
+
+    if isWatched and not found then
+        watches[#watches + 1] = { id = questID, timer = noExpire }
+    end
+end
+
 function Compat.AddQuestWatch(questID, questLogIndex)
     questID = SafeNumber(questID, nil)
+    questLogIndex = SafeNumber(questLogIndex, nil)
+    if not questID and questLogIndex then
+        questID = Compat.GetQuestIDByLogIndex(questLogIndex)
+    end
 
     if questID and questID > 0 and C_QuestLog and C_QuestLog.AddQuestWatch then
         local ok, wasWatched = SafeCall(C_QuestLog.AddQuestWatch, questID)
         if ok then
+            if wasWatched ~= false then
+                SyncLegacyQuestWatch(questID, true)
+            end
             return wasWatched ~= false
         end
     end
@@ -683,6 +774,9 @@ function Compat.AddQuestWatch(questID, questLogIndex)
     questLogIndex = SafeNumber(questLogIndex, nil) or Compat.GetQuestLogIndexByQuestID(questID)
     if questLogIndex and type(_G.AddQuestWatch) == "function" then
         local ok = SafeCall(_G.AddQuestWatch, questLogIndex)
+        if ok then
+            SyncLegacyQuestWatch(questID, true)
+        end
         return ok and true or false
     end
 
@@ -691,9 +785,17 @@ end
 
 function Compat.RemoveQuestWatch(questID, questLogIndex)
     questID = SafeNumber(questID, nil)
+    questLogIndex = SafeNumber(questLogIndex, nil)
+    if not questID and questLogIndex then
+        questID = Compat.GetQuestIDByLogIndex(questLogIndex)
+    end
+
     if questID and questID > 0 and C_QuestLog and C_QuestLog.RemoveQuestWatch then
         local ok, wasRemoved = SafeCall(C_QuestLog.RemoveQuestWatch, questID)
         if ok then
+            if wasRemoved ~= false then
+                SyncLegacyQuestWatch(questID, false)
+            end
             return wasRemoved ~= false
         end
     end
@@ -701,6 +803,9 @@ function Compat.RemoveQuestWatch(questID, questLogIndex)
     questLogIndex = SafeNumber(questLogIndex, nil) or Compat.GetQuestLogIndexByQuestID(questID)
     if questLogIndex and type(_G.RemoveQuestWatch) == "function" then
         local ok = SafeCall(_G.RemoveQuestWatch, questLogIndex)
+        if ok then
+            SyncLegacyQuestWatch(questID, false)
+        end
         return ok and true or false
     end
 

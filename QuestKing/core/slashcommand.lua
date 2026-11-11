@@ -27,23 +27,18 @@ local VALID_DISPLAY_MODES = {
     q = "quests",
     quest = "quests",
     quests = "quests",
-    r = "raids",
-    raid = "raids",
-    raids = "raids",
     a = "achievements",
     achievement = "achievements",
     achievements = "achievements",
     c = "combined",
     combined = "combined",
     modeq = "quests",
-    moder = "raids",
     modea = "achievements",
     modec = "combined",
 }
 
 local DISPLAY_MODE_LABELS = {
     quests = "Q",
-    raids = "R",
     achievements = "A",
     combined = "C",
 }
@@ -212,8 +207,8 @@ local function PrintHelp()
     Print("  help - show this help")
     Print("  status - show current tracker settings")
     Print("  options - open Blizzard AddOns settings")
-    Print("  q / r / a / c - switch tracker mode")
-    Print("  mode <q|r|a|c> - switch tracker mode directly")
+    Print("  q / a / c - switch tracker mode")
+    Print("  mode <q|a|c> - switch tracker mode directly")
     Print("  lock - lock tracker dragging")
     Print("  unlock - unlock tracker dragging")
     Print("  origin <TOPRIGHT|TOPLEFT|BOTTOMRIGHT|BOTTOMLEFT> - reset drag origin")
@@ -222,6 +217,7 @@ local function PrintHelp()
     Print("  scale <value|clear> - set tracker scale override")
     Print("  refresh - force a tracker rebuild")
     Print("  perf <on|off|reset|status> - control the Phase 7 profiler")
+    Print("  tracktrace <on|off|status> - diagnose quest watch and focus changes")
     Print("  reset - clear collapsed headers, quests, and achievements")
     Print("  resetall yes - reset all saved variables for this character and reload")
 end
@@ -259,7 +255,7 @@ end
 Command.mode = function(mode)
     local applied = ApplyDisplayMode(mode)
     if not applied then
-        Print("Invalid mode. Use |cffaaffaaq|r, |cffaaffaar|r, |cffaaffaaa|r, or |cffaaffaac|r.")
+        Print("Invalid mode. Use |cffaaffaaq|r, |cffaaffaaa|r, or |cffaaffaac|r.")
         return
     end
 
@@ -271,12 +267,6 @@ Command.q = function()
 end
 Command.quest = Command.q
 Command.quests = Command.q
-
-Command.r = function()
-    Command.mode("raids")
-end
-Command.raid = Command.r
-Command.raids = Command.r
 
 Command.a = function()
     Command.mode("achievements")
@@ -292,6 +282,37 @@ Command.combined = Command.c
 Command.refresh = function()
     RefreshTrackerPresentation(true)
     Print("Tracker refreshed.")
+end
+
+Command.tracktrace = function(action)
+    action = lower(tostring(action or "status"))
+    if type(QuestKing.SetQuestTrackingTraceEnabled) ~= "function"
+        or type(QuestKing.GetQuestTrackingTrace) ~= "function" then
+        Print("Tracking trace is not available.")
+        return
+    end
+
+    if action == "on" then
+        QuestKing:SetQuestTrackingTraceEnabled(true)
+        Print("Tracking trace enabled. Track the quest, advance one objective, then use /qk tracktrace status.")
+        return
+    elseif action == "off" then
+        QuestKing:SetQuestTrackingTraceEnabled(false)
+        Print("Tracking trace disabled; captured entries retained.")
+        return
+    elseif action ~= "status" then
+        Print("Usage: |cffaaffaa/qk tracktrace on|off|status")
+        return
+    end
+
+    Print("Tracking trace=%s project=%s legacyFocusAPI=%s modernFocusAPI=%s",
+        QuestKing.trackingTraceEnabled and "on" or "off", tostring(_G.WOW_PROJECT_ID),
+        type(_G.SetSuperTrackedQuestID) == "function" and "yes" or "no",
+        _G.C_SuperTrack and type(_G.C_SuperTrack.SetSuperTrackedQuestID) == "function" and "yes" or "no")
+    local lines = QuestKing:GetQuestTrackingTrace()
+    for index = 1, #lines do
+        Print("%s", lines[index])
+    end
 end
 
 Command.perf = function(action)
@@ -357,6 +378,12 @@ Command.perf = function(action)
         or 0
 
     Print("Profiler=%s", profile.enabled and "on" or "off")
+    local durationSeconds = tonumber(profile.durationSeconds) or 0
+    Print(
+        "duration=%.2f sec refresh/sec=%.3f",
+        durationSeconds,
+        durationSeconds > 0 and (refreshCount / durationSeconds) or 0
+    )
     Print(
         "requests=%d coalesced=%d refreshes=%d full=%d cached=%d autocomplete=%d",
         tonumber(profile.refreshRequestCount) or 0,
@@ -374,6 +401,16 @@ Command.perf = function(action)
         tonumber(profile.achievementCriteriaScanCount) or 0,
         tonumber(profile.bagScanCount) or 0,
         tonumber(profile.autoCompleteScanCount) or 0
+    )
+    Print(
+        "objective reads indexed=%d modern=%d",
+        tonumber(profile.objectiveIndexedReadCount) or 0,
+        tonumber(profile.objectiveModernReadCount) or 0
+    )
+    Print(
+        "headers expand=%d restore=%d",
+        tonumber(profile.questHeaderExpandCount) or 0,
+        tonumber(profile.questHeaderRestoreCount) or 0
     )
     Print(
         "layout=%d anchors=%d metrics=%d rows +%d/-%d",
@@ -396,6 +433,16 @@ Command.perf = function(action)
         combatQuestEventCount,
         combatRefreshRatio
     )
+
+    local questEvents = profile.questEvents or {}
+    local eventNames = {}
+    for eventName in pairs(questEvents) do
+        eventNames[#eventNames + 1] = eventName
+    end
+    table.sort(eventNames)
+    for _, eventName in ipairs(eventNames) do
+        Print("%s=%d", eventName, tonumber(questEvents[eventName]) or 0)
+    end
 end
 
 Command.profile = Command.perf

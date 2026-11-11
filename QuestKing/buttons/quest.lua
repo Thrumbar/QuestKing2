@@ -8,6 +8,8 @@ local C_QuestInfoSystem = C_QuestInfoSystem
 local Enum = Enum
 local IS_MAINLINE = _G.WOW_PROJECT_MAINLINE ~= nil
     and _G.WOW_PROJECT_ID == _G.WOW_PROJECT_MAINLINE
+local IS_MISTS_CLASSIC = _G.WOW_PROJECT_MISTS_CLASSIC ~= nil
+    and _G.WOW_PROJECT_ID == _G.WOW_PROJECT_MISTS_CLASSIC
 
 local WatchButton = QuestKing and QuestKing.WatchButton
 local Compat = QuestKing and QuestKing.Compatibility and QuestKing.Compatibility.Common or {}
@@ -767,14 +769,26 @@ local function ObjectiveTextAlreadyHasProgress(text)
     return false
 end
 
-local function GetQuestObjectives(questID)
+local function GetQuestObjectives(questID, questLogIndex)
     local out = {}
 
     if type(questID) ~= "number" or questID <= 0 then
         return out
     end
 
+    -- MoP's native tracker reads accepted quests directly from the live log.
+    -- A successful empty indexed result also completes this read.
+    if IS_MISTS_CLASSIC and type(Compat.GetIndexedQuestObjectives) == "function" then
+        local objectives = Compat.GetIndexedQuestObjectives(questID, questLogIndex)
+        if objectives then
+            return objectives
+        end
+    end
+
     if C_QuestLog and C_QuestLog.GetQuestObjectives then
+        if type(QuestKing.RecordPerformanceMetric) == "function" then
+            QuestKing:RecordPerformanceMetric("objectiveModernReadCount", 1)
+        end
         local ok, objectives = SafeCall(C_QuestLog.GetQuestObjectives, questID)
         if ok and type(objectives) == "table" then
             for i = 1, #objectives do
@@ -796,8 +810,11 @@ local function GetQuestObjectives(questID)
         end
     end
 
-    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    questLogIndex = GetQuestLogIndexByIDCompat(questID)
     if questLogIndex and _G.GetNumQuestLeaderBoards and _G.GetQuestLogLeaderBoard then
+        if type(QuestKing.RecordPerformanceMetric) == "function" then
+            QuestKing:RecordPerformanceMetric("objectiveIndexedReadCount", 1)
+        end
         local okNum, numObjectives = SafeCall(_G.GetNumQuestLeaderBoards, questLogIndex)
         if okNum then
             for i = 1, SafeNumber(numObjectives, 0) or 0 do
@@ -1514,9 +1531,9 @@ function QuestKing:GetQuestTagBracket(questID)
     return nil
 end
 
-function QuestKing:GetQuestObjectivesText(questID)
+function QuestKing:GetQuestObjectivesText(questID, questLogIndex)
     local out = {}
-    local objectives = GetQuestObjectives(questID)
+    local objectives = GetQuestObjectives(questID, questLogIndex)
     local hasProgressBarObjective = false
     -- The quest log's completed state is authoritative when objective flags
     -- or cached counts lag behind (observed on Classic Era).
@@ -2315,6 +2332,8 @@ local function QueueAbandonQuestConfirmation(questID)
 end
 
 local questContextMenu
+local modernQuestContextMenu
+local modernQuestContextKey
 local lastQuestContextMenuQuestID
 local lastQuestContextMenuOpenTime = 0
 local QUEST_CONTEXT_MENU_GUARD_SECONDS = 0.25
@@ -2391,17 +2410,26 @@ local function GetQuestContextMenuClock()
     return 0
 end
 
-local function IsQuestContextMenuOpenForQuest(menu, questID)
+local function IsLegacyQuestContextMenuOpen(menu)
     local listFrame = _G.DropDownList1
     return menu
-        and menu.questID == questID
         and _G.UIDROPDOWNMENU_OPEN_MENU == menu
         and listFrame
         and listFrame.IsShown
         and listFrame:IsShown()
 end
 
-local function AddQuestContextMenuButton(text, func, disabled, checked)
+local function IsModernQuestContextMenuOpen(key)
+    if not modernQuestContextMenu or modernQuestContextKey ~= key then
+        return false
+    end
+
+    local menu = _G.Menu
+    local manager = menu and menu.GetManager and menu.GetManager()
+    return manager and manager.GetOpenMenu and manager:GetOpenMenu() == modernQuestContextMenu
+end
+
+local function AddLegacyQuestMenuButton(text, onClick, disabled)
     if type(_G.UIDropDownMenu_CreateInfo) ~= "function"
         or type(_G.UIDropDownMenu_AddButton) ~= "function" then
         return
@@ -2409,11 +2437,39 @@ local function AddQuestContextMenuButton(text, func, disabled, checked)
 
     local info = _G.UIDropDownMenu_CreateInfo()
     info.text = text
-    info.func = func
-    info.disabled = disabled and true or false
-    info.checked = checked and true or false
-    info.notCheckable = checked == nil
+    info.func = onClick
+    info.disabled = disabled
+    info.checked = false
+    info.notCheckable = true
     _G.UIDropDownMenu_AddButton(info, 1)
+end
+
+local function PopulateQuestContextActions(questID, addButton)
+    addButton(OBJECTIVES_VIEW_IN_QUESTLOG or "Open Quest Details", function()
+        OpenQuestDetailsFromWatch(questID)
+    end, false)
+
+    if not IS_MAINLINE then
+        addButton(OBJECTIVES_SHOW_QUEST_MAP or "Open Quest Map", function()
+            OpenQuestMapFromWatch(questID)
+        end, not CanOpenQuestMapFromWatch(questID))
+    end
+
+    local isTracked = GetQuestTrackingState(questID)
+    local trackingActionText = isTracked
+        and (UNTRACK_QUEST or "Untrack Quest")
+        or (TRACK_QUEST or "Track Quest")
+    addButton(trackingActionText, function()
+        ToggleQuestTracking(questID)
+    end, not CanToggleQuestTracking(questID))
+
+    addButton(SHARE_QUEST or "Share Quest", function()
+        ShareQuestCompat(questID)
+    end, not CanShareQuestCompat(questID))
+
+    addButton(ABANDON_QUEST or "Abandon Quest", function()
+        QueueAbandonQuestConfirmation(questID)
+    end, not CanAbandonQuestCompat(questID))
 end
 
 local function EnsureQuestContextMenu()
@@ -2443,52 +2499,29 @@ local function EnsureQuestContextMenu()
             return
         end
 
-        local title = menu.questTitle or UNKNOWN
-        AddQuestContextMenuButton(title, nil, true, nil)
-
-        AddQuestContextMenuButton(OBJECTIVES_VIEW_IN_QUESTLOG or "Open Quest Details", function()
-            OpenQuestDetailsFromWatch(questID)
-        end, false, nil)
-
-        if not IS_MAINLINE then
-            AddQuestContextMenuButton(OBJECTIVES_SHOW_QUEST_MAP or "Open Quest Map", function()
-                OpenQuestMapFromWatch(questID)
-            end, not CanOpenQuestMapFromWatch(questID), nil)
-        end
-
-        local isTracked = GetQuestTrackingState(questID)
-        local trackingActionText = isTracked
-            and (UNTRACK_QUEST or "Untrack Quest")
-            or (TRACK_QUEST or "Track Quest")
-
-        AddQuestContextMenuButton(trackingActionText, function()
-            ToggleQuestTracking(questID)
-        end, not CanToggleQuestTracking(questID), nil)
-
-        local canShare = CanShareQuestCompat(questID)
-        AddQuestContextMenuButton(SHARE_QUEST or "Share Quest", function()
-            ShareQuestCompat(questID)
-        end, not canShare, nil)
-
-        local canAbandon = CanAbandonQuestCompat(questID)
-        AddQuestContextMenuButton(ABANDON_QUEST or "Abandon Quest", function()
-            QueueAbandonQuestConfirmation(questID)
-        end, not canAbandon, nil)
+        AddLegacyQuestMenuButton(menu.questTitle or UNKNOWN, nil, true)
+        PopulateQuestContextActions(questID, AddLegacyQuestMenuButton)
     end, "MENU")
 
     return questContextMenu
 end
 
-local function OpenQuestContextMenu(button, questID, questLogIndex)
-    local menu = EnsureQuestContextMenu()
-    if not menu then
-        return false
+local function OpenQuestContextMenu(button, questID)
+    local createContextMenu = _G.MenuUtil and _G.MenuUtil.CreateContextMenu
+    local useModernMenu = type(createContextMenu) == "function"
+    local menu
+    if not useModernMenu then
+        menu = EnsureQuestContextMenu()
+        if not menu then
+            return false
+        end
     end
 
     -- A quest row has a clickable title child inside a clickable body parent.
     -- Some clients can dispatch the same hardware click through both regions.
     -- Also ignore any repeated group-driven dispatch while this quest menu is open.
-    if IsQuestContextMenuOpenForQuest(menu, questID) then
+    if (useModernMenu and IsModernQuestContextMenuOpen(questID))
+        or (menu and menu.questID == questID and IsLegacyQuestContextMenuOpen(menu)) then
         return true
     end
 
@@ -2502,15 +2535,28 @@ local function OpenQuestContextMenu(button, questID, questLogIndex)
     lastQuestContextMenuQuestID = questID
     lastQuestContextMenuOpenTime = now
 
+    local owner = button.titleButton or button
+    local title = button.title and button.title:GetText() or UNKNOWN
+    if useModernMenu then
+        modernQuestContextMenu = createContextMenu(owner, function(_, root)
+            root:CreateTitle(title)
+            PopulateQuestContextActions(questID, function(text, onClick, disabled)
+                local entry = root:CreateButton(text, onClick)
+                entry:SetEnabled(not disabled)
+            end)
+        end)
+        modernQuestContextKey = questID
+        return modernQuestContextMenu ~= nil
+    end
+
     if type(_G.CloseDropDownMenus) == "function" then
         _G.CloseDropDownMenus(1)
     end
 
     menu.questID = questID
-    menu.questLogIndex = questLogIndex
-    menu.questTitle = button and button.title and button.title:GetText() or UNKNOWN
+    menu.questTitle = title
 
-    local shown = _G.ToggleDropDownMenu(1, nil, menu, button.titleButton or button, 0, 0)
+    local shown = _G.ToggleDropDownMenu(1, nil, menu, owner, 0, 0)
     return shown ~= false
 end
 
@@ -2555,7 +2601,7 @@ function mouseHandlerQuest:HandleQuestClick(mouse)
     end
 
     if mouse == "RightButton" then
-        OpenQuestContextMenu(button, questID, questLogIndex)
+        OpenQuestContextMenu(button, questID)
         return
     end
 
@@ -2686,28 +2732,17 @@ local function EnsureAvailableCampaignContextMenu()
         end
 
         local row = menu.campaignRow
-        AddQuestContextMenuButton(row.title or CAMPAIGN_HEADER, nil, true, nil)
-        AddQuestContextMenuButton(
+        AddLegacyQuestMenuButton(row.title or CAMPAIGN_HEADER, nil, true)
+        AddLegacyQuestMenuButton(
             OBJECTIVES_STOP_TRACKING or "Stop Tracking",
             function()
                 StopTrackingAvailableCampaign(row)
             end,
-            false,
-            nil
+            false
         )
     end, "MENU")
 
     return availableCampaignContextMenu
-end
-
-local function IsAvailableCampaignContextMenuOpen(menu, requirementKey)
-    local listFrame = _G.DropDownList1
-    return menu
-        and menu.requirementKey == requirementKey
-        and _G.UIDROPDOWNMENU_OPEN_MENU == menu
-        and listFrame
-        and listFrame.IsShown
-        and listFrame:IsShown()
 end
 
 local function OpenAvailableCampaignContextMenu(button, row)
@@ -2716,12 +2751,22 @@ local function OpenAvailableCampaignContextMenu(button, row)
     end
 
     local requirementKey = SafeString(row.requirementKey, nil)
-    local menu = EnsureAvailableCampaignContextMenu()
-    if not requirementKey or not menu then
+    if not requirementKey then
         return false
     end
 
-    if IsAvailableCampaignContextMenuOpen(menu, requirementKey) then
+    local createContextMenu = _G.MenuUtil and _G.MenuUtil.CreateContextMenu
+    local useModernMenu = type(createContextMenu) == "function"
+    local menu
+    if not useModernMenu then
+        menu = EnsureAvailableCampaignContextMenu()
+        if not menu then
+            return false
+        end
+    end
+
+    if (useModernMenu and IsModernQuestContextMenuOpen(requirementKey))
+        or (menu and menu.requirementKey == requirementKey and IsLegacyQuestContextMenuOpen(menu)) then
         return true
     end
 
@@ -2735,6 +2780,18 @@ local function OpenAvailableCampaignContextMenu(button, row)
     lastAvailableCampaignContextKey = requirementKey
     lastAvailableCampaignContextOpenTime = now
 
+    local owner = button.titleButton or button
+    if useModernMenu then
+        modernQuestContextMenu = createContextMenu(owner, function(_, root)
+            root:CreateTitle(row.title or CAMPAIGN_HEADER)
+            root:CreateButton(OBJECTIVES_STOP_TRACKING or "Stop Tracking", function()
+                StopTrackingAvailableCampaign(row)
+            end)
+        end)
+        modernQuestContextKey = requirementKey
+        return modernQuestContextMenu ~= nil
+    end
+
     if type(_G.CloseDropDownMenus) == "function" then
         _G.CloseDropDownMenus(1)
     end
@@ -2742,7 +2799,7 @@ local function OpenAvailableCampaignContextMenu(button, row)
     menu.requirementKey = requirementKey
     menu.campaignRow = row
 
-    local shown = _G.ToggleDropDownMenu(1, nil, menu, button.titleButton or button, 0, 0)
+    local shown = _G.ToggleDropDownMenu(1, nil, menu, owner, 0, 0)
     return shown ~= false
 end
 
@@ -2837,7 +2894,7 @@ function QuestKing:GetQuestDisplayData(questLogIndex)
     end
 
     local kind = self:GetQuestKind(questID, info)
-    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID)
+    local objectives, hasProgressBarObjective = self:GetQuestObjectivesText(questID, questLogIndex)
     local percent = nil
 
     if hasProgressBarObjective then
@@ -3352,16 +3409,16 @@ end
 
 local function GetNumQuestLogEntriesCompat()
     if C_QuestLog and C_QuestLog.GetNumQuestLogEntries then
-        local ok, count = SafeCall(C_QuestLog.GetNumQuestLogEntries)
+        local ok, count, numQuests = SafeCall(C_QuestLog.GetNumQuestLogEntries)
         if ok then
-            return SafeNumber(count, 0) or 0
+            return SafeNumber(count, 0) or 0, SafeNumber(numQuests, nil)
         end
     end
 
     if _G.GetNumQuestLogEntries then
-        local ok, count = SafeCall(_G.GetNumQuestLogEntries)
+        local ok, count, numQuests = SafeCall(_G.GetNumQuestLogEntries)
         if ok then
-            return SafeNumber(count, 0) or 0
+            return SafeNumber(count, 0) or 0, SafeNumber(numQuests, nil)
         end
     end
 
@@ -3386,6 +3443,43 @@ local function GetQuestHeaderState(questLogIndex)
     return false, false
 end
 
+local readableQuestIDsScratch = {}
+
+local function CanReadCompleteQuestLog()
+    local numEntries, numQuests = GetNumQuestLogEntriesCompat()
+    if not numQuests or numQuests < 0 then
+        return false
+    end
+
+    wipe(readableQuestIDsScratch)
+    local readableQuests = 0
+    for questLogIndex = 1, numEntries do
+        local info = GetQuestInfoByLogIndex(questLogIndex)
+        if not info then
+            return false
+        end
+        if not info.isHeader then
+            local questID = SafeNumber(info.questID, nil)
+            if not questID or questID <= 0 or readableQuestIDsScratch[questID] then
+                return false
+            end
+
+            -- Objective and item APIs consume native log indices. Verify that
+            -- structured metadata and native titles identify the same quest.
+            local titleOK, _, _, _, _, _, _, _, nativeQuestID = SafeCall(
+                _G.GetQuestLogTitle, questLogIndex
+            )
+            if not titleOK or SafeNumber(nativeQuestID, nil) ~= questID then
+                return false
+            end
+            readableQuestIDsScratch[questID] = true
+            readableQuests = readableQuests + 1
+        end
+    end
+
+    return readableQuests == numQuests
+end
+
 local function ExpandCollapsedQuestLogHeaders()
     local collapsedHeaderIndices = {}
     if type(_G.ExpandQuestHeader) ~= "function"
@@ -3400,7 +3494,9 @@ local function ExpandCollapsedQuestLogHeaders()
         local isHeader, isCollapsed = GetQuestHeaderState(questLogIndex)
         if isHeader and isCollapsed then
             collapsedHeaderIndices[#collapsedHeaderIndices + 1] = questLogIndex
-            SafeCall(_G.ExpandQuestHeader, questLogIndex)
+            if SafeCall(_G.ExpandQuestHeader, questLogIndex) then
+                QuestKing:RecordPerformanceMetric("questHeaderExpandCount", 1)
+            end
             numEntries = GetNumQuestLogEntriesCompat()
         end
 
@@ -3417,11 +3513,17 @@ local function RestoreCollapsedQuestLogHeaders(collapsedHeaderIndices)
     end
 
     for i = #collapsedHeaderIndices, 1, -1 do
-        SafeCall(_G.CollapseQuestHeader, collapsedHeaderIndices[i])
+        if SafeCall(_G.CollapseQuestHeader, collapsedHeaderIndices[i]) then
+            QuestKing:RecordPerformanceMetric("questHeaderRestoreCount", 1)
+        end
     end
 end
 
 local function RunQuestLogPopulationScan(expandHeaders, callback)
+    if expandHeaders and IS_MISTS_CLASSIC and CanReadCompleteQuestLog() then
+        expandHeaders = false
+    end
+
     local previousScanDepth = SafeNumber(QuestKing._questLogPopulationScanDepth, 0) or 0
     local collapsedHeaderIndices = {}
 
@@ -3433,7 +3535,12 @@ local function RunQuestLogPopulationScan(expandHeaders, callback)
     local ok, scanError = pcall(callback)
 
     if expandHeaders then
-        RestoreCollapsedQuestLogHeaders(collapsedHeaderIndices)
+        -- MoP can deliver header-change events after this scan has returned.
+        -- Retain expansion when collapsed children were unreadable, so the
+        -- resulting event can settle against a stable, readable log.
+        if not IS_MISTS_CLASSIC then
+            RestoreCollapsedQuestLogHeaders(collapsedHeaderIndices)
+        end
         QuestKing._questLogPopulationScanDepth = previousScanDepth
     end
 

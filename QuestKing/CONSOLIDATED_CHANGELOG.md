@@ -1,5 +1,115 @@
 # QuestKing Consolidated Changelog
 
+## 3.1.7 Objective-progress tracking follow-up R3 (2026-11-08)
+
+- Stop scheduling automatic quest refocus from `QUEST_WATCH_UPDATE`. This
+  event reports ordinary objective progress, not just quest completion. The
+  old post-refresh refocus could clear the active quest or select another
+  quest when Classic POI/distance data was unavailable or changed.
+- Retain an accepted active quest when an explicit closest-quest lookup has
+  no usable distance candidate. Preserve intentional untracking and normal
+  focus recovery after the selected quest leaves the log.
+- Add `/qk tracktrace on|off|status` for optional diagnosis. The trace records
+  native watch calls, focus changes, relevant quest events, combat state and
+  removal/setter callers in a bounded 24-entry buffer. It is disabled by
+  default, adds no polling timer and retains captured entries when stopped.
+- Reproduce R2's objective-event focus clear under Lua 5.1 with and without
+  a Blizzard watch: each reproduction causes one extra quest-log scan.
+  Verify R3 through the real quest-event dispatcher and refresh queue across
+  Era/BCC and modern API simulations, combat and noncombat progress, missing
+  distance data, explicit untracking, focus changes, completion and turn-in.
+- Keep the R2 watch-timer correction, consolidated history, TOC files and
+  bundled libraries intact. Live confirmation on the affected client remains
+  required.
+
+## 3.1.7 Classic watch persistence follow-up R2 (2026-11-08)
+
+- Correct the quest-event handler's compatibility lookup to use the shared
+  `Compatibility.Common` helpers. Acceptance auto-watches previously bypassed
+  the first watch-persistence correction and could still become temporary
+  watches after objective progress.
+- On Classic Era and BCC, also synchronize an already-watched quest during
+  acceptance so another acceptance handler cannot leave its native timer
+  metadata missing. Preserve the existing behavior on other clients.
+- Route event-driven watch removal and quest ID/index resolution through
+  the same shared helpers used by the quest context menu.
+- Reproduce the missed acceptance path with both supplied Classic clients'
+  Blizzard auto-watch functions. Validate repeated objective progress, native
+  manual watches, a simulated 601-second wait, explicit untracking, watch
+  limits, log-index changes and turn-in under Lua 5.1.
+- Immediate loss of an already permanent Blizzard watch was not reproduced
+  in the local simulation. In-game confirmation of the reported tracking
+  regression remains required; an idle profile does not validate that behavior.
+- Keep TOC files and bundled libraries unchanged.
+
+## 3.1.7 Classic watch persistence hotfix (2026-11-07)
+
+- Mark watches created through the shared QuestKing helper permanent in
+  Classic Era and BCC's native watch-timer list. The R2 follow-up also routes
+  quest-acceptance auto-watches through this helper.
+- Remove matching native timer entries when explicitly unwatching a quest,
+  and discard duplicate timer entries for that quest when watching it again.
+- Verify the native watched flag before changing timer metadata. Leave other
+  temporary auto-watches and modern-client tracking behavior unchanged.
+- Reproduced the expiry sequence with the supplied Blizzard watch functions
+  and checked the correction in a local regression simulation. Live BCC
+  objective-progress, watch-persistence and unwatch validation remains required.
+
+## 3.1.7 Raid mode removed (2026-11-07)
+
+- Remove the Raids selection from the watch-window mode cycle and slash
+  commands. The available modes are Quests, Achievements and Combined.
+- Migrate characters with a saved Raids selection to Combined when their
+  settings load or the tracker refreshes.
+
+## 3.1.7 Mists Classic header refresh fix (2026-11-06)
+
+- The live expand-all test isolated the idle feedback to native quest-log
+  header expansion and restoration. Switching objective readers alone did
+  not resolve the loop.
+- Check that every accepted quest is readable before changing Mists Classic
+  headers. Complete logs retain their current collapsed state during scans.
+- When the legacy log omits collapsed quests, expand those headers and keep
+  them expanded so subsequent objective and item reads use a stable log.
+- Add native header expansion and restoration counters to `/qk perf status`.
+- Validate with collapsed native headers, idle profiling, combat objective
+  advancement and achievement tracking on the live Mists Classic client.
+
+## 3.1.7 Mists Classic idle refresh candidate (2026-11-06)
+
+- Prefer the live indexed quest-log objective APIs for accepted Mists Classic
+  quests and quest-start item matching. Treat a successful zero objective count
+  as valid and retain fallback reads when indexed data is unavailable.
+- Add elapsed time, refreshes per second, objective read source counts and
+  individual quest event totals to `/qk perf status`.
+- The paused-handler test isolated feedback through the quest refresh path.
+  Confirm this corrective candidate with a 60-second idle run, combat objective
+  progress and tracked achievement changes on Mists Classic.
+
+## 3.1.7 Mists Classic achievement tracking follow-up (2026-11-05)
+
+- Read tracked achievements through the same Classic API used by Blizzard's
+  achievement panel and tracker. This restores the data QuestKing needs
+  to show tracked achievements at login and after tracking changes.
+- Keep achievement updates within QuestKing's tracker without forcing the
+  Blizzard watch frame to refresh.
+
+## 3.1.7 Achievement tracker taint hotfix (2026-11-05)
+
+- Removed the direct Blizzard watch frame refresh from achievement tracking
+  changes to avoid tainting the popup count reported on Mists Classic.
+- Kept QuestKing's tracked achievement refresh and Blizzard's Achievements
+  panel refresh.
+
+## 3.1.7 Quest context-menu hotfix (2026-11-05)
+
+- Use Blizzard's native context menu for accepted quests and campaign
+  continuation hints when the client provides it. This avoids the legacy
+  dropdown globals implicated in the Classic Era right-click taint log.
+- Preserve quest details, the Classic quest map action, tracking, sharing,
+  native abandon confirmation, and campaign Stop Tracking. Clients without
+  the native menu API use the existing legacy fallback.
+
 ## 3.1.7 Quest-item range hotfix (2026-11-04)
 
 - Guarded the generic item range check during combat to prevent the tracker
@@ -32,7 +142,7 @@
 ## Project outcome
 
 QuestKing was advanced from the audited 3.0.24 line through the complete
-recommended remediation sequence. The current release candidate is 3.1.6.
+recommended remediation sequence. The current beta is on the 3.1.7 line.
 
 ## 3.1.1 Phase 8 — Scroll-fix package validation
 

@@ -10,9 +10,12 @@ local tonumber = tonumber
 local type = type
 
 local pendingQuestID = nil
-local supertrackPending = false
 local activeSuperTrackedQuestID = 0
 local activeSuperTrackingType = nil
+local trackingTrace = {}
+local trackingTraceQuestID = 0
+local trackingTraceHooks = {}
+local TRACKING_TRACE_LIMIT = 24
 
 local function NormalizeQuestID(questID)
     questID = tonumber(questID)
@@ -296,6 +299,121 @@ local function QuestHasDistance(questID)
     return type(distanceSq) == "number" and onContinent == true
 end
 
+function QuestKing:RecordQuestTrackingTrace(reason, questID, argument, includeStack)
+    if not self.trackingTraceEnabled then
+        return
+    end
+
+    questID = NormalizeQuestID(questID)
+    if questID ~= 0 then
+        trackingTraceQuestID = questID
+    else
+        questID = trackingTraceQuestID
+    end
+
+    local common = self.Compatibility and self.Compatibility.Common
+    local questLogIndex = GetQuestLogIndexByIDCompat(questID)
+    local watched = "?"
+    if common and type(common.IsQuestWatched) == "function" then
+        local ok, result = SafePCall(common.IsQuestWatched, questID, questLogIndex)
+        if ok then
+            watched = result and "yes" or "no"
+        end
+    end
+
+    local timer = "none"
+    if type(_G.QUEST_WATCH_LIST) == "table" then
+        for index = 1, #_G.QUEST_WATCH_LIST do
+            local watch = _G.QUEST_WATCH_LIST[index]
+            if type(watch) == "table" and watch.id == questID then
+                timer = tostring(watch.timer)
+                break
+            end
+        end
+    end
+
+    local _, now = SafePCall(_G.GetTime)
+    local _, inCombat = SafePCall(_G.InCombatLockdown)
+    local entry = string.format(
+        "%.2f %s quest=%d watched=%s focus=%d log=%s timer=%s combat=%s arg=%s",
+        tonumber(now) or 0, reason, questID, watched,
+        GetSuperTrackedQuestIDCompat(), tostring(questLogIndex), timer,
+        inCombat and "yes" or "no", tostring(argument)
+    )
+    if includeStack and type(_G.debugstack) == "function" then
+        local ok, stack = SafePCall(_G.debugstack, 3, 5, 0)
+        if ok and type(stack) == "string" then
+            entry = entry .. " caller=" .. stack:gsub("\n", " <- "):sub(1, 500)
+        end
+    end
+
+    if #trackingTrace == TRACKING_TRACE_LIMIT then
+        table.remove(trackingTrace, 1)
+    end
+    trackingTrace[#trackingTrace + 1] = entry
+end
+
+local function InstallTrackingTraceHook(owner, method, label, isLogIndex, includeStack)
+    if trackingTraceHooks[label] or type(_G.hooksecurefunc) ~= "function" then
+        return
+    end
+
+    local func
+    if owner then
+        func = owner[method]
+    else
+        func = _G[method]
+    end
+    if type(func) ~= "function" then
+        return
+    end
+
+    local callback = function(argument)
+        if not QuestKing.trackingTraceEnabled then
+            return
+        end
+        local questID = argument
+        if isLogIndex then
+            questID = GetQuestIDForLogIndexCompat(argument)
+        end
+        QuestKing:RecordQuestTrackingTrace(label, questID, argument, includeStack)
+    end
+    local ok
+    if owner then
+        ok = pcall(_G.hooksecurefunc, owner, method, callback)
+    else
+        ok = pcall(_G.hooksecurefunc, method, callback)
+    end
+    trackingTraceHooks[label] = ok and true or false
+end
+
+function QuestKing:SetQuestTrackingTraceEnabled(enabled)
+    if enabled then
+        trackingTrace = {}
+        trackingTraceQuestID = GetSuperTrackedQuestIDCompat()
+        self.trackingTraceEnabled = true
+        InstallTrackingTraceHook(nil, "AddQuestWatch", "legacy watch add", true, false)
+        InstallTrackingTraceHook(nil, "RemoveQuestWatch", "legacy watch remove", true, true)
+        if C_QuestLog then
+            InstallTrackingTraceHook(C_QuestLog, "AddQuestWatch", "quest watch add", false, false)
+            InstallTrackingTraceHook(C_QuestLog, "RemoveQuestWatch", "quest watch remove", false, true)
+        end
+        InstallTrackingTraceHook(nil, "SetSuperTrackedQuestID", "legacy focus set", false, true)
+        if C_SuperTrack then
+            InstallTrackingTraceHook(C_SuperTrack, "SetSuperTrackedQuestID", "quest focus set", false, true)
+        end
+        self:RecordQuestTrackingTrace("trace on", trackingTraceQuestID)
+    else
+        self:RecordQuestTrackingTrace("trace off")
+        self.trackingTraceEnabled = false
+    end
+end
+
+function QuestKing:GetQuestTrackingTrace()
+    self:RecordQuestTrackingTrace("status")
+    return trackingTrace
+end
+
 local function SyncSuperTrackingCache()
     activeSuperTrackedQuestID = GetSuperTrackedQuestIDCompat()
     activeSuperTrackingType = GetHighestPrioritySuperTrackingTypeCompat()
@@ -456,6 +574,11 @@ function QuestKing:FocusClosestQuest()
 
     local closestQuestID = ResolveClosestQuest(preferredQuestID)
     if not closestQuestID then
+        -- Missing Classic POI/distance data does not invalidate an accepted
+        -- quest that the player already selected.
+        if preferredQuestID and preferredQuestID ~= 0 then
+            return false, preferredQuestID
+        end
         closestQuestID = 0
     end
 
@@ -512,35 +635,6 @@ function QuestKing:PreCheckQuestFocus()
     if pendingQuestID and CanControlQuestSuperTrack() and QuestHasDistance(pendingQuestID) then
         pendingQuestID = nil
         self:FocusClosestQuest()
-    end
-end
-
-function QuestKing:OnQuestObjectivesCompleted(questID)
-    questID = NormalizeQuestID(questID)
-    if questID == 0 then
-        return
-    end
-
-    SyncSuperTrackingCache()
-
-    if activeSuperTrackedQuestID ~= 0 and CanControlQuestSuperTrack() then
-        supertrackPending = true
-    end
-end
-
-function QuestKing:PostCheckQuestFocus()
-    if not supertrackPending then
-        return
-    end
-
-    supertrackPending = false
-    SyncSuperTrackingCache()
-
-    if activeSuperTrackedQuestID ~= 0 and CanControlQuestSuperTrack() then
-        local changed = self:FocusClosestQuest()
-        if changed then
-            QueueTrackerRefresh(true)
-        end
     end
 end
 

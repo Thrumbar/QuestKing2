@@ -49,7 +49,6 @@ local VALID_DISPLAY_MODES = {
     combined = true,
     quests = true,
     achievements = true,
-    raids = true,
 }
 
 local issecretvalue = _G.issecretvalue
@@ -140,6 +139,8 @@ local function ResetPerformanceProfile()
 
     Performance.enabled = enabled
     Performance.startedAtMilliseconds = GetProfileTimeMilliseconds()
+    Performance.startedAtSeconds = type(_G.GetTime) == "function" and _G.GetTime() or 0
+    Performance.stoppedAtSeconds = Performance.startedAtSeconds
     Performance.refreshRequestCount = 0
     Performance.coalescedRequestCount = 0
     Performance.trackerRefreshCount = 0
@@ -147,6 +148,10 @@ local function ResetPerformanceProfile()
     Performance.cachedPopulationRefreshCount = 0
     Performance.questLogScanCount = 0
     Performance.objectiveScanCount = 0
+    Performance.objectiveIndexedReadCount = 0
+    Performance.objectiveModernReadCount = 0
+    Performance.questHeaderExpandCount = 0
+    Performance.questHeaderRestoreCount = 0
     Performance.achievementListScanCount = 0
     Performance.achievementCriteriaScanCount = 0
     Performance.autoCompleteRequestCount = 0
@@ -202,6 +207,9 @@ function QuestKing:RecordPerformanceQuestEvent(eventName)
 end
 
 function QuestKing:SetPerformanceProfilingEnabled(enabled)
+    if Performance.enabled and not enabled and type(_G.GetTime) == "function" then
+        Performance.stoppedAtSeconds = _G.GetTime()
+    end
     Performance.enabled = enabled and true or false
     if Performance.enabled then
         ResetPerformanceProfile()
@@ -217,6 +225,11 @@ function QuestKing:ResetPerformanceProfile()
 end
 
 function QuestKing:GetPerformanceProfile()
+    local endTime = Performance.stoppedAtSeconds or Performance.startedAtSeconds or 0
+    if Performance.enabled and type(_G.GetTime) == "function" then
+        endTime = _G.GetTime()
+    end
+    Performance.durationSeconds = math.max(0, endTime - (Performance.startedAtSeconds or 0))
     return Performance
 end
 
@@ -455,8 +468,6 @@ local function UpdateModeButtonLabel(displayMode)
         button.label:SetText("C")
     elseif displayMode == "achievements" then
         button.label:SetText("A")
-    elseif displayMode == "raids" then
-        button.label:SetText("R")
     else
         button.label:SetText("Q")
     end
@@ -512,9 +523,6 @@ local function UpdateTrackerTitleText(displayMode, numAchievements, acceptedQues
     elseif displayMode == "achievements" then
         Tracker.titlebarText:SetText(tostring(numAchievements))
         isDimmed = numAchievements == 0
-    elseif displayMode == "raids" then
-        Tracker.titlebarText:SetText(tostring(numRaidBlocks))
-        isDimmed = numRaidBlocks == 0
     else
         Tracker.titlebarText:SetText(format("%d/%d", acceptedQuests, maxQuests))
         isDimmed = not hasTrackerContent
@@ -729,7 +737,9 @@ local function RunTrackerUpdate(
 
     local trackerDB = _G.QuestKingDBPerChar or {}
     local trackerCollapsed = trackerDB.trackerCollapsed or 0
-    local displayMode = trackerDB.displayMode or "combined"
+    local displayMode = VALID_DISPLAY_MODES[trackerDB.displayMode]
+        and trackerDB.displayMode or "combined"
+    trackerDB.displayMode = displayMode
     local questRows = nil
     local questRenderFailed = false
 
@@ -782,9 +792,6 @@ local function RunTrackerUpdate(
         elseif displayMode == "quests" then
             showScenarioBlock = hasScenarioTracker and (not isRaidScenario)
             showBonusObjectives = true
-        elseif displayMode == "raids" then
-            showScenarioBlock = hasScenarioTracker and isRaidScenario
-            showBonusObjectives = false
         elseif displayMode == "achievements" then
             showScenarioBlock = false
             showBonusObjectives = false
@@ -854,8 +861,6 @@ local function RunTrackerUpdate(
     )
 
     LayoutRequestedButtons(postCombat)
-
-    SafeCallMethod(QuestKing, "PostCheckQuestFocus")
 
     local hooks = QuestKing.updateHooks or {}
     for index = 1, #hooks do

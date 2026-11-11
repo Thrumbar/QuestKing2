@@ -9,6 +9,8 @@ local C_Container = C_Container
 local C_Item = C_Item
 local C_QuestLog = C_QuestLog
 local Enum = Enum
+local IS_MISTS_CLASSIC = _G.WOW_PROJECT_MISTS_CLASSIC ~= nil
+    and _G.WOW_PROJECT_ID == _G.WOW_PROJECT_MISTS_CLASSIC
 local issecretvalue = _G and _G.issecretvalue or nil
 
 local find = string.find
@@ -533,7 +535,20 @@ end
 local function GetQuestObjectiveTextsCompat(questID, questLogIndex)
     local objectiveTexts = {}
 
+    if IS_MISTS_CLASSIC and type(Compat.GetIndexedQuestObjectives) == "function" then
+        local objectives = Compat.GetIndexedQuestObjectives(questID, questLogIndex)
+        if objectives then
+            for _, objective in ipairs(objectives) do
+                tinsert(objectiveTexts, objective.text)
+            end
+            return objectiveTexts
+        end
+    end
+
     if C_QuestLog and C_QuestLog.GetQuestObjectives and type(questID) == "number" and questID > 0 then
+        if type(QuestKing.RecordPerformanceMetric) == "function" then
+            QuestKing:RecordPerformanceMetric("objectiveModernReadCount", 1)
+        end
         local ok, objectives = SafeCall(C_QuestLog.GetQuestObjectives, questID)
         if ok and type(objectives) == "table" then
             for _, objective in ipairs(objectives) do
@@ -548,6 +563,9 @@ local function GetQuestObjectiveTextsCompat(questID, questLogIndex)
     end
 
     if #objectiveTexts == 0 and type(GetNumQuestLeaderBoards) == "function" and type(GetQuestLogLeaderBoard) == "function" then
+        if type(QuestKing.RecordPerformanceMetric) == "function" then
+            QuestKing:RecordPerformanceMetric("objectiveIndexedReadCount", 1)
+        end
         local okCount, count = SafeCall(GetNumQuestLeaderBoards, questLogIndex)
         count = okCount and (SafeNumber(count, 0) or 0) or 0
         for objectiveIndex = 1, count do

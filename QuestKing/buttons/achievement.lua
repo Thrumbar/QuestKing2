@@ -152,6 +152,24 @@ local function GetTrackedAchievementIDs()
         end
     end
 
+    if type(GetTrackedAchievements) == "function" then
+        local function AddLegacyTrackedIDs(ok, ...)
+            if not ok then
+                return false
+            end
+
+            -- Classic returns one value per achievement ID.
+            for index = 1, select("#", ...) do
+                AddID((select(index, ...)))
+            end
+            return true
+        end
+
+        if AddLegacyTrackedIDs(pcall(GetTrackedAchievements)) then
+            return ids
+        end
+    end
+
     if type(GetNumTrackedAchievements) == "function" and type(GetTrackedAchievement) == "function" then
         local okCount, count = SafeCall(GetNumTrackedAchievements)
         count = okCount and (SafeNumber(count, 0) or 0) or 0
@@ -214,13 +232,9 @@ end
 
 QuestKing.EnsureTrackedAchievementCache = EnsureTrackedAchievementCache
 
-local function RefreshAchievementUIState()
+local function RefreshAchievementPanel()
     if type(AchievementFrameAchievements_ForceUpdate) == "function" then
         SafeCall(AchievementFrameAchievements_ForceUpdate)
-    end
-
-    if type(WatchFrame_Update) == "function" then
-        SafeCall(WatchFrame_Update)
     end
 end
 
@@ -248,7 +262,7 @@ function QuestKing:QueueAchievementTrackerRefresh(waitForListChange)
         end
 
         QuestKing._achievementDisplayDataReady = false
-        RefreshAchievementUIState()
+        RefreshAchievementPanel()
         QueueTrackerRefresh(false)
     end
 
@@ -313,7 +327,7 @@ local function ToggleAchievementTracked(achievementID)
             end
         end
 
-        RefreshAchievementUIState()
+        RefreshAchievementPanel()
         if type(QuestKing.QueueAchievementTrackerRefresh) == "function" then
             QuestKing:QueueAchievementTrackerRefresh(true)
         end
@@ -330,7 +344,7 @@ local function ToggleAchievementTracked(achievementID)
             SafeCall(AddTrackedAchievement, achievementID)
         end
 
-        RefreshAchievementUIState()
+        RefreshAchievementPanel()
         if type(QuestKing.QueueAchievementTrackerRefresh) == "function" then
             QuestKing:QueueAchievementTrackerRefresh(true)
         end
